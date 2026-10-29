@@ -177,6 +177,12 @@ public:
     // may be called concurrently. A receive already committed before stop may
     // return its lease; the provider must gate publication by its generation.
     // The caller must join its receiving thread before destroying the stream.
+    // Receive is bounded by timeout and promptly interrupted by cancellation.
+    // ErrorCode::timeout is transient; ErrorCode::stopped is terminal for this
+    // acquisition. The provider's cancellation state when handling the result
+    // determines normal shutdown versus an unexpected acquisition fault: a
+    // backend stopped result alone does not prove the MEL consumer requested
+    // shutdown. Outstanding leases remain valid across stop and logical close.
     virtual Result<FrameLease> receive(std::chrono::milliseconds timeout) = 0;
     virtual void request_stop() noexcept = 0;
     virtual void stop() noexcept = 0;
