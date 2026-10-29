@@ -1,0 +1,10 @@
+AMS-GRA GigE MEL Provider
+
+This repository includes unmodified declarations from the open-arsenal
+IR MEL, Common MEL, and AMS Math projects. Their original copyright,
+Apache-2.0 license, and INTENT.md notices are retained in third_party/.
+Source revisions and per-file provenance are recorded in
+third_party/manifest.json and docs/upstream-provenance.md.
+
+The federal-government copyright statements in those dependencies describe
+their upstream materials, not the newly authored provider implementation.

@@ -1,0 +1,22 @@
+name: Provider or backend defect
+description: Report a reproducible behavior or lifecycle failure.
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Build and device environment
+      description: Commit, OS, compiler/STL, build preset, backend/SDK version, camera model/firmware if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Smallest reproduction
+      description: Include the MEL call sequence, buffer ownership, thread/callback context, expected result, and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics and tests
+      description: Relevant errors, counters, CTest or sanitizer output. Omit credentials and unrelated private data.

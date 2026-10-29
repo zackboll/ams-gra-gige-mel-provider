@@ -1,0 +1,808 @@
+{
+  "schema_version": 1,
+  "description": "Unmodified pinned declaration closure for the initial C++ IR MEL provider. Git blob SHA-1 identities checked against immutable upstream trees.",
+  "roots": [
+    "irmel/library/irmel-types/Control.h",
+    "irmel/library/irmel-types/Buffer.h",
+    "irmel/library/c2/C2Channel.h",
+    "irmel/library/image/ImageChannel.h",
+    "irmel/library/health-status/HealthStatusChannel.h",
+    "irmel/library/irmel-types/ImageListener.h",
+    "irmel/library/irmel-types/FrameHeader.h"
+  ],
+  "components": [
+    {
+      "id": "ir-mel",
+      "repo": "open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel",
+      "revision": "8d9224519f12b44e0b28815755c56a32a28d24a0"
+    },
+    {
+      "id": "common-mel",
+      "repo": "open-arsenal/ams-gra-hello-world-sk-interfaces-common-mel",
+      "revision": "f6908437d8fd2f7fb69896f9eb9cfd272d10c439"
+    },
+    {
+      "id": "ams-math",
+      "repo": "open-arsenal/ams-gra-hello-world-sk-libraries-ams-math",
+      "revision": "00be45190f0e47d268cece8b8c2f8fb58b5418d2"
+    }
+  ],
+  "files": [
+    {
+      "path": "ams-math/INTENT.md",
+      "component": "ams-math",
+      "source_path": "INTENT.md",
+      "git_blob_sha1": "51b2035cf41da045c896c159f7f5b92b477312a3",
+      "sha256": "d27f3edaec6c975ecb5d55b12404be34926ad21bc24bf3bfcc852d6c67a49eaf",
+      "size": 851
+    },
+    {
+      "path": "ams-math/LICENSE",
+      "component": "ams-math",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "b97633deafa754f2facf2f4983c7a4a75d43d25c",
+      "sha256": "2f1aa718ddb1a34ed1581e3c57dddd1bb516fb7657a9c4076e8ff95b91d9844d",
+      "size": 11441
+    },
+    {
+      "path": "ams-math/include/math/geometry/Quaternion.h",
+      "component": "ams-math",
+      "source_path": "include/math/geometry/Quaternion.h",
+      "git_blob_sha1": "f00d15727a057216b7e7945e0362fb32997841e6",
+      "sha256": "f33e21b2d953e471f7f01be20bd218a3b848d1c9bbca6dbd055b12cb1d8eabec",
+      "size": 11474
+    },
+    {
+      "path": "ams-math/include/math/geometry/RangeAzEl.h",
+      "component": "ams-math",
+      "source_path": "include/math/geometry/RangeAzEl.h",
+      "git_blob_sha1": "3869b8bc16c5d8947f4834ea2fb20034071dbe38",
+      "sha256": "c5de331e308d0a803f4f5f1a0bbca19f3db4526ba89af98a7aa2a988906e2294",
+      "size": 1804
+    },
+    {
+      "path": "common-mel/INTENT.md",
+      "component": "common-mel",
+      "source_path": "INTENT.md",
+      "git_blob_sha1": "51b2035cf41da045c896c159f7f5b92b477312a3",
+      "sha256": "d27f3edaec6c975ecb5d55b12404be34926ad21bc24bf3bfcc852d6c67a49eaf",
+      "size": 851
+    },
+    {
+      "path": "common-mel/LICENSE",
+      "component": "common-mel",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "b97633deafa754f2facf2f4983c7a4a75d43d25c",
+      "sha256": "2f1aa718ddb1a34ed1581e3c57dddd1bb516fb7657a9c4076e8ff95b91d9844d",
+      "size": 11441
+    },
+    {
+      "path": "common-mel/include/mel/library/ActiveBIT.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/ActiveBIT.h",
+      "git_blob_sha1": "1dadea0d2219e0f5c6b1de591449b52214a59382",
+      "sha256": "1c33891e1ec0c1110f019d74833063c4bcd54a57c1aa233a8bdec6740e1328c0",
+      "size": 1778
+    },
+    {
+      "path": "common-mel/include/mel/library/BIT_Configuration.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/BIT_Configuration.h",
+      "git_blob_sha1": "25b661d8b18a0134aefa8e3917066c2140e2379f",
+      "sha256": "d72183c4a98806bba29d1727fbdf5c887bc591b12a4b5a3a94954eb96236fcc3",
+      "size": 6449
+    },
+    {
+      "path": "common-mel/include/mel/library/BIT_Status.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/BIT_Status.h",
+      "git_blob_sha1": "3c5a358cfe0424dd4e94f56839e390f9be4ed349",
+      "sha256": "87a38a9f0fab4d3176794454fc4fba1bb01023dcdf1ab8ea2557dc758ad2b081",
+      "size": 3166
+    },
+    {
+      "path": "common-mel/include/mel/library/CalibrationStatus.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/CalibrationStatus.h",
+      "git_blob_sha1": "db2b091dca0f42c56cd6901b2cc7f01159ae521f",
+      "sha256": "fda025c580ed3dbc9fcb3e1a0ea244638279eada578166b0f711e27db53bb68d",
+      "size": 2137
+    },
+    {
+      "path": "common-mel/include/mel/library/CommonMEL.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/CommonMEL.h",
+      "git_blob_sha1": "54f591b39e887cddcd138c037eef000661b266be",
+      "sha256": "eb0013f529d6afd4469d6beeae1ba47fde809390d7d8314e780d4a91bfbf8011",
+      "size": 3729
+    },
+    {
+      "path": "common-mel/include/mel/library/CompletedBIT.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/CompletedBIT.h",
+      "git_blob_sha1": "56dd684443b1ede3610e0f62321d57c661c609f9",
+      "sha256": "1399299421e962a8cde76a652bbb64adae25bedd9020ec4853fc43c69db71d55",
+      "size": 5226
+    },
+    {
+      "path": "common-mel/include/mel/library/Directional.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/Directional.h",
+      "git_blob_sha1": "db9f29b7f079502e19b278c58e846dd0f73e87c0",
+      "sha256": "73c7ae113c5bf071e5d952b03fc9149c83760765b37fc3dfa1b37b042982f9d4",
+      "size": 7232
+    },
+    {
+      "path": "common-mel/include/mel/library/DiscreteStatus.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/DiscreteStatus.h",
+      "git_blob_sha1": "3b31e4028725906066817d94c5583d4cc526c31b",
+      "sha256": "d5bab74ada4c676f3cdb4b2a20c30d938aae7b70cd113676dc3377695d45d9de",
+      "size": 1016
+    },
+    {
+      "path": "common-mel/include/mel/library/Error.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/Error.h",
+      "git_blob_sha1": "c85a428e82dfda16b0e22f92e29088f095a9114f",
+      "sha256": "b3dd6472d7bdb6da04abd76b71901440bad1f0efd55caf1fcf46ad50c5562e97",
+      "size": 2038
+    },
+    {
+      "path": "common-mel/include/mel/library/ErrorOr.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/ErrorOr.h",
+      "git_blob_sha1": "d2b7f1b5768dae0b449ce59efd65a43d4661b45c",
+      "sha256": "a1646df0453b9ad1538ac8e805f02e67f796c67856e300511481229fbd1805f2",
+      "size": 1702
+    },
+    {
+      "path": "common-mel/include/mel/library/Fault.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/Fault.h",
+      "git_blob_sha1": "3c754cc2c0fe6ba0c90f9ec698ff5332b29e644d",
+      "sha256": "793866e469b46a71085c39ea5866216ac94940f252cb9aa0c122ddb398747451",
+      "size": 11715
+    },
+    {
+      "path": "common-mel/include/mel/library/MFA_Component.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/MFA_Component.h",
+      "git_blob_sha1": "e0fc343644bac8e357dfea7956952b42827b8bc1",
+      "sha256": "f33c0814cec8ba3a61791337c74844193f4f8972157bc1669d84ececb61f758b",
+      "size": 16248
+    },
+    {
+      "path": "common-mel/include/mel/library/MFA_StatusDetailed.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/MFA_StatusDetailed.h",
+      "git_blob_sha1": "3bca2d3906f9b96e835adfd4c9a4cd62fd60331e",
+      "sha256": "d97e586151b5d2f1fa484b9fa0015fdf7993327c92aad27a8389effcac05b3c5",
+      "size": 1706
+    },
+    {
+      "path": "common-mel/include/mel/library/NameValuePair.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/NameValuePair.h",
+      "git_blob_sha1": "98e932d6f40c4d4845353169c48d49ca4dfd623b",
+      "sha256": "1c225a514e24f86ad20b9f43abb43877a3f662a1a2d13433dfaf2aa1046e5c8f",
+      "size": 1261
+    },
+    {
+      "path": "common-mel/include/mel/library/NavigationReport.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/NavigationReport.h",
+      "git_blob_sha1": "d98d6d93a5d553e52e6e154be1a86261ddc7e60a",
+      "sha256": "d3e359a33da0d3435ec14763f35290d454d53f81865f787504ec874a82694be0",
+      "size": 12134
+    },
+    {
+      "path": "common-mel/include/mel/library/SubsystemCalibration.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/SubsystemCalibration.h",
+      "git_blob_sha1": "f4743ffcb71a7e3c40b675ba47e9254a751f0367",
+      "sha256": "da73ed3ab32e1659a1a64a27b17fc0359611753f5836c7517392bfd950aa78dc",
+      "size": 4094
+    },
+    {
+      "path": "common-mel/include/mel/library/SubsystemCompletedCalibration.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/SubsystemCompletedCalibration.h",
+      "git_blob_sha1": "ad65dad034993d3b8b2cc0dd8c38f1d8f192c7fb",
+      "sha256": "71ca0ee725a2280649c9ce1a8d25a701ffe210ab5b239f750828e794cf6842de",
+      "size": 3180
+    },
+    {
+      "path": "common-mel/include/mel/library/SubsystemCompletedCalibrationItemType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/SubsystemCompletedCalibrationItemType.h",
+      "git_blob_sha1": "eed6efca70249013e6f4306c80aaa55dddff089c",
+      "sha256": "a3e29a5ccd3b9ee2431c09248a769cd161a4c3186b5b39490a85f5a66adc68d7",
+      "size": 2196
+    },
+    {
+      "path": "common-mel/include/mel/library/UCI_ID.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/UCI_ID.h",
+      "git_blob_sha1": "df08fafc7d3f8c8152ea6bb22d8473bee1e8523f",
+      "sha256": "680fac8ebb27b6e57b05db5cd197919d043802ae89c31fbddee569ee5590d3af",
+      "size": 3319
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/BaseSecurityEventType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/BaseSecurityEventType.h",
+      "git_blob_sha1": "8a9089bb35d8a42c9934f5609a6188827b72486a",
+      "sha256": "1520cc1077f69dfd7a9b3fbb32e80e4fe437d537ff68effbe4e915b3e11f394a",
+      "size": 1130
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/MFA_SecurityAuditRecord.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/MFA_SecurityAuditRecord.h",
+      "git_blob_sha1": "163ca6b39da9fbd69b33f96cb6f7f06bf923bcb6",
+      "sha256": "72fbf60a622d024e210c0b7872d1d229f2c82139981cc78a9a821e62fe9cd033",
+      "size": 5603
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecurityArtifact.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecurityArtifact.h",
+      "git_blob_sha1": "0e918742f4588b6ffc20d90259315ce7a798ef59",
+      "sha256": "ad46d53a0ea66e33735e850f82161518e7468c26a1b5a145821d67e7b80be081",
+      "size": 1426
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecurityAuthenticationType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecurityAuthenticationType.h",
+      "git_blob_sha1": "81e178a9e24e3beadc7cacaa86a2d349acf5782b",
+      "sha256": "835615e1b623bf376c6de1eda44f69df80fcbd0220f8aa4d8185716310571733",
+      "size": 3158
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecurityFileManagementType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecurityFileManagementType.h",
+      "git_blob_sha1": "8298b5cb00a83f661739385e671052bd1b09c6a6",
+      "sha256": "91d15e15ba50a9a15cccf4f88ae9d7b3a94c42ba858b8f3fb362d9b7a457ec5d",
+      "size": 2333
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecurityIntegrityType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecurityIntegrityType.h",
+      "git_blob_sha1": "a62b6ce0810fa8b4aa5cc2a7398d9ec686fa8a48",
+      "sha256": "b7f0ff9531ce98db28acdb9415ab770706a1d073c91e58d7a30d5e8980f33195",
+      "size": 2443
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecurityKeyManagementType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecurityKeyManagementType.h",
+      "git_blob_sha1": "a159d3a23e035c7db380eb1793223f88989d1ab8",
+      "sha256": "9e5e6f96eb3b694913e3657a8fc57c3704d015b0606033c7b826627c2b8e8abb",
+      "size": 2395
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecuritySanitizationType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecuritySanitizationType.h",
+      "git_blob_sha1": "12953acaf0bd434388daf1e20bd74dda8245a079",
+      "sha256": "cc211bb7f36f5d3a8477117a06671bad1ea39f234a5614837c428469781540fb",
+      "size": 1918
+    },
+    {
+      "path": "common-mel/include/mel/library/securityauditrecord/SecuritySystemType.h",
+      "component": "common-mel",
+      "source_path": "include/mel/library/securityauditrecord/SecuritySystemType.h",
+      "git_blob_sha1": "564d031bdee1ee52a99fd50e5fea1217181ec62a",
+      "sha256": "0bb31433f8f86e254a2899c03efc3dc5bbed7aef02cb4a5e47cd6ac9d1e564f9",
+      "size": 1868
+    },
+    {
+      "path": "ir-mel/INTENT.md",
+      "component": "ir-mel",
+      "source_path": "INTENT.md",
+      "git_blob_sha1": "51b2035cf41da045c896c159f7f5b92b477312a3",
+      "sha256": "d27f3edaec6c975ecb5d55b12404be34926ad21bc24bf3bfcc852d6c67a49eaf",
+      "size": 851
+    },
+    {
+      "path": "ir-mel/LICENSE",
+      "component": "ir-mel",
+      "source_path": "LICENSE",
+      "git_blob_sha1": "b97633deafa754f2facf2f4983c7a4a75d43d25c",
+      "sha256": "2f1aa718ddb1a34ed1581e3c57dddd1bb516fb7657a9c4076e8ff95b91d9844d",
+      "size": 11441
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/BIT_Command.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/BIT_Command.h",
+      "git_blob_sha1": "6f588c60ea409c484ba372a3b48e72b78f1b59dc",
+      "sha256": "9c86609cf1dced975b7f4c20b939c6df5276f0a057fdf2a6eb8bf1348d90923d",
+      "size": 4060
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/C2Channel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/C2Channel.h",
+      "git_blob_sha1": "8235c18d393f3267edf89a9ae207ed0d33b811ce",
+      "sha256": "a16e8f6ed7ff9a48d1ef4a13bf8148374ccc48f94a625d8224fc50085308ffc4",
+      "size": 8958
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/CalibrationConfigurationCmd.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/CalibrationConfigurationCmd.h",
+      "git_blob_sha1": "cc391061133a431b974f15c7bac0641b048f46c9",
+      "sha256": "2c438d742a6e15cd9b79e9b95f975ecb573603b1fa5477590067b1f89015d2ed",
+      "size": 1523
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/CalibrationStatusCmd.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/CalibrationStatusCmd.h",
+      "git_blob_sha1": "a266c6b8b1520f12978d7264b49631887c07c93d",
+      "sha256": "4a42fc34bef99e964b134db637c6498ab87ca3554851c1267e6bd234829f5645",
+      "size": 1341
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/CameraProtectCmd.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/CameraProtectCmd.h",
+      "git_blob_sha1": "89d681a1115b805c61f500fcc03258a52b6c3073",
+      "sha256": "9efa2682ae041a72a8ac6cbd19296c353ddb3e3c50caca2ef21b870f0e37fdf4",
+      "size": 3879
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/ConfigSetCommand.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/ConfigSetCommand.h",
+      "git_blob_sha1": "f97993bc69c02f8d84b32bd6bae9581ea9ae0060",
+      "sha256": "f346d04ac026705ca2217a92bc6ba9f241c95b090201d1c446cfea50607b12e5",
+      "size": 1885
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/EraseCommand.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/EraseCommand.h",
+      "git_blob_sha1": "eec98429a2eb6e504d35b12a8141f5096a8e4ee9",
+      "sha256": "a2a7b2cffbb77ae6031276c340324affa1ca29fa751e77b410cef8d31ccbfaec",
+      "size": 1461
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/EraseCommandType.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/EraseCommandType.h",
+      "git_blob_sha1": "b371b32b7fce64dde74ba824f7aa567bfb1eb3c7",
+      "sha256": "664b261bd2d4a9c4ea537e35cf9727bb7862e0a2a104a7335308fe918f34170d",
+      "size": 783
+    },
+    {
+      "path": "ir-mel/include/irmel/library/c2/ModeCmd.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/c2/ModeCmd.h",
+      "git_blob_sha1": "fee5b869c6a08fe4e1c7b36950df706a9f28057c",
+      "sha256": "987d2d4c1f54931e2e5d0b2be1e96f56b96e8d20d1ca4f861dc5e245943d02a5",
+      "size": 1916
+    },
+    {
+      "path": "ir-mel/include/irmel/library/health-status/HealthStatusChannel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/health-status/HealthStatusChannel.h",
+      "git_blob_sha1": "1f7807e5bb85e5be97b24db2cc28b38fdb8dbbf6",
+      "sha256": "0b128e49c2673546cd6ff188e0551fb11a1dad34a23e570df8296746eb677ccf",
+      "size": 6517
+    },
+    {
+      "path": "ir-mel/include/irmel/library/health-status/LFStatus.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/health-status/LFStatus.h",
+      "git_blob_sha1": "e4603de47f2dbe536f25fc5a78e9bfc55025d3d6",
+      "sha256": "512be63f648ff9c4dc17d3d167273d63cf753a9e6c57c70e88a39b634f102eca",
+      "size": 3419
+    },
+    {
+      "path": "ir-mel/include/irmel/library/health-status/SubsystemCSCIInfo.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/health-status/SubsystemCSCIInfo.h",
+      "git_blob_sha1": "b128e88ed6fe4b8c6f1dd1fab3237f5fe29c732a",
+      "sha256": "b0fb678c8b0e391bdf2e03f325123565b83bb18326780cb651377e8545a10cdd",
+      "size": 2762
+    },
+    {
+      "path": "ir-mel/include/irmel/library/health-status/SubsystemDepInfo.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/health-status/SubsystemDepInfo.h",
+      "git_blob_sha1": "c993b9694915c5805335da05efecee8b04d07ebc",
+      "sha256": "62c4d9c5f6bfa421c2ec855f68fbfccb0f0a9b435923697236ed7402723b0c65",
+      "size": 1742
+    },
+    {
+      "path": "ir-mel/include/irmel/library/health-status/SubsystemStatusResp.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/health-status/SubsystemStatusResp.h",
+      "git_blob_sha1": "48a82ce168e5db01024701b021a7df11d23bf5f2",
+      "sha256": "8737769cf886946ee3a5a12cb637af7cf8686cdc322003bd05002730c87c2055",
+      "size": 3434
+    },
+    {
+      "path": "ir-mel/include/irmel/library/health-status/Version.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/health-status/Version.h",
+      "git_blob_sha1": "69a382a3734924af4e2871b6ad4cad1be7d553e0",
+      "sha256": "84d9c889f57ae3316bfed9972a0d2945a116c6d9bfed73ba02d654b05d2d722f",
+      "size": 2018
+    },
+    {
+      "path": "ir-mel/include/irmel/library/image/ImageChannel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/image/ImageChannel.h",
+      "git_blob_sha1": "b470da717aae799e9b941abc86b15091ce9dda62",
+      "sha256": "14c42d0cc6cbb488696c8d616d134e9174da042d47bf3df28e6f92ae2137c22e",
+      "size": 9596
+    },
+    {
+      "path": "ir-mel/include/irmel/library/image/NavigationReportResp.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/image/NavigationReportResp.h",
+      "git_blob_sha1": "06d98b552c4ff7c548117d0037a1e2628f263ba8",
+      "sha256": "26fec8d33a70a3c59150d44badf7a88ef94dd33743cbf44dbbc805366494daab",
+      "size": 2095
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/AbsoluteReferencePoint.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/AbsoluteReferencePoint.h",
+      "git_blob_sha1": "8829677bd43d5daa7ed61408bb043e99c99f9fac",
+      "sha256": "e3cf0618f85c6b36547ae46cda4f5128c2f93994a34d968ca8c12cae976ba1b9",
+      "size": 2673
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/BadPixel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/BadPixel.h",
+      "git_blob_sha1": "d33f41a2a389b942a37c5c737446ffec1fe638f7",
+      "sha256": "8f31f14846d01db5c29034523bde4d7ff576cf02a1e220a5577492ec067405d1",
+      "size": 1412
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/BadPixelList.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/BadPixelList.h",
+      "git_blob_sha1": "9227fb82d1452f90c4f58652f5030de1ec0cc743",
+      "sha256": "40419c2d429c2ee53189fa145b282c75f4b1ea0acfab5e9feb8739f9d2f3d1fa",
+      "size": 2115
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/BandInfo.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/BandInfo.h",
+      "git_blob_sha1": "3c30530680a827040049c7e4a3460d9731957329",
+      "sha256": "b74bccaebf6ba96939bf18952668296159fc1fe4ede194230aaab32267b6b8ae",
+      "size": 3000
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/Buffer.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/Buffer.h",
+      "git_blob_sha1": "e98b1f84aa55aea128f01ee10da2d893290143b9",
+      "sha256": "900a107ac4d4ef15edad08c190cefc7fb85082899735d72410a31214a7bdcf2f",
+      "size": 5032
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CameraCommand.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CameraCommand.h",
+      "git_blob_sha1": "83a7e55ad7f5cad0552d5a0580ae5ea40f0caf15",
+      "sha256": "17a94889ee90852f904b6e39a2cdd6c8f8208cc2c439c65fbc9afd5ecf259c4f",
+      "size": 4079
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CameraCommandResp.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CameraCommandResp.h",
+      "git_blob_sha1": "80ed9952a6d8a2a9fa4b45c5694bfdf0a5b63b07",
+      "sha256": "020c2e1dd506ba29444ede1c0ad32a5ae5420575000a81796af4bad8145f44ee",
+      "size": 2004
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CandidateObject.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CandidateObject.h",
+      "git_blob_sha1": "bf11884f3cee5a0d7725e2775b0fe011f2d4be06",
+      "sha256": "29a552ae116680c540bd5bfb8a5e9bbd5b6cfe566ac893e14b4536266a8b3878",
+      "size": 3405
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CandidateObjectHeader.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CandidateObjectHeader.h",
+      "git_blob_sha1": "a8b74300353207be1a95e0ace19071f812fc02c1",
+      "sha256": "2ff8f60d75a044421d645145539bc67217bd02f911cb11e612d328b64de69392",
+      "size": 3567
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CandidateObjectMessage.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CandidateObjectMessage.h",
+      "git_blob_sha1": "3897844433a34cdbf0d0a2856208ea4956697fce",
+      "sha256": "3b4cc22d5dc91bc5c3243e523d7ae92da8c07fb6c74cb1fe9acabbc6e3722b2c",
+      "size": 2216
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CandidateObjectPreProc.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CandidateObjectPreProc.h",
+      "git_blob_sha1": "c418f7389ab298b59de1a0d0cc65cb4d9a709a54",
+      "sha256": "1fe5441a8ccb89a52ecc9bbde1852afb5822f6ba3f175abbd3e8d3c3fc446b9d",
+      "size": 5948
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CandidateObjectPreProcMessage.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CandidateObjectPreProcMessage.h",
+      "git_blob_sha1": "36b24bf70ad4895835e70e91287d177491b7d443",
+      "sha256": "48389032700729143590503efed82d87debf5cdbe4fde7c75054416519c2f205",
+      "size": 2386
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/Channel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/Channel.h",
+      "git_blob_sha1": "621238ed2d3512ac92d13d0558587ef875f51414",
+      "sha256": "f8c6eeb4da2e10970dd192243f2bee9ca6918ed640b3ce5359958412db5d537e",
+      "size": 4316
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ChannelCapability.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ChannelCapability.h",
+      "git_blob_sha1": "acd00c7b49bc6f9c8a48b560ce7d74f8e21b7731",
+      "sha256": "2ab8ad746bb0a6b15259a3244f8bd1f76dbd5e631e8672571a1915cfe85c187a",
+      "size": 10345
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ChannelCommsTestRep.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ChannelCommsTestRep.h",
+      "git_blob_sha1": "7e5661a1be32bd25613a8eb4571019bddb7f42ec",
+      "sha256": "d5302b2dfbe486aeb3d17d238677f0b4c403a92870a276c84a67ff82e719ba0b",
+      "size": 1666
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ChannelCommsTestReq.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ChannelCommsTestReq.h",
+      "git_blob_sha1": "3dc5f9e42a4b9a95a5bda5d270b19a134fd00469",
+      "sha256": "646d285156f88f5445465aa3562d9275b7259f20f7c873ffa7dd43ca2feea190",
+      "size": 1871
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h",
+      "git_blob_sha1": "14b5449058a366dcccf6e9eeb77d7e5ddfcfcfa4",
+      "sha256": "34735eba889d1f4ff74551abb9e48a2d7a862094d5914a1b0418bbe51a793eca",
+      "size": 3429
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ChannelType.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ChannelType.h",
+      "git_blob_sha1": "c2ed3133a719050ee20b74e5a142c9a500af5ca4",
+      "sha256": "572ad137432101a9466a063fe10f75bed78f6a384345320a0a20fe2c2374aa3b",
+      "size": 975
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CommandStatus.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CommandStatus.h",
+      "git_blob_sha1": "eca44434094a39f7c45bdc2695e92644687f516c",
+      "sha256": "de69f59856eddb7545c4cf9dbe0e1f878f592cf4dbc879d401595367490606a8",
+      "size": 3334
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/CommonIR_MEL.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+      "git_blob_sha1": "0fc9bd51b6b4b08b58be85b65cd925d7d133f3a3",
+      "sha256": "b0a01776137dff4826430885f4583020ffa5fd921fc5a18366da58f154ace145",
+      "size": 21154
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/Config.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/Config.h",
+      "git_blob_sha1": "2602f2b4c9e03f43519adf16691ad7ead250c66f",
+      "sha256": "c303445df0d61d27184e4c6193dbd0e86b11d4f8ccba7f6bd7b27f6f5ccccff6",
+      "size": 3649
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/Control.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/Control.h",
+      "git_blob_sha1": "3f0bb20294374e37d88ea636c089d92bfab1d7a8",
+      "sha256": "5ff6ea581975622d8093842dd2a6065c7aa0170feeef073589ffa34ff006d69c",
+      "size": 3459
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/FrameHeader.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/FrameHeader.h",
+      "git_blob_sha1": "4922f1c4b7c8195087484f7def93ffa5505c16af",
+      "sha256": "2eea98159706c2325a4dad1ca9cc74131690c2032996b911142851ce96580584",
+      "size": 10132
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/HotRegion.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/HotRegion.h",
+      "git_blob_sha1": "438dfc0cabc1afdd6347e638ed40f943ac719df0",
+      "sha256": "51846910e086cf4addbc59a8cc95c53fd93a16bd974e834a67d2af06e0ba6381",
+      "size": 3151
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/IR_Directional.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/IR_Directional.h",
+      "git_blob_sha1": "810f5ac01a72d3661599a755036fa43bef79e6e4",
+      "sha256": "3eacffded84626c4371312f19c217e9ba687b393f17d20367c9799aea2887713",
+      "size": 5320
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ImageListener.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ImageListener.h",
+      "git_blob_sha1": "9ad79ecf4b1779309bb390bf883ceb074ba2b897",
+      "sha256": "95641c9aa3fe6dab52a129f9826060c83c366feb64e3a7e084fc72ae715a310e",
+      "size": 2578
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/LOS3D_KinematicsType.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/LOS3D_KinematicsType.h",
+      "git_blob_sha1": "7618848348b535872b4eb1286ee6ebc70ff9cf74",
+      "sha256": "4ab3e9d4f56153db5e9547ee5403559db273c94067c04b23cd52cbe6fe66bbb4",
+      "size": 6827
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/LOS3D_OrientationCovariance.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/LOS3D_OrientationCovariance.h",
+      "git_blob_sha1": "705ab5aa6646b1ab5e0f8d3e57bbfbbede0c47d6",
+      "sha256": "cc1c2adccaf2fe743b321340e0161ede1112f1e3276ba13a55218b55b4208e6b",
+      "size": 3113
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/LineOfSightEuler.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/LineOfSightEuler.h",
+      "git_blob_sha1": "0fe9aaaf356ddad94417b7e1b6349e46a365af03",
+      "sha256": "8ceeb0519d9bd6d4e54f57fdd4690f6f4071f3a2a32b8e9bc0675bb88918adee",
+      "size": 2135
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/LineOfSightQuaternion.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/LineOfSightQuaternion.h",
+      "git_blob_sha1": "e8cfc296af4dd09933aeed8220accb14e02393d4",
+      "sha256": "fba32a4d3c6e3e83bb3759155f286a6a78ed80e12feda9810f3ef749bd3f7cdb",
+      "size": 2549
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/LineOfSightReport.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/LineOfSightReport.h",
+      "git_blob_sha1": "3cc0f09a6c40432bb901a3d80c712cc22ed4259b",
+      "sha256": "3d120f017773ebea00cc1aa8f072fe899369973af6de668a7deb225bd53f3ed4",
+      "size": 3210
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/NUC_TempData.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/NUC_TempData.h",
+      "git_blob_sha1": "8a2c2ef07b48d00cc46acf20d6a0a0c97be643c9",
+      "sha256": "227b5dfaef9cdc0e5fd48b6fc97b0a4fa41db037e07c4ef23624d8d74b510bb2",
+      "size": 1553
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/NavError.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/NavError.h",
+      "git_blob_sha1": "36fd4be4c33ef1c40cb2c71f49d0dd9d5332658c",
+      "sha256": "4b705f9fcac916f0a6c3ea77ca9b89cc9f135f56d53b9270227383da2b9a4bad",
+      "size": 1601
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/OpticalDistortionMap.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/OpticalDistortionMap.h",
+      "git_blob_sha1": "c94ded2e8417e7d9939ba98aefe98374ecc7029e",
+      "sha256": "f404e2b1173277aa4660a50c3ae8d301f2c6abd4caeceba0d3123edac576fdd6",
+      "size": 4655
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/RelativeSlantRangeLOS3D.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/RelativeSlantRangeLOS3D.h",
+      "git_blob_sha1": "61420fc34e879fdf262b2c98be45663a30b29f83",
+      "sha256": "1981126148745ff5a728b27ac34c7864678d278c5c6452aea258eed109c43e1f",
+      "size": 2475
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/RequestSystemTrackData.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/RequestSystemTrackData.h",
+      "git_blob_sha1": "103c613b22d7cedd99284ea931eb5abe517e798b",
+      "sha256": "b201a8133ce63eccced821574fcd93545365d43c60e5553a3f5138b8dfcd2195",
+      "size": 2328
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ScanParam.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ScanParam.h",
+      "git_blob_sha1": "3b98653f87d0f78a49b738944eeae764fe8ab080",
+      "sha256": "282a0c59bec3d8601ebf4b0db0557a0cffe4c29fd94cf5e1223afa1141633e05",
+      "size": 8217
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/ScanType.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/ScanType.h",
+      "git_blob_sha1": "3b45ded49f032a134563dfe58eed7c41223e9d9b",
+      "sha256": "fd156acdea2e2498c002d0f8c84eb79767a9feb92ef7ae7c4b779a29819b0376",
+      "size": 2429
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/SensorInertialState.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/SensorInertialState.h",
+      "git_blob_sha1": "04c3b851f778fb3d83b2b04e8c9cc93baac5ef7b",
+      "sha256": "54e02176b49fb55528d9d760f48e5de6344df35b85c48d0c3e33ee4c8e5b1f3d",
+      "size": 3037
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/SensorNavState.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/SensorNavState.h",
+      "git_blob_sha1": "4135751e13d57d6d66b716fe06ca1a2158a1d09c",
+      "sha256": "141988fea20a9a577cdf73d480e6adf97409714100838d3917f1c5691fffe197",
+      "size": 7929
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/SystemTrackDataResponse.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/SystemTrackDataResponse.h",
+      "git_blob_sha1": "848fd799df611a5f7e79d8da6e83b3ed825b5b20",
+      "sha256": "2f16f2903154f4541bd4e8715e28450e3073b93bda91ca2e80e7045b905c6ba7",
+      "size": 4008
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/TempPoint.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/TempPoint.h",
+      "git_blob_sha1": "772e0da1aafb70a3fe06deba418e5006c08a6794",
+      "sha256": "2a1c63db59dedb2e394ebf5dd8799f51c9358c28a9a0c105353d5b325700d57b",
+      "size": 3905
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/Uncertainty.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/Uncertainty.h",
+      "git_blob_sha1": "a77c1bed19b5cdc60ed342a8df9e90233474f8ee",
+      "sha256": "34e31a2ee2485a4eeb96a096a5f3e72381c8f9ad654b35739f9a33c948aef1a0",
+      "size": 1519
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/mel_export.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/mel_export.h",
+      "git_blob_sha1": "4eda04f3cc9a27e62fd38a2345235d245588d157",
+      "sha256": "ca32907410241638bd03549e38650cddfe9d92a2aecaf070eba50ccbd6d041fc",
+      "size": 949
+    }
+  ]
+}

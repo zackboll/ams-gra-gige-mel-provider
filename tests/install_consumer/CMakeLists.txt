@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.24)
+project(gige_mel_installed_consumer LANGUAGES CXX)
+find_package(GigeMelProvider 0.1 CONFIG REQUIRED)
+add_executable(installed_consumer main.cpp)
+target_link_libraries(installed_consumer PRIVATE gige_mel::provider)

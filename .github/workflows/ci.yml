@@ -1,0 +1,64 @@
+name: C++ provider
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: g++
+            preset: dev
+          - compiler: g++
+            preset: release
+          - compiler: clang++
+            preset: dev
+    env:
+      CXX: ${{ matrix.compiler }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+      - name: Configure without SDKs or network downloads
+        run: cmake --preset "${{ matrix.preset }}"
+      - name: Build
+        run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
+      - name: Test contracts and native loading
+        run: ctest --preset "${{ matrix.preset }}"
+      - name: Capture a synthetic image
+        run: build/${{ matrix.preset }}/mel_capture build/${{ matrix.preset }}/libgige_mel_provider.so build/${{ matrix.preset }}/capture.pgm
+      - name: Install and build a separate consumer
+        run: |
+          cmake --install build/${{ matrix.preset }} --prefix "$RUNNER_TEMP/gige-mel-install"
+          cmake -S tests/install_consumer -B build/install-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
+          cmake --build build/install-consumer
+          build/install-consumer/installed_consumer
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [asan, tsan]
+    env:
+      CXX: g++
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+      - run: cmake --preset "${{ matrix.preset }}"
+      - run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
+      - run: ctest --preset "${{ matrix.preset }}"

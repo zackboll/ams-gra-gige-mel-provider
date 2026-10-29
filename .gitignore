@@ -1,0 +1,9 @@
+/build/
+/out/
+/dist/
+/CMakeUserPresets.json
+/compile_commands.json
+*.pgm
+__pycache__/
+*.pyc
+.DS_Store
