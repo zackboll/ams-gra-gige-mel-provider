@@ -517,6 +517,146 @@ void image_callback_mutations_fail_without_deadlock() {
     CHECK(results->command_error == static_cast<int>(mel::ErrorCode::InvalidState));
 }
 
+using CommsCallback = std::function<void(ir::Channel&, const ir::ChannelCommsTestRep*)>;
+
+ir::ChannelCommsTestReq comms_request(std::uint32_t command, std::uint32_t request) {
+    ir::ChannelCommsTestReq result;
+    result.setCommandID(command);
+    result.setRequestID(request);
+    return result;
+}
+
+void nested_callback_mutation_cannot_deadlock_external_detach() {
+    Fixture a, b;
+    std::promise<void> nested_entered, resume_nested;
+    auto entered = nested_entered.get_future();
+    auto resume = resume_nested.get_future();
+    ir::Return mutation = ir::Return::Success;
+    unsigned outer_calls = 0, nested_calls = 0;
+    CHECK(b.c2->registerMetadataCallback(CommsCallback{[&](auto&, auto* reply) {
+        ++nested_calls;
+        nested_entered.set_value();
+        // The CTest process timeout bounds this gate and any operation deadlock.
+        resume.wait();
+        mutation = a.image->disable();
+        CHECK(reply->getCommandID() == 202 && reply->getRequestID() == 22);
+    }}) == ir::Return::Success);
+    CHECK(a.image->registerMetadataCallback(CommsCallback{[&](auto&, auto* reply) {
+        ++outer_calls;
+        const auto nested = response(b.c2->send(comms_request(202, 22)));
+        CHECK(nested->getCommandID() == 202 && nested->getRequestID() == 22);
+        CHECK(reply->getCommandID() == 101 && reply->getRequestID() == 11);
+    }}) == ir::Return::Success);
+    auto sent = std::async(std::launch::async, [&] {
+        return response(a.image->send(comms_request(101, 11)));
+    });
+    CHECK(entered.wait_for(2s) == std::future_status::ready);
+    auto detached = std::async(std::launch::async, [&] {
+        return a.control->detachChannel(a.image);
+    });
+    // detach_locked sets detached_ only after taking A's operation lock, before
+    // draining admitted metadata callbacks. No other thread detaches A here.
+    // Observing InvalidState therefore proves admission is closed while both
+    // callbacks remain active at the gate, not merely that detach was launched.
+    eventually([&] { return !a.image->sendKeepAliveRep().get(); });
+    expect_error(a.image->sendKeepAliveRep(), mel::ErrorCode::InvalidState);
+    CHECK(detached.wait_for(0ms) == std::future_status::timeout);
+    resume_nested.set_value();
+    CHECK(sent.wait_for(2s) == std::future_status::ready);
+    const auto outer = sent.get();
+    CHECK(outer->getCommandID() == 101 && outer->getRequestID() == 11);
+    CHECK(detached.wait_for(2s) == std::future_status::ready);
+    CHECK(detached.get() == ir::Return::Success);
+    CHECK(mutation == ir::Return::Fail);
+    CHECK(outer_calls == 1 && nested_calls == 1);
+    CHECK(gige_mel::provider_statistics(a.manager).callback_failures == 0);
+    CHECK(gige_mel::provider_statistics(b.manager).callback_failures == 0);
+    CHECK(b.c2->enable() == ir::Return::Success); // No stale callback context.
+    CHECK(b.c2->disable() == ir::Return::Success);
+}
+
+void check_callback_policy(Fixture& target, const std::shared_ptr<ir::Buffer>& candidate) {
+    CHECK(target.image->enable() == ir::Return::Fail);
+    CHECK(target.image->disable() == ir::Return::Fail);
+    CHECK(target.image->registerBuffer(candidate) == ir::Return::Fail);
+    CHECK(target.image->unregisterBuffer(target.buffers.front()) == ir::Return::Fail);
+    CHECK(target.image->registerMetadataCallback(CommsCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
+    using CameraCallback = std::function<void(ir::Channel&, const ir::CameraCommandResp*)>;
+    CHECK(target.image->registerMetadataCallback(CameraCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
+    expect_error(target.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+    CHECK(target.control->init() == ir::Return::Fail);
+    CHECK(!target.control->attachChannel(target.config(ir::ChannelType::CommandAndControl)));
+    CHECK(target.control->detachChannel(target.image) == ir::Return::Fail);
+    CHECK(!ir::getControl("synthetic", target.manager));
+    CHECK(target.image->getCapabilities().getWidth() == 64);
+    CHECK(!target.control->getCapabilities().empty());
+    CHECK(response(target.image->sendKeepAliveRep()) != nullptr);
+    (void)gige_mel::provider_statistics(target.manager);
+    const auto reply = response(target.c2->send(comms_request(303, 33)));
+    CHECK(reply->getCommandID() == 303 && reply->getRequestID() == 33);
+}
+
+void image_and_metadata_callbacks_reject_cross_provider_mutations() {
+    Fixture a, b, unattached(false);
+    CHECK(unattached.control->init() == ir::Return::Success);
+    const auto fresh_manager = getAPI_Manager("synthetic");
+    CHECK(fresh_manager);
+    a.add_buffer();
+    b.add_buffer();
+    auto a_candidate = a.add_buffer(64 * 48, false);
+    auto b_candidate = b.add_buffer(64 * 48, false);
+    auto exercise = [&] {
+        check_callback_policy(a, a_candidate);
+        check_callback_policy(b, b_candidate); // B has no active callback.
+        // Exercise an actual attachment and control-creation opportunity.
+        CHECK(!unattached.control->attachChannel(unattached.config(ir::ChannelType::CommandAndControl)));
+        CHECK(!ir::getControl("synthetic", fresh_manager));
+    };
+    unsigned metadata_completed = 0;
+    CHECK(a.image->registerMetadataCallback(CommsCallback{[&](auto&, auto*) {
+        exercise();
+        ++metadata_completed;
+    }}) == ir::Return::Success);
+    (void)response(a.image->send(comms_request(404, 44)));
+    CHECK(metadata_completed == 1);
+    a.listener->hook = exercise;
+    a.listener->auto_release = true;
+    CHECK(a.image->enable() == ir::Return::Success);
+    a.listener->wait_for(1);
+    CHECK(a.image->disable() == ir::Return::Success);
+    CHECK(gige_mel::provider_statistics(a.manager).callback_failures == 0);
+    CHECK(gige_mel::provider_statistics(b.manager).callback_failures == 0);
+    CHECK(a.buffers.front()->release() == ir::Return::Fail); // Released in callback.
+    CHECK(b.image->unregisterBuffer(b.buffers.front()) == ir::Return::Success);
+    CHECK(b.image->registerBuffer(b_candidate) == ir::Return::Success);
+    CHECK(b.control->init() == ir::Return::Success);
+    CHECK(ir::getControl("synthetic", b.manager) == b.control);
+    CHECK(unattached.control->attachChannel(unattached.config(ir::ChannelType::CommandAndControl)));
+    CHECK(ir::getControl("synthetic", fresh_manager));
+}
+
+void nested_metadata_exception_restores_callback_context() {
+    Fixture a, b;
+    unsigned outer_completed = 0;
+    CHECK(b.c2->registerMetadataCallback(CommsCallback{[](auto&, auto*) {
+        throw std::runtime_error("Deliberate nested metadata exception");
+    }}) == ir::Return::Success);
+    CHECK(a.image->registerMetadataCallback(CommsCallback{[&](auto&, auto*) {
+        const auto nested = response(b.c2->send(comms_request(505, 55)));
+        CHECK(nested->getCommandID() == 505 && nested->getRequestID() == 55);
+        CHECK(a.image->disable() == ir::Return::Fail);
+        CHECK(b.c2->enable() == ir::Return::Fail);
+        ++outer_completed;
+    }}) == ir::Return::Success);
+    (void)response(a.image->send(comms_request(606, 66)));
+    CHECK(outer_completed == 1);
+    CHECK(gige_mel::provider_statistics(a.manager).callback_failures == 0);
+    CHECK(gige_mel::provider_statistics(b.manager).callback_failures == 1);
+    CHECK(a.image->disable() == ir::Return::Success);
+    CHECK(b.c2->enable() == ir::Return::Success);
+    CHECK(b.c2->disable() == ir::Return::Success);
+}
+
 void unsupported_surfaces_return_real_errors() {
     Fixture fixture;
     constexpr auto unsupported = mel::ErrorCode::Unsupported;
@@ -853,6 +993,9 @@ void failed_readback_blocks_enable_even_with_sufficient_buffers() {
 
 int main() {
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"nested callback mutation versus external detach", nested_callback_mutation_cannot_deadlock_external_detach},
+        {"image and metadata cross-provider mutation policy", image_and_metadata_callbacks_reject_cross_provider_mutations},
+        {"nested metadata exception restores context", nested_metadata_exception_restores_callback_context},
         {"factory initialization and channel identity", factory_initialization_and_channel_identity},
         {"registered memory validation and affinity", buffer_validation_affinity_and_mutation},
         {"retained buffers, starvation, release recovery", retained_buffers_starvation_and_release_recovery},
