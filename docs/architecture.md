@@ -194,6 +194,17 @@ for existing reports. BIT adds no worker, backend interface or factory signature
 Registration/command dispatch pins owners and enters consumers outside locks.
 Health remains weak across waits and retains the R1 acquisition unpublication rule.
 
+The [software subsystem profile](subsystem-status.md) extends that same
+`health_snapshot()` transaction under the state mutex. It commits a
+manager-lifetime BIT-state revision together with the completion/fault
+observations whenever their committed semantic state changes. When a
+SubsystemStatusResp is registered, it also derives a fixed software
+subsystem/CSCI report from the captured core state and consumes a separate
+prepared-report sequence. The batch carries both values from capture to
+dispatch (MFA_Status, Detailed, BIT_Status, SubsystemStatusResp) without
+rereading the runtime. It adds no worker, backend call, public ABI or
+factory change.
+
 The next development sequence is:
 
 1. Keep native MEL loading, memory ownership, and synthetic lifecycle tests green.

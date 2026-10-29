@@ -102,7 +102,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | Callback payload | Upstream annotation | Bootstrap | Priority |
 | --- | --- | --- | --- |
 | `mel::BIT_Configuration` | Required | One observed-state test catalogue | [Software BIT profile](software-bit.md) |
-| `CommandStatus` | Required | Supported for C2 ConfigSet and CameraCommand only | [Synchronous terminal Accepted/Rejected profile](configuration.md); not complete C2 status coverage |
+| `CommandStatus` | Required | Supported for C2 ConfigSet, CameraCommand and the documented BIT_Command subset | [Synchronous terminal Accepted/Rejected profile](configuration.md) and [software BIT command outcomes](software-bit.md); ModeCmd and other unsupported commands produce no status; not complete C2 status coverage |
 | `mel::CalibrationConfiguration` | Optional | NotSupported | P4 |
 | `CameraProtectCmdResp` | Required if camera protection | NotSupported | P4 when protection is implemented |
 | `mel::CalibrationStatus` | Optional | NotSupported | P4 |
@@ -137,20 +137,20 @@ The `LOS3D_KinematicsType` registration takes its `std::function` by `const&`; m
 
 ## P1: HealthStatusChannel
 
-[HealthStatusChannel][health] is annotated required and has no extra `send` overloads. It adds eight callbacks to the common Channel interface. The provider now advertises and attaches a **partial** Health channel: common communications plus MFA_Status and MFA_StatusDetailed, with zero image geometry. The other six Health registrations remain unsupported and unadvertised. This does not close the required Health conformance gaps below. See [the exact implemented contract](health-status.md) for 100 ms current-state snapshots, state mapping, diagnostic vocabulary, lifecycle and limitations.
+[HealthStatusChannel][health] is annotated required and has no extra `send` overloads. It adds eight callbacks to the common Channel interface. The provider now advertises and attaches a **partial** Health channel: common communications plus MFA_Status, MFA_StatusDetailed, the bounded software [BIT_Status](software-bit.md), and the bounded software [SubsystemStatusResp](subsystem-status.md), with zero image geometry. All four are published by one 100 ms worker from one captured core state per batch. The other four Health registrations (LFStatus, DiscreteStatus, MFA_SecurityAuditRecord, NUC_TempData) remain unsupported and unadvertised. This does not close the required Health conformance gaps below. See [the exact implemented contract](health-status.md) for 100 ms current-state snapshots, state mapping, diagnostic vocabulary, lifecycle and limitations.
 
 | Callback payload | Upstream annotation | Priority and intended source |
 | --- | --- | --- |
 | `LFStatus` | Required if local functions | P4 if supported local functions exist |
 | `mel::MFA_Status` | Required | Partial: sampled observed provider readiness/acquisition state; no hardware health claim |
 | `mel::BIT_Status` | Required | Partial: latest software result/current faults on existing Health worker; hardware BIT remains future work |
-| `SubsystemStatusResp` | Required | P1: versioned subsystem/device/transport inventory and status |
+| `SubsystemStatusResp` | Required | Partial: one provider **software** subsystem/CSCI with version 0.1.0, current readiness, committed BIT-state revision and prepared-report sequence ([profile](subsystem-status.md)); physical device/transport inventory, dependent subsystems, assigned criticality and connection probing remain P1/P2 work |
 | `mel::DiscreteStatus` | Required | P1: define meaningful supported discrete state |
 | `mel::MFA_SecurityAuditRecord` | Required | P1: define which actual provider events generate records |
 | `mel::MFA_StatusDetailed` | Required | Partial: schema-1 provider diagnostics; no transport/hardware metrics |
 | `NUC_TempData` | Optional | P4 if the selected sensor provides it |
 
-A temperature sample is not a complete Health implementation. The implemented increments define initial/late periodic publication, ordering, shutdown, current acquisition failure versus historical diagnostics, and the bounded [software BIT profile](software-bit.md). They do not provide an event log, physical connection probing, hardware health, hardware BIT, calibration or full Health conformance. Remaining table entries describe broader upstream work, not capability claims.
+A temperature sample is not a complete Health implementation. The implemented increments define initial/late periodic publication, ordering, shutdown, current acquisition failure versus historical diagnostics, the bounded [software BIT profile](software-bit.md), and the bounded [software subsystem profile](subsystem-status.md). They do not provide an event log, physical connection probing, hardware health, hardware BIT, calibration or full Health conformance. Remaining table entries describe broader upstream work, not capability claims.
 
 ## P1 profile decision / P5 implementation: SchedulingChannel
 

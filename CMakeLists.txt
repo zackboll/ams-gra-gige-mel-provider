@@ -69,6 +69,12 @@ target_include_directories(gige_mel_provider PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(gige_mel_provider PUBLIC gige_mel_headers
   PRIVATE gige_mel_backend Threads::Threads gige_mel_build_options)
+# Private provider software version (not the MEL API version or a dependency
+# revision); reported as text and as the Health subsystem CSCI Version.
+target_compile_definitions(gige_mel_provider PRIVATE
+  GIGE_MEL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  GIGE_MEL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  GIGE_MEL_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 add_dependencies(gige_mel_provider verify_upstream)
 
 if(GIGE_MEL_BUILD_EXAMPLES)
