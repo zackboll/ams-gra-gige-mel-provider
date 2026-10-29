@@ -108,7 +108,8 @@ restart or live reallocation is added.
 ## Status scope and callback contract
 
 C2 discovery and per-channel capabilities advertise CommandStatus independently
-of registration. Only **C2 ConfigSet and C2 CameraCommand** emit it. Image-origin
+of registration. **C2 ConfigSet, C2 CameraCommand and the
+[software BIT command](software-bit.md)** emit it. Image-origin
 CameraCommand emits its existing Image response, not status on an arbitrary C2.
 ConfigSet never emits Image CameraCommandResp. Communications/keep-alive retain
 their reply mechanisms; other unsupported commands remain unsupported.

@@ -87,7 +87,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 
 | Request → response | Upstream annotation | Bootstrap | Priority and implementation task |
 | --- | --- | --- | --- |
-| `BIT_Command` → `Return` | Required | Unsupported | P1: define supported built-in-test operations and resulting BIT status/configuration |
+| `BIT_Command` → `Return` | Required | Partial: bounded provider-software test ID 1 | [Software BIT profile](software-bit.md); hardware/asynchronous BIT remains future work |
 | `CalibrationConfigurationCmd` → `mel::CalibrationConfiguration` | Optional | Unsupported | P4: return genuine calibration configuration; this is a query, not a generic execute-NUC operation |
 | `CalibrationStatusCmd` → `mel::CalibrationStatus` | Optional | Unsupported | P4: report actual calibration state and progress semantics |
 | `CameraCommand` → `CameraCommandResp` | Required if camera control | Supported for staring Mono8 profile | P0: serialize with Image commands; full snapshot, validation, readback, command correlation, and disabled-stream policy |
@@ -101,12 +101,12 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 
 | Callback payload | Upstream annotation | Bootstrap | Priority |
 | --- | --- | --- | --- |
-| `mel::BIT_Configuration` | Required | NotSupported | P1 |
+| `mel::BIT_Configuration` | Required | One observed-state test catalogue | [Software BIT profile](software-bit.md) |
 | `CommandStatus` | Required | Supported for C2 ConfigSet and CameraCommand only | [Synchronous terminal Accepted/Rejected profile](configuration.md); not complete C2 status coverage |
 | `mel::CalibrationConfiguration` | Optional | NotSupported | P4 |
 | `CameraProtectCmdResp` | Required if camera protection | NotSupported | P4 when protection is implemented |
 | `mel::CalibrationStatus` | Optional | NotSupported | P4 |
-| `mel::BIT_Status` | Required | NotSupported | P1 |
+| `mel::BIT_Status` | Required | Latest software result and current software faults | [Software BIT profile](software-bit.md) |
 
 `CameraCommandResp` metadata registration is on **ImageChannel**, not C2Channel. Do not add a new C2 overload under the assumption that every response type has a C2 callback. `CameraProtectCmd` and its response are declared together in `CameraProtectCmd.h`.
 
@@ -143,14 +143,14 @@ The `LOS3D_KinematicsType` registration takes its `std::function` by `const&`; m
 | --- | --- | --- |
 | `LFStatus` | Required if local functions | P4 if supported local functions exist |
 | `mel::MFA_Status` | Required | Partial: sampled observed provider readiness/acquisition state; no hardware health claim |
-| `mel::BIT_Status` | Required | P1: actual BIT results |
+| `mel::BIT_Status` | Required | Partial: latest software result/current faults on existing Health worker; hardware BIT remains future work |
 | `SubsystemStatusResp` | Required | P1: versioned subsystem/device/transport inventory and status |
 | `mel::DiscreteStatus` | Required | P1: define meaningful supported discrete state |
 | `mel::MFA_SecurityAuditRecord` | Required | P1: define which actual provider events generate records |
 | `mel::MFA_StatusDetailed` | Required | Partial: schema-1 provider diagnostics; no transport/hardware metrics |
 | `NUC_TempData` | Optional | P4 if the selected sensor provides it |
 
-A temperature sample is not a complete Health implementation. The implemented increment defines initial/late periodic publication, ordering, shutdown, and current acquisition failure versus historical diagnostics. It does not provide an event log, physical connection probing, hardware health, BIT, calibration or full Health conformance. Remaining table entries describe broader upstream work, not capability claims.
+A temperature sample is not a complete Health implementation. The implemented increments define initial/late periodic publication, ordering, shutdown, current acquisition failure versus historical diagnostics, and the bounded [software BIT profile](software-bit.md). They do not provide an event log, physical connection probing, hardware health, hardware BIT, calibration or full Health conformance. Remaining table entries describe broader upstream work, not capability claims.
 
 ## P1 profile decision / P5 implementation: SchedulingChannel
 

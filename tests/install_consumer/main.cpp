@@ -1,6 +1,7 @@
 #include <irmel/library/irmel-types/Control.h>
 #include <irmel/library/c2/C2Channel.h>
 #include "../public_health_demo.hpp"
+#include "../public_bit_demo.hpp"
 
 #include <iostream>
 
@@ -13,7 +14,7 @@ int main() {
         return 1;
     }
     namespace ir = ams::iface::irmel;
-    try { demonstrate_health(control); }
+    try { demonstrate_health(control); demonstrate_bit(control); }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 6; }
     ir::Config config;
     for (const auto& capability : control->getCapabilities()) {
@@ -37,5 +38,5 @@ int main() {
     auto result = c2->send(command).get();
     if (!result || *result.get() != ir::Return::Success || !accepted || statuses != 1) return 4;
     if (control->detachChannel(c2) != ir::Return::Success) return 5;
-    std::cout << "PASS: installed package, factories, Health snapshots, ConfigSet and correlated CommandStatus (published MEL only)\n";
+    std::cout << "PASS: installed package, factories, BIT catalogue/results/Health faults, Health snapshots, ConfigSet and correlated CommandStatus (published MEL only)\n";
 }

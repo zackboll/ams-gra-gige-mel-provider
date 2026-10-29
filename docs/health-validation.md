@@ -1,5 +1,8 @@
 # GIGE-MEL-004 validation record
 
+This historical Health/R1 evidence is retained. GIGE-MEL-005's incremental BIT
+validation is recorded separately in [software BIT validation](software-bit-validation.md).
+
 Starting origin/main (fetched before branching):
 
 - Commit `1349fd3bdc265398750ba2c8ec92928124c6e215`

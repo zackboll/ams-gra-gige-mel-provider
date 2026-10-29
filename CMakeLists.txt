@@ -82,9 +82,9 @@ if(BUILD_TESTING)
   target_link_libraries(backend_tests PRIVATE gige_mel_backend gige_mel_build_options)
   add_test(NAME backend_contract COMMAND backend_tests)
 
-  add_executable(provider_tests tests/provider_tests.cpp tests/join_observer.cpp)
+  add_executable(provider_tests tests/provider_tests.cpp tests/join_observer.cpp tests/clock_observer.cpp)
   target_link_libraries(provider_tests PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
-  target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join)
+  target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=clock_gettime)
   add_test(NAME provider_contract COMMAND provider_tests)
 
   add_executable(configuration_probe tests/configuration_probe.cpp)

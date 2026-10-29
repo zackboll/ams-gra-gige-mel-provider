@@ -244,11 +244,19 @@ still retained by a consumer-created cycle.
 
 ## Unsupported surfaces and diagnostics
 
+The [bounded provider-software BIT profile](software-bit.md) supports one
+synchronous C2 observed-state test (numeric ID 1), C2 catalogue/status registration,
+correlated CommandStatus and Health BIT_Status. Latest completion and two current
+software fault categories are manager-local, not hardware diagnosis. Host UTC
+wall-clock epoch nanoseconds for these reports do not change image timestamps.
+
 Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
-unimplemented. C2 commands other than CameraCommand and ConfigSetCommand, Image
+unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
+documented BIT_Command subset, Image
 NavigationReport, and metadata other than communications, Image camera responses
-and C2 configuration CommandStatus or Health MFA_Status/MFA_StatusDetailed
+and C2 configuration/BIT CommandStatus, C2 BIT_Configuration/BIT_Status or Health
+MFA_Status/MFA_StatusDetailed/BIT_Status
 return unsupported.
 Some of these are upstream **required** methods, not optional capabilities; this
 is why the implementation is called a bootstrap rather than conformant MEL.

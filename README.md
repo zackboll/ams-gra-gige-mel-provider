@@ -53,6 +53,11 @@ readiness/acquisition state and cumulative diagnostics through the pinned public
 MEL API. Reports are best-effort 100 ms snapshots, not an event log or physical
 camera-health certificate. Health can stop independently of Image acquisition.
 
+[Provider-software BIT](docs/software-bit.md) adds one bounded observed-state
+check through C2, a catalogue and latest result/current software faults through
+C2 and Health. Command execution success is distinct from a test Pass/Fail. It
+performs no device I/O and does not certify connectivity or future acquisition.
+
 | Area | Bootstrap behavior |
 | --- | --- |
 | Dynamic factories | Exact `getAPI_Manager`, `getControl`, and `getBuffer` symbols |
@@ -62,7 +67,7 @@ camera-health certificate. Health can stop independently of Image acquisition.
 | Buffers | Consumer-owned Host memory, affinity and overlap checks, explicit release, bounded registration count |
 | Images | Mono8, one band, tightly packed rows; padding in a backend frame is copied out |
 | Camera configuration | Complete ROI/exposure/integer-frame-rate CameraCommand through C2 or Image; versioned JSON ConfigSet through C2; disabled acquisition required |
-| Metadata | Communications replies, Image camera-command replies, and correlated C2 configuration CommandStatus |
+| Metadata | Communications replies, Image camera-command replies, correlated C2 configuration/BIT CommandStatus, C2 BIT catalogue, C2/Health BIT results and current software faults |
 | Backend seam | SDK-independent discovery/device/stream interfaces and move-only retained frame leases |
 | Synthetic backend | Deterministic images, bounded native pool, cancellation, validated readback, generation and time metadata |
 | Diagnostics | Partial Health MFA_Status/MFA_StatusDetailed periodic current snapshots plus project C++ counters and last error; no invented MEL Instrumentation fields |

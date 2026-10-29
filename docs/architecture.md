@@ -186,6 +186,14 @@ A channel reports only capabilities that the selected camera, selected backend, 
 
 ## Extension sequence
 
+The common runtime now also owns the bounded [software BIT profile](software-bit.md):
+one latest immutable completion and two current-fault observation timestamps under
+the state mutex. C2 executes the fixed observed-state check without device I/O;
+Health captures its retained completion/current faults with the same state used
+for existing reports. BIT adds no worker, backend interface or factory signature.
+Registration/command dispatch pins owners and enters consumers outside locks.
+Health remains weak across waits and retains the R1 acquisition unpublication rule.
+
 The next development sequence is:
 
 1. Keep native MEL loading, memory ownership, and synthetic lifecycle tests green.

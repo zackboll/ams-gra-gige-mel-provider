@@ -17,6 +17,7 @@
 #include <limits>
 #include <mutex>
 #include <thread>
+#include <time.h>
 #include <utility>
 
 namespace gige_mel {
@@ -115,6 +116,9 @@ struct Runtime {
     std::weak_ptr<ChannelCore> image_channel; // guarded by operations
     std::atomic<std::uint64_t> delivered{0}, dropped{0}, rejected{0}, callback_failures{0}, stream_failures{0};
     std::string last_error;
+    // Manager lifetime; bounded latest completion and two category observations.
+    std::shared_ptr<const mel::CompletedBIT> completed_bit;
+    std::array<std::optional<std::chrono::nanoseconds>, 2> fault_observations;
 
     ~Runtime() {
         if (device) {
@@ -176,10 +180,15 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     cap.setChannelTypes({type});
     std::set<ir::ChannelMetadataCapabilityType> metadata{ir::ChannelMetadataCapabilityType::ChannelCommsTestRep};
     if (type == ir::ChannelType::IRSTImage) metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
-    if (type == ir::ChannelType::CommandAndControl) metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
+    if (type == ir::ChannelType::CommandAndControl) {
+        metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
+        metadata.insert(ir::ChannelMetadataCapabilityType::BITConfiguration);
+        metadata.insert(ir::ChannelMetadataCapabilityType::BITStatus);
+    }
     if (type == ir::ChannelType::HealthAndStatus) {
         metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatus);
         metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatusDetailed);
+        metadata.insert(ir::ChannelMetadataCapabilityType::BITStatus);
     }
     cap.setChannelMetadataCapabilities(metadata);
     if (config) {
@@ -276,6 +285,97 @@ struct StreamState {
     std::atomic<bool> stopping{false};
     std::atomic<bool> failed{false};
 };
+
+// Fixed identities in the manager-local experimental profile, not a vendor
+// registry. Numeric BIT_Command ID 1 maps explicitly to software_bit_id().
+mel::UCI_ID software_bit_id() {
+    return {{0x9c,0x85,0xc2,0x63,0x54,0x6e,0x4e,0x11,0x9b,0x71,0xd2,0x40,0x5a,0x13,0x80,0x01},
+            "gige_mel.provider_state.v1"};
+}
+constexpr const char* bit_items[] = {"gige_mel.configuration_known_valid",
+    "gige_mel.owned_acquisition_without_terminal_failure"};
+constexpr const char* fault_codes[] = {"gige_mel.configuration_invalid", "gige_mel.acquisition_failed"};
+constexpr const char* fault_descriptions[] = {"Initialized provider configuration is not known valid",
+    "Logically owned Image acquisition has an observed terminal failure; explicitly disable for cleanup"};
+
+mel::BIT_Configuration bit_catalogue() {
+    mel::BIT_Type test;
+    test.setBitID(software_bit_id());
+    test.setAcceptedInterface(mel::BIT_ControlInterface::SubsystemBITCommand);
+    test.setBitItemNames({bit_items[0], bit_items[1]});
+    // Empty components and upstream default duration 0 mean unspecified.
+    return mel::BIT_Configuration({test});
+}
+
+std::chrono::nanoseconds host_utc_now() {
+    timespec value{};
+    if (::clock_gettime(CLOCK_REALTIME, &value) != 0)
+        throw std::runtime_error("BIT host UTC clock_gettime(CLOCK_REALTIME) failed");
+    constexpr auto billion = 1000000000LL;
+    constexpr auto maximum = std::numeric_limits<std::chrono::nanoseconds::rep>::max();
+    if (value.tv_sec < 0 || value.tv_nsec < 0 || value.tv_nsec >= billion ||
+        value.tv_sec > maximum / billion ||
+        (value.tv_sec == maximum / billion && value.tv_nsec > maximum % billion))
+        throw std::runtime_error("BIT host Unix-epoch nanoseconds are not representable");
+    const auto count = static_cast<std::chrono::nanoseconds::rep>(value.tv_sec) * billion + value.tv_nsec;
+    if (count == 0) throw std::runtime_error("BIT host UTC clock returned an unspecified zero timestamp");
+    return std::chrono::nanoseconds(count);
+}
+
+struct HealthSnapshot {
+    bool initialized, configuration_valid, active, failed;
+    std::uint64_t generation;
+    ProviderStatistics statistics;
+    std::optional<mel::BIT_Status> bit;
+    std::exception_ptr bit_error;
+};
+
+// No operations mutex or backend I/O. The temporary acquisition owner is
+// destroyed while state_mutex is held, under the established unpublication rule.
+HealthSnapshot health_snapshot(Runtime& r, bool execute = false, bool prepare_bit = true) {
+    std::lock_guard lock(r.state_mutex);
+    const auto acquisition = r.acquisition.lock();
+    HealthSnapshot s{r.initialized, r.configuration_valid, r.image_active,
+        acquisition && acquisition->failed.load(), r.configuration_generation,
+        {r.delivered.load(), r.dropped.load(), r.rejected.load(),
+         r.callback_failures.load(), r.stream_failures.load(), r.last_error}, {}, {}};
+    if (!prepare_bit) return s;
+    try {
+        auto observations = r.fault_observations;
+        const bool predicates[] = {s.initialized && !s.configuration_valid,
+                                  s.initialized && s.active && s.failed};
+        std::vector<mel::Fault> faults;
+        for (std::size_t i = 0; i < observations.size(); ++i) {
+            if (!predicates[i]) { observations[i].reset(); continue; }
+            if (!observations[i]) observations[i] = host_utc_now();
+            auto uuid = software_bit_id().getUUID();
+            uuid.back() = static_cast<std::uint8_t>(0x11 + i);
+            faults.emplace_back(mel::UCI_ID(uuid, fault_codes[i]), mel::FaultSeverity::Warning,
+                mel::FaultState::Set, std::vector<mel::FaultData>{}, *observations[i],
+                fault_codes[i], fault_descriptions[i], std::vector<mel::UCI_ID>{},
+                std::vector<mel::FaultAmbiguityGroup>{});
+        }
+        auto completion = r.completed_bit;
+        if (execute) {
+            const bool passes[] = {s.initialized && s.configuration_valid, !(s.active && s.failed)};
+            std::vector<mel::CompletedBIT_Item> items;
+            for (std::size_t i = 0; i < 2; ++i)
+                items.emplace_back(bit_items[i], passes[i] ? mel::BIT_Result::Pass : mel::BIT_Result::Fail,
+                    passes[i] ? "" : fault_descriptions[i]);
+            const bool pass = passes[0] && passes[1];
+            // Completion means item evaluation has finished, not command admission.
+            completion = std::make_shared<const mel::CompletedBIT>(software_bit_id(), host_utc_now(),
+                pass ? mel::BIT_Result::Pass : mel::BIT_Result::Fail,
+                pass ? "" : "Provider observed-state check failed; see item failure reasons", std::move(items));
+        }
+        s.bit.emplace(std::vector<mel::ActiveBIT>{}, completion ? std::vector<mel::CompletedBIT>{*completion} :
+                      std::vector<mel::CompletedBIT>{}, std::move(faults));
+        // Commit only after the complete immutable payload has been formed.
+        r.completed_bit = std::move(completion);
+        r.fault_observations = observations;
+    } catch (...) { s.bit_error = std::current_exception(); }
+    return s;
+}
 
 class ChannelCore : public virtual ir::Channel, public std::enable_shared_from_this<ChannelCore> {
 public:
@@ -767,7 +867,58 @@ public:
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
     mel::RequestFor<ir::CameraCommandResp> send(ir::CameraCommand command) override { return camera_command(command); }
-    GIGE_UNSUPPORTED_SEND(ir::BIT_Command, ir::Return)
+    mel::RequestFor<ir::Return> send(ir::BIT_Command command) override {
+        if (in_provider_callback())
+            return failed<ir::Return>(mel::ErrorCode::InvalidState, "schedule BIT outside provider callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<ir::Return>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        ConfigurationOutcome outcome;
+        std::optional<mel::BIT_Status> payload;
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return failed<ir::Return>(mel::ErrorCode::InvalidState, "channel is detached");
+            const bool initiate = !command.getInitiateBIT_ID().empty();
+            const auto& selected = initiate ? command.getInitiateBIT_ID() : command.getCancelBIT_ID();
+            const auto reject = [&](backend::ErrorCode code, const char* message) {
+                outcome = ConfigurationOutcome::failure({code, message});
+            };
+            if (!selected.empty()) {
+                if (selected.size() != 1)
+                    reject(backend::ErrorCode::invalid_argument, "selected BIT operation requires exactly one test ID");
+                else if (selected.front() != 1)
+                    reject(backend::ErrorCode::not_found, "unknown BIT test ID; only numeric ID 1 is recognized");
+                else if (!initiate)
+                    reject(backend::ErrorCode::invalid_state, "no active test: software BIT is synchronous and has no queued work");
+                else {
+                    try {
+                        auto snapshot = health_snapshot(*runtime_, true);
+                        if (snapshot.bit_error) std::rethrow_exception(snapshot.bit_error);
+                        payload = std::move(snapshot.bit);
+                        outcome.success = true;
+                    } catch (const std::exception& error) {
+                        outcome = ConfigurationOutcome::failure({backend::ErrorCode::resource_exhausted,
+                            std::string("BIT report preparation failed: ") + error.what()});
+                        runtime_->report(outcome.description);
+                    } catch (...) {
+                        reject(backend::ErrorCode::resource_exhausted, "BIT report preparation failed: unknown internal failure");
+                        runtime_->report(outcome.description);
+                    }
+                }
+            } else if (!command.getClearFaultCode().empty())
+                reject(backend::ErrorCode::unsupported, "clearFaultCode is unsupported; real recovery retires current software faults");
+            else reject(backend::ErrorCode::invalid_argument, "BIT command has no selected operation");
+        }
+        auto result = outcome.error ? failed<ir::Return>(map_error(outcome.error->code), outcome.description)
+                                    : ready(ir::Return::Success);
+        if (payload) {
+            Callback<mel::BIT_Status> callback;
+            { std::lock_guard lock(callback_mutex_); callback = bit_callback_; }
+            invoke(callback, *payload);
+        }
+        on_command_status(outcome.status(command.getCommandID()));
+        return result;
+    }
     GIGE_UNSUPPORTED_SEND(ir::CalibrationConfigurationCmd, mel::CalibrationConfiguration)
     GIGE_UNSUPPORTED_SEND(ir::CalibrationStatusCmd, mel::CalibrationStatus)
     GIGE_UNSUPPORTED_SEND(ir::CameraProtectCmd, ir::CameraProtectCmdResp)
@@ -775,38 +926,54 @@ public:
     GIGE_UNSUPPORTED_SEND(ir::SystemTrackDataResponse, ir::CommandStatus)
     GIGE_UNSUPPORTED_SEND(ir::ModeCmd, ir::MFA_Mode)
     mel::RequestFor<ir::Return> send(ir::ConfigSetCommand command) override { return config_set(command); }
-    GIGE_UNSUPPORTED_CALLBACK(mel::BIT_Configuration)
+    ir::Return registerMetadataCallback(Callback<mel::BIT_Configuration> callback) override {
+        return register_initial(catalogue_callback_, std::move(callback), [&] { return bit_catalogue(); });
+    }
     ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const ir::CommandStatus* const)> callback) override {
         return register_callback(status_callback_, std::move(callback));
     }
     GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationConfiguration)
     GIGE_UNSUPPORTED_CALLBACK(ir::CameraProtectCmdResp)
     GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationStatus)
-    GIGE_UNSUPPORTED_CALLBACK(mel::BIT_Status)
+    ir::Return registerMetadataCallback(Callback<mel::BIT_Status> callback) override {
+        return register_initial(bit_callback_, std::move(callback), [&] {
+            auto snapshot = health_snapshot(*runtime_);
+            if (snapshot.bit_error) std::rethrow_exception(snapshot.bit_error);
+            return std::move(*snapshot.bit);
+        });
+    }
 private:
+    template <class T, class Prepare>
+    ir::Return register_initial(Callback<T>& slot, Callback<T> callback, Prepare prepare) {
+        if (in_provider_callback() || is_detached()) return ir::Return::Fail;
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        const auto self = shared_from_this();
+        if (!callback) return is_detached() ? ir::Return::Fail : ir::Return::BadPointer;
+        std::optional<T> payload;
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return ir::Return::Fail;
+            if (!callback) return ir::Return::BadPointer;
+            { std::lock_guard lock(callback_mutex_); if (slot) return ir::Return::Fail; }
+            try { payload.emplace(prepare()); }
+            catch (const std::exception& error) { runtime_->report(error.what()); return ir::Return::Fail; }
+            catch (...) { runtime_->report("BIT initial publication preparation failed"); return ir::Return::Fail; }
+            const auto registered = register_callback(slot, callback);
+            if (registered != ir::Return::Success) return registered;
+        }
+        invoke(callback, *payload);
+        return ir::Return::Success;
+    }
     void on_command_status(const ir::CommandStatus& status) override {
         Callback<ir::CommandStatus> callback;
         { std::lock_guard lock(callback_mutex_); callback = status_callback_; }
         invoke(callback, status);
     }
     Callback<ir::CommandStatus> status_callback_;
+    Callback<mel::BIT_Configuration> catalogue_callback_;
+    Callback<mel::BIT_Status> bit_callback_;
 };
-// One core-state capture supplies both reports. Counters remain independently
-// atomic samples; no per-frame transaction lock is imposed by Health.
-struct HealthSnapshot {
-    bool initialized, configuration_valid, active, failed;
-    std::uint64_t generation;
-    ProviderStatistics statistics;
-};
-
-HealthSnapshot health_snapshot(const Runtime& r) {
-    std::lock_guard lock(r.state_mutex);
-    const auto acquisition = r.acquisition.lock();
-    return {r.initialized, r.configuration_valid, r.image_active,
-        acquisition && acquisition->failed.load(), r.configuration_generation,
-        {r.delivered.load(), r.dropped.load(), r.rejected.load(),
-         r.callback_failures.load(), r.stream_failures.load(), r.last_error}};
-}
 
 class HealthChannelImpl final : public ChannelCore, public ir::HealthStatusChannel {
     struct Publisher {
@@ -852,7 +1019,14 @@ public:
         return result;
     }
     GIGE_UNSUPPORTED_CALLBACK(ir::LFStatus)
-    GIGE_UNSUPPORTED_CALLBACK(mel::BIT_Status)
+    ir::Return registerMetadataCallback(Callback<mel::BIT_Status> callback) override {
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        const auto self = shared_from_this();
+        const auto result = register_callback(bit_callback_, std::move(callback));
+        if (result == ir::Return::Success) prompt();
+        return result;
+    }
     GIGE_UNSUPPORTED_CALLBACK(ir::SubsystemStatusResp)
     GIGE_UNSUPPORTED_CALLBACK(mel::DiscreteStatus)
     GIGE_UNSUPPORTED_CALLBACK(mel::MFA_SecurityAuditRecord)
@@ -881,12 +1055,14 @@ private:
     void publish(const Publisher& publisher) {
         Callback<mel::MFA_Status> status_callback;
         Callback<mel::MFA_StatusDetailed> detailed_callback;
+        Callback<mel::BIT_Status> bit_callback;
         {
             std::lock_guard lock(callback_mutex_);
             status_callback = status_callback_;
             detailed_callback = detailed_callback_;
+            bit_callback = bit_callback_;
         }
-        const auto s = health_snapshot(*runtime_);
+        const auto s = health_snapshot(*runtime_, false, static_cast<bool>(bit_callback));
         const auto state = !s.initialized ? mel::MFA_State::Unknown :
             !s.configuration_valid || (s.active && s.failed) ? mel::MFA_State::Degraded :
             s.active ? mel::MFA_State::Operate : mel::MFA_State::Standby;
@@ -896,7 +1072,7 @@ private:
             s.active ? "Image acquisition is logically owned without an observed terminal failure" :
             "Idle with known valid configuration; explicit Image enable may be attempted (not a physical connection probe)";
         mel::MFA_Status status(state, description,
-            "Experimental Mono8 image-stream profile; no task scheduling, scanning, BIT, calibration or ModeCmd",
+            "Experimental Mono8 image-stream profile with provider-software BIT; no task scheduling, scanning, hardware BIT, calibration or ModeCmd",
             mel::StateTransitionStatus::NotTransitioning,
             mel::About("ams-gra-gige-mel-provider (software provider)", "", "0.1.0", "", ""), {});
         mel::MFA_StatusDetailed detailed;
@@ -917,6 +1093,12 @@ private:
         add("last_error_history", s.statistics.last_error);
         invoke(status_callback, status, &publisher.running);
         invoke(detailed_callback, detailed, &publisher.running);
+        if (s.bit) invoke(bit_callback, *s.bit, &publisher.running);
+        else if (s.bit_error) {
+            try { std::rethrow_exception(s.bit_error); }
+            catch (const std::exception& error) { runtime_->report(std::string("Health BIT publication preparation failed: ") + error.what()); }
+            catch (...) { runtime_->report("Health BIT publication preparation failed"); }
+        }
     }
     static void run(const std::shared_ptr<Publisher>& state, const std::weak_ptr<ChannelCore>& weak,
                     const std::shared_ptr<Runtime>& runtime) noexcept {
@@ -941,6 +1123,7 @@ private:
     }
     Callback<mel::MFA_Status> status_callback_;
     Callback<mel::MFA_StatusDetailed> detailed_callback_;
+    Callback<mel::BIT_Status> bit_callback_;
     std::shared_ptr<Publisher> publisher_; // writes under callback_mutex AND operations
     std::thread worker_; // operations; defensive destructor on its own worker
 };
