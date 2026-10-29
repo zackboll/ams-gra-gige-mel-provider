@@ -23,10 +23,34 @@ struct BitReports {
         CHECK(changed.wait_for(lock, 2s, [&] { return reports.size() >= count; }));
     }
     mel::BIT_Status last() { std::lock_guard lock(mutex); CHECK(!reports.empty()); return reports.back(); }
+    mel::BIT_Status at(std::size_t index) { std::lock_guard lock(mutex); CHECK(index < reports.size()); return reports[index]; }
     std::size_t count() { std::lock_guard lock(mutex); return reports.size(); }
     void quiet() {
         std::unique_lock lock(mutex); const auto before = reports.size();
         CHECK(!changed.wait_for(lock, 130ms, [&] { return reports.size() != before; }));
+    }
+    // Payload freshness, not delivery count: a later callback may carry a batch
+    // captured before a synchronous command. Valid only where history started
+    // empty and exactly one accepted Pass execution is expected.
+    static bool has_expected_completion(const mel::BIT_Status& report) {
+        return report.getCompletedBITs().size() == 1 &&
+               report.getCompletedBITs().front().getBitID() == expected_bit_id() &&
+               report.getCompletedBITs().front().getResult() == mel::BIT_Result::Pass;
+    }
+    std::optional<mel::BIT_Status> find_completed(std::chrono::milliseconds timeout) {
+        std::unique_lock lock(mutex);
+        std::optional<mel::BIT_Status> found;
+        (void)changed.wait_for(lock, timeout, [&] {
+            const auto match = std::find_if(reports.rbegin(), reports.rend(), has_expected_completion);
+            if (match != reports.rend()) found = *match; // Selected while synchronized.
+            return found.has_value();
+        });
+        return found;
+    }
+    mel::BIT_Status wait_completed() {
+        auto found = find_completed(2s);
+        CHECK(found);
+        return *found;
     }
 };
 
@@ -218,12 +242,25 @@ void bit_acquisition() {
     }
 }
 
-void bit_no_io() {
+struct ControlledUnwind {};
+
+// The scripted first stream blocks receive after one delivered frame. The gate
+// must be explicitly opened: request_stop only notifies, it never satisfies it.
+void gated_no_io_scenario(const std::shared_ptr<ReceivePlan>& plan, bool unwind_early) {
     auto adapter = std::make_shared<CountingBackend>();
-    auto plan = std::make_shared<ReceivePlan>(); plan->frames_before_error = 1; plan->timeouts_before_frame = 3;
     adapter->inner = std::make_shared<TransformBackend>(Transform::none,plan);
     BitReports reports, health_reports;
     Fixture f(true,adapter);
+    std::shared_ptr<ir::HealthStatusChannel> health;
+    std::future<ir::Return> disabled;
+    // Declared after everything it references. Release the receive gate before
+    // waiting on stop or letting Fixture destruction join the Image worker, and
+    // drain Health while its collector is alive. Never throws or waits on expiry.
+    TestCleanup cleanup{[&] {
+        plan->open();
+        if (disabled.valid()) disabled.wait();
+        if (health) (void)health->disable();
+    }};
     f.add_buffer();
     CHECK(f.image->enable() == ir::Return::Success);
     f.listener->wait_for(1); plan->wait_for(&ReceivePlan::entered); // Worker deterministically blocked in receive.
@@ -233,17 +270,47 @@ void bit_no_io() {
     CHECK(f.c2->registerMetadataCallback(reports.callback()) == ir::Return::Success);
     CHECK(*response(f.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
     check_completion(reports.last()); CHECK(reports.last().getFaults().empty());
-    auto health = attach_health(f);
+    health = attach_health(f);
     CHECK(health->registerMetadataCallback(health_reports.callback()) == ir::Return::Success);
     CHECK(health->enable() == ir::Return::Success); health_reports.wait(3);
+    if (unwind_early) throw ControlledUnwind{}; // Receive gated, Health enabled.
     CHECK(health->disable() == ir::Return::Success);
+    // Complete the zero-I/O measurement before shutdown legitimately calls the backend.
     CHECK(adapter->calls->load() == calls && plan->last_generation == generation);
     CHECK(copy_image(frame) == bytes && f.image->enable() == ir::Return::Success);
-    CHECK(f.image->disable() == ir::Return::Success);
+    const auto failures = gige_mel::provider_statistics(f.manager).stream_failures;
+    // Observed cancellation precedes gate release, so the scripted terminal
+    // result is classified as requested shutdown rather than a stream fault.
+    disabled = std::async(std::launch::async, [&] { return f.image->disable(); });
+    plan->wait_for(&ReceivePlan::stop_requested);
+    plan->open();
+    CHECK(disabled.wait_for(2s) == std::future_status::ready);
+    CHECK(disabled.get() == ir::Return::Success);
+    plan->wait_for_exit(); // Worker exited; also rejects gate_expired.
+    { std::lock_guard lock(plan->mutex); CHECK(plan->proceed && !plan->gate_expired); }
+    CHECK(gige_mel::provider_statistics(f.manager).stream_failures == failures);
+    CHECK(copy_image(frame) == bytes);
     CHECK(f.image->enable() == ir::Return::Fail); // BIT did not release the delivered image.
     CHECK(frame.buffer->release() == ir::Return::Success);
     CHECK(f.image->enable() == ir::Return::Success);
     CHECK(f.image->disable() == ir::Return::Success);
+}
+
+std::shared_ptr<ReceivePlan> gated_plan() {
+    auto plan = std::make_shared<ReceivePlan>(); plan->frames_before_error = 1; plan->timeouts_before_frame = 3;
+    return plan;
+}
+
+void bit_no_io() { gated_no_io_scenario(gated_plan(), false); }
+
+void bit_no_io_unwind() {
+    auto plan = gated_plan(); // Outlives the scenario, its worker and cleanup.
+    bool unwound = false;
+    try { gated_no_io_scenario(plan, true); } catch (const ControlledUnwind&) { unwound = true; }
+    CHECK(unwound);
+    plan->wait_for_exit(); // Cleanup released the gate; the worker drained before expiry.
+    std::lock_guard lock(plan->mutex);
+    CHECK(plan->entered && plan->proceed && !plan->gate_expired);
 }
 
 void bit_callbacks() {
@@ -354,10 +421,12 @@ void bit_health() {
         CHECK(health->enable() == ir::Return::Success); reports.wait(1);
         CHECK(reports.last().getCompletedBITs().empty());
         CHECK(*response(f.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
-        const auto count = reports.count(); reports.wait(count+1); check_completion(reports.last());
+        check_completion(reports.wait_completed()); // Fresh payload, not merely a later callback.
         CHECK(health->disable() == ir::Return::Success); reports.quiet();
         for(auto thread : reports.threads) CHECK(thread != std::this_thread::get_id());
-        CHECK(health->enable() == ir::Return::Success); reports.wait(count+2);
+        const auto stopped_count = reports.count(); // Baseline after disable has quiesced.
+        CHECK(health->enable() == ir::Return::Success); reports.wait(stopped_count+1);
+        check_completion(reports.at(stopped_count)); // First report of the new enable interval.
         CHECK(health->disable() == ir::Return::Success);
     }
     // Late BIT-only registration prompts the existing worker, not caller dispatch.
@@ -375,6 +444,65 @@ void bit_health() {
     CHECK(health->registerMetadataCallback(reports.callback()) == ir::Return::Success);
     CHECK(health->enable() == ir::Return::Success); reports.wait(count+1);
     CHECK(health->disable() == ir::Return::Success);
+}
+
+// Controlled legal ordering: a Health batch captured before a synchronous C2
+// command is delivered after the command returns. Its BIT callback is held after
+// recording/notify and outside the collector mutex, so no newer batch can hide it.
+void bit_health_stale_batch() {
+    auto status_gate = std::make_shared<WatchdogGate>();
+    auto bit_gate = std::make_shared<WatchdogGate>();
+    BitReports reports; // Outlives Fixture and every Health callback.
+    std::mutex mutex;
+    std::vector<char> order;
+    std::size_t statuses = 0;
+    Fixture f;
+    auto health = attach_health(f);
+    TestCleanup cleanup{[&] { status_gate->open(); bit_gate->open(); (void)health->disable(); }};
+    CHECK(health->registerMetadataCallback(HealthStatusCallback{[&](auto&,auto*) {
+        bool second;
+        { std::lock_guard lock(mutex); order.push_back('S'); second = ++statuses == 2; }
+        if(second) status_gate->enter_and_wait(); // Batch two already captured.
+    }}) == ir::Return::Success);
+    CHECK(health->registerMetadataCallback(HealthDetailedCallback{[&](auto&,auto*) {
+        std::lock_guard lock(mutex); order.push_back('D');
+    }}) == ir::Return::Success);
+    CHECK(health->registerMetadataCallback(BitCallback{[&](auto& c,auto* value) {
+        { std::lock_guard lock(mutex); order.push_back('B'); }
+        reports.callback()(c,value); // Recorded and notified first.
+        if(reports.count() == 2) bit_gate->enter_and_wait();
+    }}) == ir::Return::Success);
+    CHECK(health->enable() == ir::Return::Success);
+    reports.wait(1); CHECK(reports.at(0).getCompletedBITs().empty());
+    status_gate->wait_for_entry();
+    CHECK(*response(f.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
+    const auto count = reports.count(); CHECK(count == 1);
+    status_gate->open();
+    bit_gate->wait_for_entry();
+    // Old observation: count+1 is satisfied while the delivered payload predates
+    // the accepted command. check_completion(reports.last()) would fail here.
+    reports.wait(count+1);
+    CHECK(reports.count() == count+1);
+    const auto stale = reports.last();
+    CHECK(stale.getCompletedBITs().empty());
+    CHECK(!BitReports::has_expected_completion(stale));
+    CHECK(!reports.find_completed(0ms)); // Corrected predicate rejects it.
+    bit_gate->open();
+    check_completion(reports.wait_completed()); // Later fresh batch.
+    CHECK(health->disable() == ir::Return::Success); reports.quiet();
+    status_gate->check(); bit_gate->check();
+    // Re-enable: enough stopped-state reports already satisfy the old count+2.
+    const auto stopped = reports.count();
+    CHECK(stopped >= count+2);
+    CHECK(health->enable() == ir::Return::Success);
+    reports.wait(stopped+1); // Requires a report from this enable interval.
+    check_completion(reports.at(stopped));
+    CHECK(health->disable() == ir::Return::Success);
+    // The gated batches were complete and ordered; later disables may legally
+    // suppress a suffix, so only the controlled prefix is asserted.
+    std::lock_guard lock(mutex);
+    CHECK(order.size() >= 6);
+    for(std::size_t i=0;i<6;++i) CHECK(order[i] == "SDB"[i%3]);
 }
 
 void bit_health_owners() {
