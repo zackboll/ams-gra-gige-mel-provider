@@ -4,6 +4,7 @@
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
+#include <irmel/library/health-status/HealthStatusChannel.h>
 #include <irmel/library/irmel-types/FrameHeader.h>
 #include <irmel/library/irmel-types/ImageListener.h>
 
@@ -91,10 +92,12 @@ struct ConfigurationOutcome {
 
 class ChannelCore;
 class ControlImpl;
+struct StreamState;
 
 struct Runtime {
     ProviderSettings settings;
     std::shared_ptr<backend::ICameraBackend> backend;
+    std::string backend_id; // immutable, acquired before any publisher exists
     std::shared_ptr<backend::ICameraDevice> device;
     std::shared_ptr<const int> affinity{std::make_shared<const int>(0)};
     // Mutations serialize here. A worker never takes this lock. Callbacks run
@@ -106,6 +109,7 @@ struct Runtime {
     bool initialized{false};
     bool configuration_valid{false};
     bool image_active{false};
+    std::weak_ptr<StreamState> acquisition; // guarded by state_mutex
     std::uint64_t configuration_generation{1};
     std::atomic<std::weak_ptr<ControlImpl>> control;
     std::weak_ptr<ChannelCore> image_channel; // guarded by operations
@@ -159,18 +163,24 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     const auto& c = runtime.configuration;
     ir::ChannelCapability cap;
     cap.setChanID(id);
-    cap.setWidth(c.width);
-    cap.setHeight(c.height);
-    cap.setBitDepth(8); // significant bits; FrameHeader separately reports storage bits
-    cap.setRowPitch(c.width);
-    cap.setBufferSize(c.width * c.height);
-    cap.setImageSize(c.width * c.height);
-    cap.setNumberOfBands(1);
-    cap.setFormat(ir::PixelFormat::Mono);
+    if (type != ir::ChannelType::HealthAndStatus) {
+        cap.setWidth(c.width);
+        cap.setHeight(c.height);
+        cap.setBitDepth(8); // significant bits; FrameHeader separately reports storage bits
+        cap.setRowPitch(c.width);
+        cap.setBufferSize(c.width * c.height);
+        cap.setImageSize(c.width * c.height);
+        cap.setNumberOfBands(1);
+        cap.setFormat(ir::PixelFormat::Mono);
+    }
     cap.setChannelTypes({type});
     std::set<ir::ChannelMetadataCapabilityType> metadata{ir::ChannelMetadataCapabilityType::ChannelCommsTestRep};
     if (type == ir::ChannelType::IRSTImage) metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
     if (type == ir::ChannelType::CommandAndControl) metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
+    if (type == ir::ChannelType::HealthAndStatus) {
+        metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatus);
+        metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatusDetailed);
+    }
     cap.setChannelMetadataCapabilities(metadata);
     if (config) {
         cap.setPlatform(config->getPlatform());
@@ -303,7 +313,9 @@ public:
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
-        if (is_detached() || enabled_) return ir::Return::Fail;
+        if (is_detached()) return ir::Return::Fail;
+        if (type() == ir::ChannelType::HealthAndStatus) return ir::Return::NotSupported;
+        if (enabled_) return ir::Return::Fail;
         if (type() != ir::ChannelType::IRSTImage) return ir::Return::NotSupported;
         auto host = std::dynamic_pointer_cast<HostBuffer>(buffer);
         if (!host) return ir::Return::BadPointer;
@@ -327,7 +339,9 @@ public:
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
-        if (is_detached() || enabled_) return ir::Return::Fail;
+        if (is_detached()) return ir::Return::Fail;
+        if (type() == ir::ChannelType::HealthAndStatus) return ir::Return::NotSupported;
+        if (enabled_) return ir::Return::Fail;
         const auto found = std::find(buffers_.begin(), buffers_.end(), buffer);
         if (found == buffers_.end()) return ir::Return::BadPointer;
         if ((*found)->outstanding()) return ir::Return::Fail;
@@ -369,6 +383,7 @@ public:
             {
                 std::lock_guard lock(runtime_->state_mutex);
                 runtime_->image_active = true;
+                runtime_->acquisition = state;
             }
             stream_state_ = state;
             enabled_ = true;
@@ -427,18 +442,20 @@ protected:
         slot = std::move(callback);
         return ir::Return::Success;
     }
-    template <class T> void invoke(const Callback<T>& callback, const T& message) {
+    template <class T> void invoke(const Callback<T>& callback, const T& message,
+                                  const std::atomic<bool>* admission = nullptr) {
         if (!callback) return;
         {
             std::lock_guard lock(callback_mutex_);
-            if (is_detached()) return;
+            if (is_detached() || (admission && !admission->load())) return;
             ++active_metadata_callbacks_;
         }
         CallbackGuard guard(runtime_.get());
         try { callback(*this, &message); }
         catch (...) {
             ++runtime_->callback_failures;
-            try { runtime_->report("metadata callback threw; response remains available through its future"); } catch (...) {}
+            try { runtime_->report(admission ? "Health metadata callback threw; periodic reporting continues" :
+                "metadata callback threw; response remains available through its future"); } catch (...) {}
         }
         { std::lock_guard lock(callback_mutex_); --active_metadata_callbacks_; }
         callback_cv_.notify_all();
@@ -549,12 +566,15 @@ protected:
 
     virtual void on_camera_reply(const ir::CameraCommandResp&) {}
     virtual void on_command_status(const ir::CommandStatus&) {}
+    // Called by disable AND internal detach, including Control destruction.
+    virtual void stop_auxiliary_locked() {}
     std::shared_ptr<Runtime> runtime_;
     ir::Config config_;
     std::mutex callback_mutex_;
 
 private:
     void stop_locked() {
+        stop_auxiliary_locked();
         const bool owned_stream = static_cast<bool>(stream_state_);
         if (stream_state_) {
             stream_state_->stopping = true;
@@ -569,6 +589,7 @@ private:
         if (owned_stream) {
             std::lock_guard lock(runtime_->state_mutex);
             runtime_->image_active = false;
+            runtime_->acquisition.reset();
         }
         enabled_ = false;
     }
@@ -758,6 +779,159 @@ private:
     }
     Callback<ir::CommandStatus> status_callback_;
 };
+// One core-state capture supplies both reports. Counters remain independently
+// atomic samples; no per-frame transaction lock is imposed by Health.
+struct HealthSnapshot {
+    bool initialized, configuration_valid, active, failed;
+    std::uint64_t generation;
+    ProviderStatistics statistics;
+};
+
+HealthSnapshot health_snapshot(const Runtime& r) {
+    std::lock_guard lock(r.state_mutex);
+    const auto acquisition = r.acquisition.lock();
+    return {r.initialized, r.configuration_valid, r.image_active,
+        acquisition && acquisition->failed.load(), r.configuration_generation,
+        {r.delivered.load(), r.dropped.load(), r.rejected.load(),
+         r.callback_failures.load(), r.stream_failures.load(), r.last_error}};
+}
+
+class HealthChannelImpl final : public ChannelCore, public ir::HealthStatusChannel {
+    struct Publisher {
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::atomic<bool> running{true};
+        bool prompted{true};
+    };
+public:
+    using ChannelCore::ChannelCore;
+    using ChannelCore::send;
+    using ChannelCore::registerMetadataCallback;
+    ~HealthChannelImpl() override { stop_auxiliary_locked(); }
+
+    ir::Return enable() override {
+        if (in_provider_callback()) return ir::Return::Fail;
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        std::lock_guard operation(runtime_->operations);
+        if (is_detached()) return ir::Return::Fail;
+        if (publisher_ && publisher_->running) return ir::Return::Success;
+        try {
+            auto state = std::make_shared<Publisher>();
+            { std::lock_guard lock(callback_mutex_); publisher_ = state; }
+            worker_ = std::thread([state, weak = weak_from_this(), runtime = runtime_] {
+                run(state, weak, runtime);
+            });
+            return ir::Return::Success;
+        } catch (const std::exception& error) {
+            stop_auxiliary_locked();
+            runtime_->report(error.what());
+            return ir::Return::Fail;
+        }
+    }
+    ir::Return registerMetadataCallback(Callback<mel::MFA_Status> callback) override {
+        const auto result = register_callback(status_callback_, std::move(callback));
+        if (result == ir::Return::Success) prompt();
+        return result;
+    }
+    ir::Return registerMetadataCallback(Callback<mel::MFA_StatusDetailed> callback) override {
+        const auto result = register_callback(detailed_callback_, std::move(callback));
+        if (result == ir::Return::Success) prompt();
+        return result;
+    }
+    GIGE_UNSUPPORTED_CALLBACK(ir::LFStatus)
+    GIGE_UNSUPPORTED_CALLBACK(mel::BIT_Status)
+    GIGE_UNSUPPORTED_CALLBACK(ir::SubsystemStatusResp)
+    GIGE_UNSUPPORTED_CALLBACK(mel::DiscreteStatus)
+    GIGE_UNSUPPORTED_CALLBACK(mel::MFA_SecurityAuditRecord)
+    GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)
+
+private:
+    void prompt() {
+        std::shared_ptr<Publisher> state;
+        { std::lock_guard lock(callback_mutex_); state = publisher_; }
+        if (!state) return;
+        { std::lock_guard lock(state->mutex); state->prompted = true; }
+        state->changed.notify_all();
+    }
+    void stop_auxiliary_locked() override {
+        std::shared_ptr<Publisher> state;
+        { std::lock_guard lock(callback_mutex_); state = publisher_; }
+        if (state) {
+            { std::lock_guard lock(state->mutex); state->running = false; }
+            state->changed.notify_all();
+        }
+        if (worker_.joinable()) {
+            if (worker_.get_id() == std::this_thread::get_id()) worker_.detach();
+            else worker_.join();
+        }
+    }
+    void publish(const Publisher& publisher) {
+        Callback<mel::MFA_Status> status_callback;
+        Callback<mel::MFA_StatusDetailed> detailed_callback;
+        {
+            std::lock_guard lock(callback_mutex_);
+            status_callback = status_callback_;
+            detailed_callback = detailed_callback_;
+        }
+        const auto s = health_snapshot(*runtime_);
+        const auto state = !s.initialized ? mel::MFA_State::Unknown :
+            !s.configuration_valid || (s.active && s.failed) ? mel::MFA_State::Degraded :
+            s.active ? mel::MFA_State::Operate : mel::MFA_State::Standby;
+        const auto description = !s.initialized ? "Provider not initialized" :
+            !s.configuration_valid ? "Actual camera configuration is not known valid" :
+            s.active && s.failed ? "Owned Image acquisition has observed a terminal failure; explicitly disable before recovery" :
+            s.active ? "Image acquisition is logically owned without an observed terminal failure" :
+            "Idle with known valid configuration; explicit Image enable may be attempted (not a physical connection probe)";
+        mel::MFA_Status status(state, description,
+            "Experimental Mono8 image-stream profile; no task scheduling, scanning, BIT, calibration or ModeCmd",
+            mel::StateTransitionStatus::NotTransitioning,
+            mel::About("ams-gra-gige-mel-provider (software provider)", "", "0.1.0", "", ""), {});
+        mel::MFA_StatusDetailed detailed;
+        const auto add = [&](const char* name, std::string value) {
+            detailed.addStatus(mel::NameValuePair(std::string("gige_mel.") + name, std::move(value)));
+        };
+        add("health_schema", "1");
+        add("backend_id", runtime_->backend_id);
+        add("device_id", runtime_->settings.device_id);
+        add("configuration_valid", s.configuration_valid ? "true" : "false");
+        add("configuration_generation", std::to_string(s.generation));
+        add("acquisition_state", !s.active ? "idle" : s.failed ? "faulted" : "running");
+        add("delivered_frames", std::to_string(s.statistics.delivered_frames));
+        add("dropped_no_buffer", std::to_string(s.statistics.dropped_no_buffer));
+        add("rejected_frames", std::to_string(s.statistics.rejected_frames));
+        add("callback_failures", std::to_string(s.statistics.callback_failures));
+        add("stream_failures", std::to_string(s.statistics.stream_failures));
+        add("last_error_history", s.statistics.last_error);
+        invoke(status_callback, status, &publisher.running);
+        invoke(detailed_callback, detailed, &publisher.running);
+    }
+    static void run(const std::shared_ptr<Publisher>& state, const std::weak_ptr<ChannelCore>& weak,
+                    const std::shared_ptr<Runtime>& runtime) noexcept {
+        while (state->running) {
+            {
+                std::lock_guard lock(state->mutex);
+                state->prompted = false;
+            }
+            try {
+                // Pins are scoped to preparation/dispatch, NEVER the wait. Their
+                // destruction may itself tear down Control on this worker.
+                const auto control_pin = runtime->control.load().lock();
+                const auto channel = std::dynamic_pointer_cast<HealthChannelImpl>(weak.lock());
+                if (!control_pin || !channel || channel->is_detached()) break;
+                channel->publish(*state);
+            } catch (...) {
+                try { runtime->report("Health publication preparation failed"); } catch (...) {}
+            }
+            std::unique_lock lock(state->mutex);
+            state->changed.wait_for(lock, 100ms, [&] { return !state->running || state->prompted; });
+        }
+    }
+    Callback<mel::MFA_Status> status_callback_;
+    Callback<mel::MFA_StatusDetailed> detailed_callback_;
+    std::shared_ptr<Publisher> publisher_; // writes under callback_mutex AND operations
+    std::thread worker_; // operations; defensive destructor on its own worker
+};
 #undef GIGE_UNSUPPORTED_SEND
 #undef GIGE_UNSUPPORTED_CALLBACK
 
@@ -795,7 +969,7 @@ public:
                 }
             }
             if (capabilities_.empty()) {
-                mel::UCI_ID image_id, c2_id;
+                mel::UCI_ID image_id, c2_id, health_id;
                 std::array<std::uint8_t, mel::UUID_SIZE> image_uuid{}, c2_uuid{};
                 image_uuid.back() = 1;
                 c2_uuid.back() = 2;
@@ -803,8 +977,13 @@ public:
                 c2_id.setUUID(c2_uuid);
                 image_id.setDescriptiveLabel(runtime_->settings.instance + "/image");
                 c2_id.setDescriptiveLabel(runtime_->settings.instance + "/c2");
+                auto health_uuid = c2_uuid;
+                health_uuid.back() = 3;
+                health_id.setUUID(health_uuid);
+                health_id.setDescriptiveLabel(runtime_->settings.instance + "/health");
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::IRSTImage, image_id));
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::CommandAndControl, c2_id));
+                capabilities_.push_back(capability(*runtime_, ir::ChannelType::HealthAndStatus, health_id));
             }
             return ir::Return::Success;
         } catch (const std::exception& error) {
@@ -822,7 +1001,8 @@ public:
         std::lock_guard operation(runtime_->operations);
         if (!runtime_->initialized) return {};
         const auto type = config.getChannelType();
-        if (type != ir::ChannelType::IRSTImage && type != ir::ChannelType::CommandAndControl) return {};
+        if (type != ir::ChannelType::IRSTImage && type != ir::ChannelType::CommandAndControl &&
+            type != ir::ChannelType::HealthAndStatus) return {};
         const auto found = std::find_if(capabilities_.begin(), capabilities_.end(), [&](const auto& cap) {
             return cap.getChanID().getUUID() == config.getChanID().getUUID() && cap.getChannelTypes().front() == type;
         });
@@ -831,7 +1011,8 @@ public:
         if (type == ir::ChannelType::IRSTImage && !config.getImgLstnr()) return {};
         std::shared_ptr<ChannelCore> channel;
         if (type == ir::ChannelType::IRSTImage) channel = std::make_shared<ImageChannelImpl>(runtime_, config);
-        else channel = std::make_shared<C2ChannelImpl>(runtime_, config);
+        else if (type == ir::ChannelType::CommandAndControl) channel = std::make_shared<C2ChannelImpl>(runtime_, config);
+        else channel = std::make_shared<HealthChannelImpl>(runtime_, config);
         channels_.push_back(channel);
         if (type == ir::ChannelType::IRSTImage) runtime_->image_channel = channel;
         return channel;
@@ -871,6 +1052,7 @@ std::shared_ptr<API_Manager> make_api_manager(ProviderSettings settings, std::sh
         settings.vertical_radians_per_pixel <= 0 || settings.timestamp_domain == backend::ClockDomain::unspecified) return {};
     auto runtime = std::make_shared<Runtime>();
     runtime->settings = std::move(settings);
+    runtime->backend_id = backend->id();
     runtime->backend = std::move(backend);
     return std::make_shared<Manager>(std::move(runtime));
 }

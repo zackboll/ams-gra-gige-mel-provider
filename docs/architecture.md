@@ -160,6 +160,26 @@ The synthetic optical model assigns an angular pixel pitch of 0.001 radians in e
 
 ## Errors and capabilities
 
+### Partial Health snapshots
+
+Health shares the initialized manager/Control lifecycle but has no image
+storage. One enabled Health attachment owns an independent, interruptible
+100 ms publisher. A state-mutex-protected weak acquisition link exposes the
+existing atomic StreamState failure flag without reading ChannelCore's
+operation-owned stream pointer. Sampling never takes the operation mutex or
+calls backend/device/stream methods. Both reports use the same core snapshot;
+atomic counters are independently sampled, not made globally transactional.
+
+Periodic callbacks reuse metadata admission and the thread-local callback guard.
+No internal locks cross consumer entry. Disable closes periodic admission and
+joins; internal detach (including Control destruction) invokes the same worker
+cleanup before metadata draining. Worker state is independent, owner links are
+weak, and strong Control/channel pins exist only during preparation/dispatch,
+never the wait. Last-owner destruction on the worker uses self-thread-safe
+teardown. Image ownership and retained bytes are unaffected by Health shutdown.
+See [Health status](health-status.md) for exact state mapping, vocabulary,
+exception/reentry policy, observation limits and public consumer demonstration.
+
 The internal backend may distinguish timeout, disconnected, invalid state, unsupported, resource exhaustion, and I/O failures. MEL translation must use actual upstream values. Common MEL `ErrorCode` has no dedicated timeout enumerator; preserve the reason in the error description and choose an existing code by documented policy. IR `Return` provides `Success`, `BadPointer`, `Fail`, `NotSupported`, and `NotImplemented`; it is not the same error type as the future's `ErrorOr` result.
 
 A channel reports only capabilities that the selected camera, selected backend, and implemented MEL profile jointly support. Presence of a GenApi feature name does not prove it is currently available, writable, or implemented as a MEL operation. Never advertise a callback solely because a pure virtual method was filled in with a stub. The selected camera can offer more than another backend's camera; do not reduce all adapters to the intersection of all possible SDKs.

@@ -2,6 +2,7 @@
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
+#include <irmel/library/health-status/HealthStatusChannel.h>
 #include <irmel/library/irmel-types/FrameHeader.h>
 #include <irmel/library/irmel-types/ImageListener.h>
 
@@ -14,6 +15,7 @@
 #include <future>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -290,7 +292,7 @@ void factory_initialization_and_channel_identity() {
     CHECK(fixture.control->init("unknown-profile") == ir::Return::NotSupported);
     CHECK(fixture.control->init("mono8-bootstrap") == ir::Return::Success);
     CHECK(fixture.control->init() == ir::Return::Success);
-    CHECK(fixture.control->getCapabilities().size() == 2);
+    CHECK(fixture.control->getCapabilities().size() == 3);
     auto selected = fixture.config(ir::ChannelType::IRSTImage);
     auto no_listener = selected;
     no_listener.setImgLstnr({});
@@ -940,6 +942,7 @@ struct ConfigurationProbe {
     mutable unsigned reads{0};
     std::vector<backend::CameraConfiguration> requests;
     std::optional<backend::Error> apply_error;
+    std::atomic<bool> fail_readback{false}, invalid_readback{false};
 };
 
 class TransformDevice final : public backend::ICameraDevice {
@@ -950,10 +953,11 @@ public:
     backend::CameraCapabilities capabilities() const override { return inner_->capabilities(); }
     backend::Result<backend::CameraConfiguration> configuration() const override {
         if (probe_) ++probe_->reads;
-        if (readback_failed_.load()) {
+        if (readback_failed_.load() || (probe_ && probe_->fail_readback)) {
             return backend::Error{backend::ErrorCode::io_error, "Injected configuration readback failure after apply"};
         }
         auto actual = inner_->configuration();
+        if (actual && probe_ && probe_->invalid_readback) actual.value().width = 0;
         if (actual && mutated_ && transform_ == Transform::invalid_readback) actual.value().width = 0;
         return actual;
     }
@@ -1580,10 +1584,21 @@ void status_suppression_and_lifetime_pins() {
     expect_error(pinned.image->send(camera_command()), mel::ErrorCode::InvalidState);
 }
 
+#include "provider_health_tests.inc"
+
 } // namespace
 
 int main() {
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"Health discovery and supported surface", health_surface},
+        {"Health periodic lifecycle and report ordering", health_lifecycle},
+        {"Health observed faults and explicit recovery", health_fault_recovery},
+        {"Health configuration validity and history", health_configuration},
+        {"Health timeouts drops and frame rejection", health_nonterminal},
+        {"Health independent sampling without device I/O", health_no_io},
+        {"Health disable and detach drain gates", health_shutdown},
+        {"Health reentry and contained exceptions", health_reentry},
+        {"Health final owner release and dual-worker teardown", health_owner_lifetime},
         {"ConfigSet schema and rejection without apply", config_schema_and_no_apply_on_rejection},
         {"ConfigSet shared transaction and status ordering", config_transaction_status_and_ordering},
         {"configuration failures, readback and reason mapping", config_failure_readback_and_error_mapping},

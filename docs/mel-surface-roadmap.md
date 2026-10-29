@@ -137,20 +137,20 @@ The `LOS3D_KinematicsType` registration takes its `std::function` by `const&`; m
 
 ## P1: HealthStatusChannel
 
-[HealthStatusChannel][health] is annotated required and has no extra `send` overloads. It adds eight callbacks to the common Channel interface. The bootstrap does not attach or advertise this channel.
+[HealthStatusChannel][health] is annotated required and has no extra `send` overloads. It adds eight callbacks to the common Channel interface. The provider now advertises and attaches a **partial** Health channel: common communications plus MFA_Status and MFA_StatusDetailed, with zero image geometry. The other six Health registrations remain unsupported and unadvertised. This does not close the required Health conformance gaps below. See [the exact implemented contract](health-status.md) for 100 ms current-state snapshots, state mapping, diagnostic vocabulary, lifecycle and limitations.
 
 | Callback payload | Upstream annotation | Priority and intended source |
 | --- | --- | --- |
 | `LFStatus` | Required if local functions | P4 if supported local functions exist |
-| `mel::MFA_Status` | Required | P1: shared runtime/device operational state |
+| `mel::MFA_Status` | Required | Partial: sampled observed provider readiness/acquisition state; no hardware health claim |
 | `mel::BIT_Status` | Required | P1: actual BIT results |
 | `SubsystemStatusResp` | Required | P1: versioned subsystem/device/transport inventory and status |
 | `mel::DiscreteStatus` | Required | P1: define meaningful supported discrete state |
 | `mel::MFA_SecurityAuditRecord` | Required | P1: define which actual provider events generate records |
-| `mel::MFA_StatusDetailed` | Required | P1: structured runtime/transport fault detail |
+| `mel::MFA_StatusDetailed` | Required | Partial: schema-1 provider diagnostics; no transport/hardware metrics |
 | `NUC_TempData` | Optional | P4 if the selected sensor provides it |
 
-A temperature sample is not a complete Health implementation. Define initial publication, change publication, ordering, stale/disconnected state, and the relationship between current status and historical faults.
+A temperature sample is not a complete Health implementation. The implemented increment defines initial/late periodic publication, ordering, shutdown, and current acquisition failure versus historical diagnostics. It does not provide an event log, physical connection probing, hardware health, BIT, calibration or full Health conformance. Remaining table entries describe broader upstream work, not capability claims.
 
 ## P1 profile decision / P5 implementation: SchedulingChannel
 

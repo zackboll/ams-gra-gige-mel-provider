@@ -1,5 +1,6 @@
 #include <irmel/library/irmel-types/Control.h>
 #include <irmel/library/c2/C2Channel.h>
+#include "../public_health_demo.hpp"
 
 #include <iostream>
 
@@ -7,11 +8,13 @@ int main() {
     auto manager = getAPI_Manager("synthetic");
     auto control = ams::iface::irmel::getControl("synthetic", manager);
     if (!manager || !control || control->init() != ams::iface::irmel::Return::Success ||
-        control->getCapabilities().size() != 2) {
+        control->getCapabilities().size() != 3) {
         std::cerr << "Installed package did not expose the expected provider\n";
         return 1;
     }
     namespace ir = ams::iface::irmel;
+    try { demonstrate_health(control); }
+    catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 6; }
     ir::Config config;
     for (const auto& capability : control->getCapabilities()) {
         if (capability.getChannelTypes().front() != ir::ChannelType::CommandAndControl) continue;
@@ -34,5 +37,5 @@ int main() {
     auto result = c2->send(command).get();
     if (!result || *result.get() != ir::Return::Success || !accepted || statuses != 1) return 4;
     if (control->detachChannel(c2) != ir::Return::Success) return 5;
-    std::cout << "PASS: installed package, factories, ConfigSet and correlated CommandStatus (no JSON headers)\n";
+    std::cout << "PASS: installed package, factories, Health snapshots, ConfigSet and correlated CommandStatus (published MEL only)\n";
 }

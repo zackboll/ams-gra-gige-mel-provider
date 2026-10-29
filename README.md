@@ -48,11 +48,16 @@ ctest --test-dir build/make --output-on-failure
 
 ## What is implemented
 
+[Partial Health reporting](docs/health-status.md) exposes current provider
+readiness/acquisition state and cumulative diagnostics through the pinned public
+MEL API. Reports are best-effort 100 ms snapshots, not an event log or physical
+camera-health certificate. Health can stop independently of Image acquisition.
+
 | Area | Bootstrap behavior |
 | --- | --- |
 | Dynamic factories | Exact `getAPI_Manager`, `getControl`, and `getBuffer` symbols |
 | Provider initialization | Explicit `synthetic` instance, stable `synthetic-0` device, idempotent initialization |
-| Discovery and attachment | One Image and one C2 channel per manager; unsupported channel types and incorrect IDs rejected |
+| Discovery and attachment | One Image, one C2 and one partial Health channel per manager; unsupported channel types and incorrect IDs rejected |
 | Common Channel | Keep-alive, correlated communications replies and callback, enable/disable, registration lifecycle |
 | Buffers | Consumer-owned Host memory, affinity and overlap checks, explicit release, bounded registration count |
 | Images | Mono8, one band, tightly packed rows; padding in a backend frame is copied out |
@@ -60,7 +65,7 @@ ctest --test-dir build/make --output-on-failure
 | Metadata | Communications replies, Image camera-command replies, and correlated C2 configuration CommandStatus |
 | Backend seam | SDK-independent discovery/device/stream interfaces and move-only retained frame leases |
 | Synthetic backend | Deterministic images, bounded native pool, cancellation, validated readback, generation and time metadata |
-| Diagnostics | Project C++ counters and last error; no invented MEL Instrumentation fields |
+| Diagnostics | Partial Health MFA_Status/MFA_StatusDetailed periodic current snapshots plus project C++ counters and last error; no invented MEL Instrumentation fields |
 | Build and distribution | Offline upstream verification, CMake presets, shared library, install/export package, example and tests |
 
 Read [the implementation profile](docs/implementation-profile.md) before
