@@ -35,6 +35,7 @@ endif()
 # together with the code and covers the unmodified, minimal header closure.
 add_custom_target(verify_upstream ALL
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMENT "Verify pinned MEL dependency bytes")
 
@@ -57,7 +58,8 @@ target_include_directories(gige_mel_backend PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(gige_mel_backend PUBLIC Threads::Threads PRIVATE $<BUILD_INTERFACE:gige_mel_build_options>)
 
-add_library(gige_mel_provider SHARED src/provider.cpp src/factories.cpp)
+add_library(gige_mel_provider SHARED src/provider.cpp src/factories.cpp src/config_parser.cpp)
+target_include_directories(gige_mel_provider SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
 add_library(gige_mel::provider ALIAS gige_mel_provider)
 set_target_properties(gige_mel_provider PROPERTIES
   OUTPUT_NAME gige_mel_provider VERSION ${PROJECT_VERSION} SOVERSION 0 EXPORT_NAME provider)
@@ -84,12 +86,17 @@ if(BUILD_TESTING)
   target_link_libraries(provider_tests PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads)
   add_test(NAME provider_contract COMMAND provider_tests)
 
+  add_executable(configuration_probe tests/configuration_probe.cpp)
+  target_link_libraries(configuration_probe PRIVATE gige_mel_provider gige_mel_build_options)
+  add_test(NAME configuration_public_api COMMAND configuration_probe)
+
   add_executable(loader_tests tests/loader_tests.cpp)
   target_link_libraries(loader_tests PRIVATE gige_mel_headers gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
   add_dependencies(loader_tests gige_mel_provider)
   add_test(NAME native_loader COMMAND loader_tests $<TARGET_FILE:gige_mel_provider>)
   add_test(NAME upstream_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify)
-  set_tests_properties(backend_contract provider_contract native_loader PROPERTIES TIMEOUT 30)
+  add_test(NAME json_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py)
+  set_tests_properties(backend_contract provider_contract configuration_public_api native_loader PROPERTIES TIMEOUT 30)
 endif()
 
 configure_package_config_file(cmake/GigeMelProviderConfig.cmake.in
@@ -111,5 +118,7 @@ foreach(component ir-mel common-mel ams-math)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/ams-gra-gige-mel-provider/third_party/${component})
 endforeach()
 install(FILES third_party/manifest.json third_party/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/ams-gra-gige-mel-provider/third_party)
+install(FILES third_party/nlohmann-json/LICENSE.MIT DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/ams-gra-gige-mel-provider/third_party/nlohmann-json)
+install(FILES third_party/json-manifest.json DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/ams-gra-gige-mel-provider/third_party)
 install(FILES LICENSE NOTICE README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/ams-gra-gige-mel-provider)
 install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/ams-gra-gige-mel-provider/docs)

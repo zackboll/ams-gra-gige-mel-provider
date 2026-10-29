@@ -8,3 +8,8 @@ third_party/manifest.json and docs/upstream-provenance.md.
 
 The federal-government copyright statements in those dependencies describe
 their upstream materials, not the newly authored provider implementation.
+
+This distribution also uses nlohmann/json 3.12.0, Copyright (c) 2013-2025
+Niels Lohmann, under the MIT license retained in
+third_party/nlohmann-json/LICENSE.MIT. Its private parser source identity and
+integrity hashes are recorded in third_party/json-manifest.json.

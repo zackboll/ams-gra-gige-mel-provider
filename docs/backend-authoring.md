@@ -30,6 +30,13 @@ The synthetic factory is `make_synthetic_backend(SyntheticOptions)`. Its backend
 
 ## Configuration contract
 
+The common provider uses the same transaction for typed CameraCommand and C2
+ConfigSet schema v1. The [configuration profile](configuration.md) separates JSON
+representation validation from backend-specific limits and documents readback,
+partial application, error/status mapping and disabled-acquisition requirements.
+Adapters need no JSON dependency and must not impose synthetic-only limits in
+the common parser or facade.
+
 The current `CameraConfiguration` is a complete typed snapshot:
 
 | Field | Meaning in the initial profile |

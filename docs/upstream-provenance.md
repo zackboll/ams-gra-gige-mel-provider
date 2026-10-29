@@ -98,6 +98,12 @@ can use `--source-dir` as described in `third_party/README.md`.
 
 ## Licenses and notices
 
+The separate private parser lock is `third_party/json-manifest.json`:
+nlohmann/json 3.12.0 at `55f93686c01528224f448c19128836e7df245f72`, MIT.
+It does not modify or enlarge the 97-file MEL declaration lock. Its offline
+verification, immutable source identity and implementation-only integration are
+described in [configuration](configuration.md#private-parser-and-offline-verification).
+
 Each of the three source repositories supplies an Apache License 2.0
 `LICENSE` and a federal-government `INTENT.md`. Both original files are
 retained under its component directory and remain applicable to those files.

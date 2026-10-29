@@ -95,14 +95,14 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | `EraseCommand` → `EraseCommandType` | Optional | Unsupported | P4 only with a defined target and lifecycle semantics |
 | `SystemTrackDataResponse` → `CommandStatus` | Optional | Unsupported | P5 or earlier pointing integration; distinct from the same-named TrackChannel operation |
 | `ModeCmd` → `MFA_Mode` | Required | Unsupported | P1: define accepted MFA states/modes and their relationship to acquisition/tasking |
-| `ConfigSetCommand` → `Return` | Required | Unsupported | P1: define a versioned schema for its string `config`, validation, application, and error semantics |
+| `ConfigSetCommand` → `Return` | Required | Supported for provider-defined camera schema v1 | [Exact configuration/status profile](configuration.md); other configuration domains remain future work |
 
 ### C2 metadata
 
 | Callback payload | Upstream annotation | Bootstrap | Priority |
 | --- | --- | --- | --- |
 | `mel::BIT_Configuration` | Required | NotSupported | P1 |
-| `CommandStatus` | Required | NotSupported | P1 |
+| `CommandStatus` | Required | Supported for C2 ConfigSet and CameraCommand only | [Synchronous terminal Accepted/Rejected profile](configuration.md); not complete C2 status coverage |
 | `mel::CalibrationConfiguration` | Optional | NotSupported | P4 |
 | `CameraProtectCmdResp` | Required if camera protection | NotSupported | P4 when protection is implemented |
 | `mel::CalibrationStatus` | Optional | NotSupported | P4 |

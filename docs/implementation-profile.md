@@ -122,6 +122,12 @@ camera acquisition.
 
 ## Camera command semantics
 
+C2 also implements versioned `ConfigSetCommand` and terminal `CommandStatus` for
+C2 ConfigSet and CameraCommand. The exact provider-defined schema, working payload,
+future/reason mapping, partial-failure rules and callback scope are specified in
+[configuration and status](configuration.md). No other C2 command status scope,
+command history, update/delete protocol, or duplicate-ID cache is implemented.
+
 Both C2 and Image commands enter the same serialized runtime. Every
 `CameraCommand` is a **complete snapshot**, with explicit dimensions, offsets,
 rate, integration time, `ImageType::Staring`, and zero TDI stages. Zero dimensions,
@@ -160,12 +166,12 @@ The supported reconfiguration sequence is:
 Automatic live stop/apply/reallocate/restart, fractional rates, gain, trigger,
 pixel-format selection, and camera feature trees are future work. MEL's current
 CameraCommand has no fields for several of those settings; a future provider
-configuration schema must define their control path explicitly.
+schema extension must define their control path explicitly.
 
 ## Callbacks, threads, and shutdown
 
 Image callbacks run on one provider receive worker per active Image channel.
-Communications and camera-response metadata callbacks run synchronously on the
+Communications, camera-response and C2 command-status metadata callbacks run synchronously on the
 submitting thread before `send` returns. They are invoked outside the runtime
 operation and state locks. The same consumer may receive metadata and image
 callbacks concurrently and must synchronize its own state.
@@ -238,8 +244,9 @@ still retained by a consumer-created cycle.
 
 Only Image and C2 are attachable. Health, Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
-unimplemented. All non-camera C2 commands, Image NavigationReport, and all
-metadata other than communications and camera responses return unsupported.
+unimplemented. C2 commands other than CameraCommand and ConfigSetCommand, Image
+NavigationReport, and metadata other than communications, Image camera responses
+and C2 configuration CommandStatus return unsupported.
 Some of these are upstream **required** methods, not optional capabilities; this
 is why the implementation is called a bootstrap rather than conformant MEL.
 
