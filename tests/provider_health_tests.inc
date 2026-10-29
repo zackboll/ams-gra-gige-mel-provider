@@ -59,6 +59,87 @@ struct HealthReports {
     }
 };
 
+void check_health_order(const std::vector<char>& order, std::size_t minimum_pairs) {
+    CHECK(order.size() / 2 >= minimum_pairs);
+    // Independent admission permits one last Status without its Detailed.
+    for (std::size_t i = 0; i < order.size(); ++i) CHECK(order[i] == (i % 2 == 0 ? 'S' : 'D'));
+}
+
+void health_teardown_publication() {
+    auto plan = std::make_shared<ReceivePlan>();
+    auto destruction = std::make_shared<WatchdogGate>();
+    auto status_gate = std::make_shared<WatchdogGate>();
+    plan->destruction = destruction;
+    HealthReports reports; // Outlives Fixture and all consumer callbacks.
+    Fixture f(true, std::make_shared<TransformBackend>(Transform::none, plan));
+    auto health = attach_health(f);
+    std::future<ir::Return> disabled;
+    std::thread::id cleanup_thread;
+    TestCleanup cleanup{[&] {
+        status_gate->open(); destruction->open(); plan->open();
+        if (disabled.valid()) disabled.wait();
+        (void)health->disable();
+        (void)f.control->detachChannel(health);
+    }};
+    CHECK(health->registerMetadataCallback(HealthStatusCallback{[&](auto& channel, auto* status) {
+        reports.status_callback()(channel, status);
+        bool first;
+        { std::lock_guard lock(reports.mutex); first = reports.statuses.size() == 1; }
+        if (first) status_gate->enter_and_wait();
+    }}) == ir::Return::Success);
+    CHECK(health->registerMetadataCallback(reports.detailed_callback()) == ir::Return::Success);
+    f.add_buffer();
+    CHECK(f.image->enable() == ir::Return::Success);
+    plan->wait_for(&ReceivePlan::entered); plan->open(); plan->wait_for_exit();
+    CHECK(health->enable() == ir::Return::Success);
+    status_gate->wait_for_entry();
+    { std::lock_guard lock(reports.mutex);
+      CHECK(reports.statuses.size() == 1 && reports.statuses.front().getMFAState() == mel::MFA_State::Degraded);
+      CHECK(reports.details.empty()); }
+    disabled = std::async(std::launch::async, [&] {
+        cleanup_thread = std::this_thread::get_id();
+        return f.image->disable();
+    });
+    destruction->wait_for_entry();
+    CHECK(disabled.wait_for(0ms) == std::future_status::timeout);
+    status_gate->open();
+    // Detailed[0] belongs to the old gated snapshot. Require a NEW complete
+    // publication while backend destruction is still blocked, not its companion.
+    reports.wait([&] { return reports.statuses.size() >= 2 && reports.details.size() >= 2; });
+    {
+        std::lock_guard lock(reports.mutex);
+        const auto old = HealthReports::values(reports.details.front());
+        CHECK(old.at("gige_mel.acquisition_state") == "faulted");
+        for (std::size_t i = 1; i < reports.statuses.size(); ++i) {
+            if (reports.statuses[i].getMFAState() == mel::MFA_State::Operate)
+                throw std::runtime_error("During gated destruction of a terminally failed stream: FALSE Operate/running observed");
+            CHECK(reports.statuses[i].getMFAState() == mel::MFA_State::Standby);
+        }
+        for (std::size_t i = 1; i < reports.details.size(); ++i) {
+            const auto fresh = HealthReports::values(reports.details[i]);
+            CHECK(fresh.at("gige_mel.acquisition_state") == "idle");
+            CHECK(fresh.at("gige_mel.stream_failures") == "1");
+            CHECK(fresh.at("gige_mel.last_error_history") == plan->terminal.message);
+        }
+    }
+    CHECK(disabled.wait_for(0ms) == std::future_status::timeout);
+    destruction->open();
+    CHECK(disabled.wait_for(2s) == std::future_status::ready);
+    CHECK(disabled.get() == ir::Return::Success);
+    destruction->check(); status_gate->check();
+    CHECK(destruction->thread == cleanup_thread && destruction->thread != status_gate->thread);
+    CHECK(gige_mel::provider_statistics(f.manager).stream_failures == 1);
+    CHECK(gige_mel::provider_statistics(f.manager).last_error == plan->terminal.message);
+    CHECK(*response(health->sendKeepAliveRep()) == ir::Return::Success);
+    CHECK(health->disable() == ir::Return::Success);
+    std::size_t before;
+    { std::lock_guard lock(reports.mutex); before = reports.details.size(); }
+    CHECK(health->enable() == ir::Return::Success);
+    reports.wait([&] { return reports.details.size() > before; });
+    reports.state(mel::MFA_State::Standby); reports.detail("acquisition_state", "idle");
+    CHECK(health->disable() == ir::Return::Success);
+}
+
 void health_surface() {
     Fixture f;
     const auto before = f.control->getCapabilities();
@@ -151,8 +232,7 @@ void health_lifecycle() {
         const auto count = reports.statuses.size();
         for (auto thread : reports.threads) CHECK(thread == reports.threads.front() && thread != std::this_thread::get_id());
         if (first == 2) {
-            CHECK(reports.order.size() % 2 == 0);
-            for (std::size_t i = 0; i < reports.order.size(); i += 2) CHECK(reports.order[i] == 'S' && reports.order[i + 1] == 'D');
+            check_health_order(reports.order, 3);
         }
         for (const auto& status : reports.statuses) {
             CHECK(status.getMFAState() == mel::MFA_State::Standby);
@@ -360,35 +440,66 @@ void health_no_io() {
 
 void health_shutdown() {
     for (bool detach : {false, true}) {
-        Fixture f;
-        auto gate = std::make_shared<CallbackGate>();
-        std::atomic<unsigned> statuses{0}, details{0};
+        auto gate = std::make_shared<WatchdogGate>();
+        HealthReports reports;
+        Fixture f; // Image inactive: only the Health worker can be joined here.
         auto health = attach_health(f);
-        CHECK(health->registerMetadataCallback(HealthStatusCallback{[&](auto&, auto*) { ++statuses; gate->enter_and_wait(); }}) == ir::Return::Success);
-        CHECK(health->registerMetadataCallback(HealthDetailedCallback{[&](auto&, auto*) { ++details; }}) == ir::Return::Success);
+        std::atomic<bool> joining{false};
+        std::future<ir::Return> done;
+        TestCleanup cleanup{[&] {
+            gate->open();
+            if (done.valid()) done.wait();
+            if (!detach) (void)health->disable();
+            (void)f.control->detachChannel(health);
+        }};
+        CHECK(health->registerMetadataCallback(HealthStatusCallback{[&](auto& channel, auto* status) {
+            reports.status_callback()(channel, status);
+            bool fourth;
+            { std::lock_guard lock(reports.mutex); fourth = reports.statuses.size() == 4; }
+            if (fourth) gate->enter_and_wait();
+        }}) == ir::Return::Success);
+        CHECK(health->registerMetadataCallback(reports.detailed_callback()) == ir::Return::Success);
         CHECK(health->enable() == ir::Return::Success); gate->wait_for_entry();
-        std::promise<void> submitted;
-        auto done = std::async(std::launch::async, [&] {
-            submitted.set_value();
-            return detach ? f.control->detachChannel(health) : health->disable();
+        done = std::async(std::launch::async, [&] {
+            if (detach) return f.control->detachChannel(health);
+            test_join::Observe observation(joining);
+            return health->disable();
         });
-        submitted.get_future().wait();
-        const bool waited = done.wait_for(30ms) == std::future_status::timeout;
+        if (detach) {
+            eventually([&] { return health->registerMetadataCallback(HealthStatusCallback{}) == ir::Return::Fail; });
+        } else {
+            // Actual pthread_join entry follows periodic admission closure, not
+            // merely task submission. RTLD_NEXT forwards through sanitizers.
+            eventually([&] { return joining.load(std::memory_order_acquire); });
+            CHECK(health->registerMetadataCallback(HealthStatusCallback{}) == ir::Return::BadPointer);
+            CHECK(*response(health->sendKeepAliveRep()) == ir::Return::Success);
+        }
+        CHECK(done.wait_for(0ms) == std::future_status::timeout);
         gate->open();
-        CHECK(done.wait_for(750ms) == std::future_status::ready);
-        CHECK(done.get() == ir::Return::Success && waited);
-        CHECK(statuses == 1 && details == 0); // Unadmitted Detailed suppressed.
+        CHECK(done.wait_for(2s) == std::future_status::ready);
+        CHECK(done.get() == ir::Return::Success);
+        gate->check(); reports.quiet();
+        CHECK(reports.order == (std::vector<char>{'S', 'D', 'S', 'D', 'S', 'D', 'S'}));
+        check_health_order(reports.order, 3); // Legal final unpaired Status.
         CHECK(health->registerMetadataCallback(HealthStatusCallback{}) == (detach ? ir::Return::Fail : ir::Return::BadPointer));
     }
     // Periodic stop alone is insufficient: inherited synchronous metadata must
     // also drain when Control detaches Health.
+    auto gate = std::make_shared<WatchdogGate>();
     Fixture f;
     auto health = attach_health(f);
-    auto gate = std::make_shared<CallbackGate>();
+    std::future<std::shared_ptr<ir::ChannelCommsTestRep>> sent;
+    std::future<ir::Return> detached;
+    TestCleanup cleanup{[&] {
+        gate->open();
+        if (sent.valid()) sent.wait();
+        if (detached.valid()) detached.wait();
+        (void)f.control->detachChannel(health);
+    }};
     CHECK(health->registerMetadataCallback(CommsCallback{[&](auto&, auto*) { gate->enter_and_wait(); }}) == ir::Return::Success);
-    auto sent = std::async(std::launch::async, [&] { return response(health->send(comms_request(81, 82))); });
+    sent = std::async(std::launch::async, [&] { return response(health->send(comms_request(81, 82))); });
     gate->wait_for_entry();
-    auto detached = std::async(std::launch::async, [&] { return f.control->detachChannel(health); });
+    detached = std::async(std::launch::async, [&] { return f.control->detachChannel(health); });
     // Public registration rejection observes closed admission, deterministically
     // establishing detach has begun before the callback gate is opened.
     eventually([&] { return health->registerMetadataCallback(HealthStatusCallback{}) == ir::Return::Fail; });
@@ -396,6 +507,47 @@ void health_shutdown() {
     gate->open();
     CHECK(sent.wait_for(750ms) == std::future_status::ready && sent.get()->getRequestID() == 82);
     CHECK(detached.wait_for(750ms) == std::future_status::ready && detached.get() == ir::Return::Success);
+    gate->check();
+}
+
+void health_shutdown_scheduler_delay() {
+    for (bool detach : {false, true}) {
+        auto status_gate = std::make_shared<WatchdogGate>();
+        auto allow_stop_call = std::make_shared<WatchdogGate>();
+        HealthReports reports;
+        Fixture f;
+        auto health = attach_health(f);
+        std::promise<void> submitted;
+        std::future<ir::Return> done;
+        TestCleanup cleanup{[&] {
+            status_gate->open(); allow_stop_call->open();
+            if (done.valid()) done.wait();
+            (void)health->disable(); (void)f.control->detachChannel(health);
+        }};
+        CHECK(health->registerMetadataCallback(HealthStatusCallback{[&](auto& channel, auto* status) {
+            reports.status_callback()(channel, status);
+            status_gate->enter_and_wait();
+        }}) == ir::Return::Success);
+        CHECK(health->registerMetadataCallback(reports.detailed_callback()) == ir::Return::Success);
+        CHECK(health->enable() == ir::Return::Success); status_gate->wait_for_entry();
+        done = std::async(std::launch::async, [&] {
+            submitted.set_value();
+            allow_stop_call->enter_and_wait(); // Models descheduling BEFORE stop.
+            return detach ? f.control->detachChannel(health) : health->disable();
+        });
+        auto submission = submitted.get_future();
+        CHECK(submission.wait_for(2s) == std::future_status::ready);
+        allow_stop_call->wait_for_entry();
+        CHECK(done.wait_for(0ms) == std::future_status::timeout);
+        status_gate->open();
+        reports.wait([&] { return !reports.details.empty(); });
+        // Detailed was validly delivered despite submitted + pending future.
+        CHECK(done.wait_for(0ms) == std::future_status::timeout);
+        allow_stop_call->open();
+        CHECK(done.wait_for(2s) == std::future_status::ready && done.get() == ir::Return::Success);
+        status_gate->check(); allow_stop_call->check(); reports.quiet();
+        check_health_order(reports.order, 1);
+    }
 }
 
 void health_reentry() {

@@ -71,6 +71,17 @@ faulted remains rejected. Invalid configuration remains invalid until actual
 valid readback establishes readiness. Valid readback after partial apply failure
 is represented accurately even though that command failed.
 
+During Image cleanup, the provider retains a strong acquisition owner through
+worker shutdown and stream stop, clears `image_active` and the weak acquisition
+publication together under the state mutex, then releases its stream owner
+outside that mutex. A fresh Health snapshot after this unpublication reports
+idle/Standby (when configuration is valid), even if backend stream destruction
+is still finishing. This avoids a false running/Operate interval and prevents
+ordinary external cleanup from transferring final stream destruction to Health
+sampling under the state mutex. Enable's exception cleanup unpublishes both
+fields while its local acquisition owner still exists. Neither Health nor C2
+disable clears Image state because cleanup retains the owned-stream guard.
+
 Neither nonzero historical counters nor last_error imply Degraded. Ordinary
 command rejection, receive polling timeout, no-buffer drops, nonterminal rejected
 frames and contained Health callback exceptions do not independently degrade

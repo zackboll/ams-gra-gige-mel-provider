@@ -1,4 +1,5 @@
 #include <gige_mel/provider.hpp>
+#include "join_observer.hpp"
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
@@ -132,6 +133,41 @@ struct CallbackGate {
         { std::lock_guard lock(mutex); leave = true; }
         changed.notify_all();
     }
+};
+
+// New shutdown regressions use an explicit watchdog result (unlike the legacy
+// CallbackGate's silent timeout). Owners open gates on every unwind path.
+struct WatchdogGate {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered{false}, opened{false}, expired{false};
+    std::thread::id thread;
+
+    void enter_and_wait() {
+        std::unique_lock lock(mutex);
+        entered = true;
+        thread = std::this_thread::get_id();
+        changed.notify_all();
+        if (!changed.wait_for(lock, 5s, [&] { return opened; })) expired = true;
+    }
+    void wait_for_entry() {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 2s, [&] { return entered; }));
+        CHECK(!expired);
+    }
+    void open() {
+        { std::lock_guard lock(mutex); opened = true; }
+        changed.notify_all();
+    }
+    void check() {
+        std::lock_guard lock(mutex);
+        CHECK(entered && !expired);
+    }
+};
+
+struct TestCleanup {
+    std::function<void()> cleanup;
+    ~TestCleanup() { cleanup(); }
 };
 
 class Listener final : public ir::ImageListener {
@@ -835,6 +871,7 @@ struct ReceivePlan {
     bool entered{false}, proceed{false}, stop_requested{false}, gate_expired{false};
     std::promise<void> exited;
     std::future<void> worker_exit{exited.get_future()};
+    std::shared_ptr<WatchdogGate> destruction;
 
     void wait_for(bool ReceivePlan::* flag) {
         std::unique_lock lock(mutex);
@@ -855,6 +892,9 @@ public:
     TransformStream(std::unique_ptr<backend::IFrameStream> inner, Transform transform,
                     std::shared_ptr<ReceivePlan> plan = {}, bool scripted = false)
         : inner_(std::move(inner)), transform_(transform), plan_(std::move(plan)), scripted_(scripted) {}
+    ~TransformStream() override {
+        if (scripted_ && plan_->destruction) plan_->destruction->enter_and_wait();
+    }
     backend::Status start(std::uint64_t generation) override {
         if (plan_) ++plan_->starts;
         if (plan_) plan_->last_generation = generation;
@@ -1588,8 +1628,11 @@ void status_suppression_and_lifetime_pins() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    test_join::prepare();
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"Health failed acquisition teardown publication", health_teardown_publication},
+        {"Health shutdown scheduler-delay counterexample", health_shutdown_scheduler_delay},
         {"Health discovery and supported surface", health_surface},
         {"Health periodic lifecycle and report ordering", health_lifecycle},
         {"Health observed faults and explicit recovery", health_fault_recovery},
@@ -1636,6 +1679,7 @@ int main() {
     };
     std::size_t passed = 0;
     for (const auto& [name, run] : tests) {
+        if (argc == 2 && std::string(name).find(argv[1]) == std::string::npos) continue;
         try {
             run();
             ++passed;

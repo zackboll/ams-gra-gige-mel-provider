@@ -394,9 +394,15 @@ public:
         } catch (const std::exception& error) {
             state->stopping = true;
             if (state->stream) state->stream->stop();
+            {
+                // Unpublish while the local state still owns the acquisition,
+                // including thread-construction failure after publication.
+                std::lock_guard lock(runtime_->state_mutex);
+                runtime_->image_active = false;
+                runtime_->acquisition.reset();
+            }
             stream_state_.reset();
             enabled_ = false;
-            { std::lock_guard lock(runtime_->state_mutex); runtime_->image_active = false; }
             runtime_->report(error.what());
             return ir::Return::Fail;
         }
@@ -588,12 +594,15 @@ private:
             else worker_.join();
         }
         if (stream_state_) stream_state_->stream->stop();
-        stream_state_.reset();
         if (owned_stream) {
+            // Retain the strong stream owner until no snapshot can promote the
+            // weak publication. Earlier snapshots release their temporary owner
+            // before this lock is acquired. No backend destruction under lock.
             std::lock_guard lock(runtime_->state_mutex);
             runtime_->image_active = false;
             runtime_->acquisition.reset();
         }
+        stream_state_.reset();
         enabled_ = false;
     }
 
