@@ -17,7 +17,9 @@ with the manager's identity.
 initialization is successful. Other aperture profile names return NotSupported.
 Initialize on a control thread before sharing the discovery capability reference.
 
-Two discovery entries are returned: one `IRSTImage`, one `CommandAndControl`.
+Three discovery entries are returned: `IRSTImage`, `CommandAndControl`, and
+`HealthAndStatus`. The partial Health surface and its state/sampling semantics
+are specified in [Health status](health-status.md).
 Use the advertised UUID and channel type in `Config`; invented IDs are rejected.
 There may be one attached channel of each type per manager. Image attachment
 requires a non-null listener. IDs are local to the manager and are not globally
@@ -242,11 +244,12 @@ still retained by a consumer-created cycle.
 
 ## Unsupported surfaces and diagnostics
 
-Only Image and C2 are attachable. Health, Scheduling, Track, Instrumentation,
+Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand and ConfigSetCommand, Image
 NavigationReport, and metadata other than communications, Image camera responses
-and C2 configuration CommandStatus return unsupported.
+and C2 configuration CommandStatus or Health MFA_Status/MFA_StatusDetailed
+return unsupported.
 Some of these are upstream **required** methods, not optional capabilities; this
 is why the implementation is called a bootstrap rather than conformant MEL.
 

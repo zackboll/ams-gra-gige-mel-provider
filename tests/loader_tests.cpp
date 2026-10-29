@@ -3,6 +3,7 @@
 #include <irmel/library/irmel-types/Control.h>
 #include <irmel/library/irmel-types/FrameHeader.h>
 #include <irmel/library/irmel-types/ImageListener.h>
+#include "public_health_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -185,7 +186,7 @@ private:
     std::string error_;
 };
 
-void run(const char* library_path) {
+void run(const char* library_path, bool health_only, bool expect_absent) {
     // First declared, last destroyed: no MEL object or deleter may outlive DSO.
     SharedLibrary library(library_path);
     const auto manager_factory = library.symbol<decltype(&getAPI_Manager)>("getAPI_Manager");
@@ -202,6 +203,8 @@ void run(const char* library_path) {
     session.control = control_factory("synthetic", session.manager);
     require(session.control != nullptr, "control factory returned null");
     require(session.control->init("") == ir::Return::Success, "Control::init failed");
+    demonstrate_health(session.control, expect_absent);
+    if (health_only) return;
 
     const auto capabilities = session.control->getCapabilities();
     const auto selected = std::find_if(capabilities.begin(), capabilities.end(), [](const auto& capability) {
@@ -248,13 +251,16 @@ void run(const char* library_path) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
+    if (argc < 2 || argc > 3) {
         std::cerr << "Usage: " << argv[0] << " /path/to/libams_gige_mel.so\n";
         return 2;
     }
     try {
-        run(argv[1]);
-        std::cout << "PASS: native factory loading, capabilities, registered Mono8 delivery, and teardown\n";
+        const std::string mode = argc == 3 ? argv[2] : "";
+        run(argv[1], !mode.empty(), mode == "--expect-no-health");
+        std::cout << (mode == "--expect-no-health" ? "PASS: baseline Health absent and not attachable\n" :
+            mode == "--health-only" ? "PASS: public MEL Health discovery, attachment and both current reports\n" :
+            "PASS: native factory loading, Health snapshots, registered Mono8 delivery, and teardown\n");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
