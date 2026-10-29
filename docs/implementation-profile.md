@@ -207,6 +207,23 @@ counted and contained; its ready command future remains available. Re-enabling
 a faulted still-enabled stream fails; explicitly disable and resolve/release the
 outstanding state first. The provider does not silently restart a failed camera.
 
+Unexpected backend receive termination, including `ErrorCode::stopped` without
+provider cancellation, records a stream fault and ends reception. Cancellation
+observed when the worker handles the failed receive is the ordering point:
+already-observed cancellation is normal shutdown; a fault processed first remains
+a fault even if disable follows. Receive timeouts without cancellation are
+transient and do not count as terminal stream failures.
+
+A faulted acquisition retains logical ownership: repeated `enable()` fails
+without creating another stream, and camera configuration remains rejected until
+explicit `disable()` joins and cleans up the old stream. Delivered buffers and
+their bytes remain consumer-owned through both fault and disable; every
+outstanding registered buffer still requires explicit `Buffer::release()` before
+re-enabling. A later enable can create a fresh acquisition only if the backend,
+configuration validity, and registered buffer capacities permit it. Cleanup and
+successful recovery do not reset cumulative failure counters or automatically
+clear the last diagnostic.
+
 The dynamic library must remain loaded until all provider-created objects and
 their shared-pointer control blocks are destroyed. The example keeps its loader
 handle alive longer than the entire provider object graph.

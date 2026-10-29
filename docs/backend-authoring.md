@@ -97,6 +97,18 @@ The current stream contract permits **one receiving thread per stream**. `reques
 
 `receive(timeout)` must return within its bound subject to normal scheduler execution, or be interrupted promptly by stop/close. Do not hide an infinite native wait behind this method. Prefer native cancellation or finite wait slices, and test the actual SDK behavior. `request_stop()` is nonthrowing and wakes receive. `stop()` is nonthrowing and is safe for lifecycle cleanup.
 
+Return `timeout` for a transient wait expiration; the provider continues receiving
+without recording a terminal failure. Return `stopped` for terminal acquisition
+termination, with a useful diagnostic. A backend `stopped` result alone does not
+prove that the MEL consumer requested shutdown. The provider classifies the
+failed receive using its cancellation flag at handling time: cancellation already
+observed means normal shutdown; otherwise `stopped` is an acquisition fault, like
+other terminal receive errors. Explicit disable and cleanup are required before
+a fresh acquisition; there is no automatic reconnect or restart. Outstanding
+MEL buffers still require consumer release, and recovery retains diagnostic
+history. Test both orderings deterministically rather than assigning a fixed
+outcome to an unordered simultaneous stop and fault.
+
 A receive committed before a stop request can still return a lease. The provider gates publication using its own state and generation. Adapters must not rely on “we requested stop” to imply no late native callback or result can exist.
 
 `ICameraDevice::close` is logical close: stop new I/O, wake receive, and preserve outstanding frame leases. Physical native resource destruction may have to wait for those leases. The adapter must document and test the last-lease path, including which thread can execute it.

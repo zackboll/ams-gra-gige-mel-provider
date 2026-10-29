@@ -505,11 +505,14 @@ private:
             while (!state->stopping) {
                 auto result = state->stream->receive(50ms);
                 if (!result) {
+                    // Classify at the cancellation observation: a backend stop
+                    // alone does not establish provider-requested shutdown.
+                    if (state->stopping) break;
                     if (result.error().code == backend::ErrorCode::timeout) continue;
-                    if (state->stopping || result.error().code == backend::ErrorCode::stopped) break;
                     ++state->runtime->stream_failures;
                     state->failed = true;
-                    state->runtime->report(result.error().message);
+                    state->runtime->report(result.error().code == backend::ErrorCode::stopped && result.error().message.empty()
+                        ? "backend stream stopped without provider cancellation" : result.error().message);
                     break;
                 }
                 auto frame = std::move(result).value();

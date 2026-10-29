@@ -17,6 +17,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -777,6 +778,7 @@ void detach_drains_metadata_callback_and_closes_admission() {
 }
 
 enum class Transform {
+    none,
     padding,
     incomplete,
     wrong_generation,
@@ -788,15 +790,79 @@ enum class Transform {
     readback_failure_after_apply
 };
 
+// Only the first created stream is scripted; later acquisitions use the real
+// synthetic stream. All fault injection and synchronization stay in tests.
+struct ReceivePlan {
+    backend::Error terminal{backend::ErrorCode::stopped, "Injected unexpected stream stop"};
+    std::size_t frames_before_error{0};
+    std::size_t timeouts_before_frame{0};
+    bool inject_terminal{true};
+    std::atomic<unsigned> creations{0}, starts{0}, timeouts{0};
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered{false}, proceed{false}, stop_requested{false}, gate_expired{false};
+    std::promise<void> exited;
+    std::future<void> worker_exit{exited.get_future()};
+
+    void wait_for(bool ReceivePlan::* flag) {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 750ms, [&] { return this->*flag; }));
+    }
+    void open() {
+        { std::lock_guard lock(mutex); proceed = true; }
+        changed.notify_all();
+    }
+    void wait_for_exit() {
+        CHECK(worker_exit.wait_for(750ms) == std::future_status::ready);
+        CHECK(!gate_expired);
+    }
+};
+
 class TransformStream final : public backend::IFrameStream {
 public:
-    TransformStream(std::unique_ptr<backend::IFrameStream> inner, Transform transform)
-        : inner_(std::move(inner)), transform_(transform) {}
-    backend::Status start(std::uint64_t generation) override { return inner_->start(generation); }
-    void request_stop() noexcept override { inner_->request_stop(); }
-    void stop() noexcept override { inner_->stop(); }
+    TransformStream(std::unique_ptr<backend::IFrameStream> inner, Transform transform,
+                    std::shared_ptr<ReceivePlan> plan = {}, bool scripted = false)
+        : inner_(std::move(inner)), transform_(transform), plan_(std::move(plan)), scripted_(scripted) {}
+    backend::Status start(std::uint64_t generation) override {
+        if (plan_) ++plan_->starts;
+        return inner_->start(generation);
+    }
+    void request_stop() noexcept override {
+        inner_->request_stop();
+        if (plan_ && scripted_) {
+            { std::lock_guard lock(plan_->mutex); plan_->stop_requested = true; }
+            plan_->changed.notify_all();
+        }
+    }
+    void stop() noexcept override {
+        inner_->stop();
+        // The worker's final cleanup arms a one-shot thread-exit notification.
+        // Unlike a signal before receive returns (or the failure counter), this
+        // proves classification, diagnostic publication, and cleanup completed.
+        if (scripted_ && worker_id_ == std::this_thread::get_id() && !exit_armed_) {
+            exit_armed_ = true;
+            plan_->exited.set_value_at_thread_exit();
+        }
+    }
     backend::StreamStatistics statistics() const override { return inner_->statistics(); }
     backend::Result<backend::FrameLease> receive(std::chrono::milliseconds timeout) override {
+        worker_id_ = std::this_thread::get_id();
+        if (scripted_) {
+            if (plan_->timeouts.load() < plan_->timeouts_before_frame) {
+                ++plan_->timeouts;
+                return backend::Error{backend::ErrorCode::timeout, "Injected transient timeout"};
+            }
+            if (plan_->inject_terminal && received_ >= plan_->frames_before_error) {
+                std::unique_lock lock(plan_->mutex);
+                plan_->entered = true;
+                plan_->changed.notify_all();
+                if (!plan_->changed.wait_for(lock, 2s, [&] { return plan_->proceed; })) {
+                    plan_->gate_expired = true;
+                    return backend::Error{backend::ErrorCode::io_error, "Test receive gate expired"};
+                }
+                return plan_->terminal;
+            }
+        }
         auto result = inner_->receive(timeout);
         if (!result) return result.error();
         auto lease = std::make_shared<backend::FrameLease>(std::move(result).value());
@@ -833,12 +899,16 @@ private:
     std::unique_ptr<backend::IFrameStream> inner_;
     Transform transform_;
     std::uint64_t received_{0};
+    std::shared_ptr<ReceivePlan> plan_;
+    bool scripted_{false}, exit_armed_{false};
+    std::thread::id worker_id_;
 };
 
 class TransformDevice final : public backend::ICameraDevice {
 public:
-    TransformDevice(std::shared_ptr<backend::ICameraDevice> inner, Transform transform)
-        : inner_(std::move(inner)), transform_(transform) {}
+    TransformDevice(std::shared_ptr<backend::ICameraDevice> inner, Transform transform,
+                    std::shared_ptr<ReceivePlan> plan)
+        : inner_(std::move(inner)), transform_(transform), plan_(std::move(plan)) {}
     backend::CameraCapabilities capabilities() const override { return inner_->capabilities(); }
     backend::Result<backend::CameraConfiguration> configuration() const override {
         if (readback_failed_.load()) {
@@ -865,8 +935,9 @@ public:
     backend::Result<std::unique_ptr<backend::IFrameStream>> create_stream() override {
         auto created = inner_->create_stream();
         if (!created) return created.error();
+        const bool scripted = plan_ && plan_->creations.fetch_add(1) == 0;
         std::unique_ptr<backend::IFrameStream> stream =
-            std::make_unique<TransformStream>(std::move(created).value(), transform_);
+            std::make_unique<TransformStream>(std::move(created).value(), transform_, plan_, scripted);
         return stream;
     }
 
@@ -874,25 +945,163 @@ private:
     std::shared_ptr<backend::ICameraDevice> inner_;
     Transform transform_;
     std::atomic<bool> readback_failed_{false};
+    std::shared_ptr<ReceivePlan> plan_;
 };
 
 class TransformBackend final : public backend::ICameraBackend {
 public:
-    explicit TransformBackend(Transform transform) : transform_(transform) {}
+    explicit TransformBackend(Transform transform, std::shared_ptr<ReceivePlan> plan = {})
+        : transform_(transform), plan_(std::move(plan)) {}
     std::string_view id() const noexcept override { return "decorated-synthetic"; }
     backend::Result<std::vector<backend::DeviceInfo>> enumerate() override { return inner_->enumerate(); }
     backend::Result<std::shared_ptr<backend::ICameraDevice>> open(std::string_view id) override {
         auto opened = inner_->open(id);
         if (!opened) return opened.error();
         std::shared_ptr<backend::ICameraDevice> device =
-            std::make_shared<TransformDevice>(std::move(opened).value(), transform_);
+            std::make_shared<TransformDevice>(std::move(opened).value(), transform_, plan_);
         return device;
     }
 
 private:
     std::shared_ptr<backend::ICameraBackend> inner_{backend::make_synthetic_backend()};
     Transform transform_;
+    std::shared_ptr<ReceivePlan> plan_;
 };
+
+void unexpected_stop_is_a_fault_and_explicit_disable_recovers() {
+    auto plan = std::make_shared<ReceivePlan>();
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan));
+    fixture.add_buffer();
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    plan->wait_for(&ReceivePlan::entered);
+    plan->open();
+    plan->wait_for_exit();
+    CHECK(fixture.listener->count() == 0);
+    CHECK(gige_mel::provider_statistics(fixture.manager).stream_failures == 1);
+    CHECK(gige_mel::provider_statistics(fixture.manager).last_error == plan->terminal.message);
+    for (int attempt = 0; attempt < 3; ++attempt) CHECK(fixture.image->enable() == ir::Return::Fail);
+    CHECK(plan->creations == 1);
+    CHECK(plan->starts == 1);
+    expect_error(fixture.image->send(camera_command()), mel::ErrorCode::InvalidState);
+    expect_error(fixture.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    CHECK(response(fixture.c2->send(camera_command(801, 32, 24)))->getCommandSuccess());
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(1);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    CHECK(plan->creations == 2);
+    CHECK(plan->starts == 2);
+    const auto delivered = fixture.listener->at(0);
+    CHECK(delivered.header.getWidth() == 32);
+    CHECK(delivered.header.getHeight() == 24);
+    check_pattern(delivered);
+    const auto stats = gige_mel::provider_statistics(fixture.manager);
+    CHECK(stats.stream_failures == 1);
+    CHECK(stats.last_error == plan->terminal.message);
+    CHECK(stats.callback_failures == 0);
+}
+
+void requested_cancellation_precedes_stopped_result() {
+    auto plan = std::make_shared<ReceivePlan>();
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan));
+    fixture.add_buffer();
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    plan->wait_for(&ReceivePlan::entered);
+    auto disabled = std::async(std::launch::async, [image = fixture.image] { return image->disable(); });
+    // stop_locked publishes cancellation before calling request_stop. Only now
+    // let receive return stopped, establishing the requested-shutdown ordering.
+    plan->wait_for(&ReceivePlan::stop_requested);
+    plan->open();
+    CHECK(disabled.wait_for(750ms) == std::future_status::ready);
+    CHECK(disabled.get() == ir::Return::Success);
+    plan->wait_for_exit();
+    const auto stats = gige_mel::provider_statistics(fixture.manager);
+    CHECK(stats.stream_failures == 0);
+    CHECK(stats.last_error.empty());
+    CHECK(fixture.listener->count() == 0);
+}
+
+void transient_receive_timeouts_allow_delivery() {
+    auto plan = std::make_shared<ReceivePlan>();
+    plan->inject_terminal = false;
+    plan->timeouts_before_frame = 3;
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan));
+    fixture.add_buffer();
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(1);
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    plan->wait_for_exit();
+    CHECK(plan->timeouts == 3);
+    CHECK(plan->creations == 1);
+    CHECK(plan->starts == 1);
+    check_pattern(fixture.listener->at(0));
+    const auto stats = gige_mel::provider_statistics(fixture.manager);
+    CHECK(stats.stream_failures == 0);
+    CHECK(stats.last_error.empty());
+    CHECK(stats.callback_failures == 0);
+}
+
+void unexpected_stop_preserves_retained_buffer() {
+    auto plan = std::make_shared<ReceivePlan>();
+    plan->frames_before_error = 1;
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan));
+    auto buffer = fixture.add_buffer();
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(1);
+    plan->wait_for(&ReceivePlan::entered);
+    const auto delivered = fixture.listener->at(0);
+    CHECK(delivered.buffer == buffer);
+    check_pattern(delivered);
+    const auto bytes = copy_image(delivered);
+    plan->open();
+    plan->wait_for_exit();
+    CHECK(gige_mel::provider_statistics(fixture.manager).stream_failures == 1);
+    CHECK(copy_image(delivered) == bytes);
+    CHECK(fixture.image->enable() == ir::Return::Fail);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    CHECK(copy_image(delivered) == bytes);
+    CHECK(fixture.image->unregisterBuffer(buffer) == ir::Return::Fail);
+    CHECK(fixture.image->enable() == ir::Return::Fail);
+    CHECK(plan->creations == 1);
+    CHECK(plan->starts == 1);
+    CHECK(copy_image(delivered) == bytes);
+    CHECK(buffer->release() == ir::Return::Success);
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(2);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    CHECK(plan->creations == 2);
+    CHECK(plan->starts == 2);
+    check_pattern(fixture.listener->at(1));
+    const auto stats = gige_mel::provider_statistics(fixture.manager);
+    CHECK(stats.stream_failures == 1);
+    CHECK(stats.last_error == plan->terminal.message);
+    CHECK(stats.callback_failures == 0);
+}
+
+void terminal_receive_diagnostics_and_existing_errors() {
+    for (const auto code : {backend::ErrorCode::stopped, backend::ErrorCode::io_error}) {
+        auto plan = std::make_shared<ReceivePlan>();
+        plan->terminal = {code, code == backend::ErrorCode::stopped ? "" : "Injected receive I/O failure"};
+        Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan));
+        fixture.add_buffer();
+        CHECK(fixture.image->enable() == ir::Return::Success);
+        plan->wait_for(&ReceivePlan::entered);
+        plan->open();
+        plan->wait_for_exit();
+        const auto stats = gige_mel::provider_statistics(fixture.manager);
+        CHECK(stats.stream_failures == 1);
+        CHECK(!stats.last_error.empty());
+        if (!plan->terminal.message.empty()) CHECK(stats.last_error == plan->terminal.message);
+        CHECK(fixture.image->enable() == ir::Return::Fail);
+        CHECK(plan->creations == 1);
+        CHECK(plan->starts == 1);
+        CHECK(fixture.image->disable() == ir::Return::Success);
+        CHECK(gige_mel::provider_statistics(fixture.manager).stream_failures == 1);
+        CHECK(gige_mel::provider_statistics(fixture.manager).last_error == stats.last_error);
+    }
+}
 
 void alternate_backend_padded_rows_are_repacked() {
     Fixture fixture(true, std::make_shared<TransformBackend>(Transform::padding));
@@ -993,6 +1202,11 @@ void failed_readback_blocks_enable_even_with_sufficient_buffers() {
 
 int main() {
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"unexpected stream stop and explicit recovery", unexpected_stop_is_a_fault_and_explicit_disable_recovers},
+        {"requested cancellation before stopped result", requested_cancellation_precedes_stopped_result},
+        {"transient receive timeouts continue acquisition", transient_receive_timeouts_allow_delivery},
+        {"unexpected stop preserves retained buffer", unexpected_stop_preserves_retained_buffer},
+        {"empty stopped diagnostic and existing I/O fault", terminal_receive_diagnostics_and_existing_errors},
         {"nested callback mutation versus external detach", nested_callback_mutation_cannot_deadlock_external_detach},
         {"image and metadata cross-provider mutation policy", image_and_metadata_callbacks_reject_cross_provider_mutations},
         {"nested metadata exception restores context", nested_metadata_exception_restores_callback_context},
