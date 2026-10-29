@@ -1,5 +1,6 @@
 #include <gige_mel/provider.hpp>
 #include "join_observer.hpp"
+#include "clock_observer.hpp"
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
@@ -726,7 +727,7 @@ void nested_metadata_exception_restores_callback_context() {
 void unsupported_surfaces_return_real_errors() {
     Fixture fixture;
     constexpr auto unsupported = mel::ErrorCode::Unsupported;
-    expect_error(fixture.c2->send(ir::BIT_Command{}), unsupported);
+    expect_error(fixture.c2->send(ir::BIT_Command{}), mel::ErrorCode::InvalidParameters);
     expect_error(fixture.c2->send(ir::ConfigSetCommand{}), mel::ErrorCode::InvalidParameters);
     expect_error(fixture.c2->send(ir::ModeCmd{}), unsupported);
     expect_error(fixture.c2->send(ir::CalibrationConfigurationCmd{}), unsupported);
@@ -738,7 +739,7 @@ void unsupported_surfaces_return_real_errors() {
     CHECK(fixture.image->registerMetadataCallback(
         std::function<void(ir::Channel&, const ir::BadPixelList*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
     CHECK(fixture.c2->registerMetadataCallback(
-        std::function<void(ir::Channel&, const mel::BIT_Status*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
+        std::function<void(ir::Channel&, const mel::CalibrationStatus*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
 }
 
 void callback_exception_preserves_explicit_lease() {
@@ -1458,8 +1459,9 @@ void config_transaction_status_and_ordering() {
     CHECK(!response(fixture.c2->send(camera_command(58, 641)))->getCommandSuccess());
     check_status(statuses.back(), 58, ir::CannotComply::InvalidInputParameter);
     CHECK(statuses.size() == 7);
-    expect_error(fixture.c2->send(ir::BIT_Command{}), mel::ErrorCode::Unsupported);
-    CHECK(statuses.size() == 7);
+    expect_error(fixture.c2->send(ir::BIT_Command{}), mel::ErrorCode::InvalidParameters);
+    CHECK(statuses.size() == 8);
+    check_status(statuses.back(), 0, ir::CannotComply::InvalidInputParameter);
 }
 
 void config_failure_readback_and_error_mapping() {
@@ -1625,12 +1627,30 @@ void status_suppression_and_lifetime_pins() {
 }
 
 #include "provider_health_tests.inc"
+#include "provider_bit_tests.inc"
 
 } // namespace
 
 int main(int argc, char** argv) {
     test_join::prepare();
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"BIT surface catalogue and registration", bit_surface},
+        {"BIT command validation and precedence", bit_commands},
+        {"BIT configuration faults recovery and UTC observations", bit_configuration},
+        {"BIT acquisition terminal and callback failures", bit_acquisition},
+        {"BIT no device I/O and retained bytes", bit_no_io},
+        {"BIT no-I/O gated receive failure cleanup", bit_no_io_unwind},
+        {"BIT callback reentry exceptions and ownership", bit_callbacks},
+        {"BIT immutable concurrent payload and detach drain", bit_concurrent_detach},
+        {"BIT Health lifecycle order and independent admission", bit_health},
+        {"BIT Health stale captured batch and re-enable freshness", bit_health_stale_batch},
+        {"BIT Health final owner release", bit_health_owners},
+        {"BIT synchronous registration detach drain", bit_registration_drain},
+        {"BIT Health coherent state and contained exceptions", bit_health_coherent},
+        {"BIT ordinary rejection and pool pressure", bit_nonterminal},
+        {"BIT clock failure preserves prior completion", bit_clock_failure},
+        {"BIT initial faults without command execution", bit_initial_faults},
+        {"BIT Health clock failure preserves existing reports", bit_health_clock_failure},
         {"Health failed acquisition teardown publication", health_teardown_publication},
         {"Health shutdown scheduler-delay counterexample", health_shutdown_scheduler_delay},
         {"Health discovery and supported surface", health_surface},

@@ -3,8 +3,11 @@
 This is a **partial Health implementation** for the experimental Mono8
 image-stream profile, not full Health or MEL conformance. It reports observed
 software-provider facts, not physical-health certification. No hardware/SDK
-combination, BIT, calibration, security audit, navigation, temperature, transport
-packet statistics, UTC clock, or hardware inventory is qualified or fabricated.
+combination, hardware BIT, calibration, security audit, navigation, temperature,
+transport packet statistics, synchronized UTC clock, or hardware inventory is
+qualified or fabricated. The [provider-software BIT profile](software-bit.md)
+adds observed-state results/current software faults, with host UTC wall-clock
+estimate timestamps only; it is not physical-health certification.
 
 ## Public MEL surface
 
@@ -16,16 +19,18 @@ attachment per manager is allowed. No Image listener or buffers are required.
 Reattachment after detach creates fresh callback-registration state.
 
 The exact Health metadata capability set is `ChannelCommsTestRep`, `MFAStatus`,
-and `MFAStatusDetailed`, independent of callback registration. All image geometry
+`MFAStatusDetailed`, and `BITStatus`, independent of callback registration. All image
+geometry
 and storage fields (width, height, pitch, image/buffer size, bit depth, bands)
 are zero. No reserved capability enum is repurposed.
 
-Implemented Health-specific registrations are `MFA_Status` and
-`MFA_StatusDetailed`. The first nonempty callback succeeds; empty returns
+Implemented Health-specific registrations are `MFA_Status`,
+`MFA_StatusDetailed`, and `BIT_Status`. The first nonempty callback succeeds; empty
+returns
 BadPointer on a usable channel; duplicate returns Fail. Registration on a
 detached channel or from **any provider callback on the thread**, including
 another manager's callback, fails. There is no replacement or unregister API.
-The other six registrations return NotSupported: LFStatus, BIT_Status,
+The other five registrations return NotSupported: LFStatus,
 SubsystemStatusResp, DiscreteStatus, MFA_SecurityAuditRecord, and NUC_TempData.
 
 Inherited keep-alive and correlated communications remain available even while
@@ -48,7 +53,8 @@ The settled-state mapping is evaluated from one captured core snapshot:
 
 All reports use `StateTransitionStatus::NotTransitioning`. State descriptions
 explain these observations; the human-readable mode describes the experimental
-Mono8 image-stream profile and explicitly disclaims TaskSched, scanning, BIT,
+Mono8 image-stream profile with software BIT and explicitly disclaims TaskSched,
+scanning, hardware BIT,
 calibration and ModeCmd. `MFA_Status` has no timestamp, command ID or typed mode
 field. About identifies `ams-gra-gige-mel-provider (software provider)` version
 0.1.0. Physical serial, hardware version and bootloader version are empty. The
@@ -132,9 +138,9 @@ The nominal interval is **100 milliseconds**, using interruptible waiting after
 dispatch. This is best effort, not real time. There is no history queue, catch-up
 burst or exactly-once transition guarantee. Slow callbacks delay later reports;
 intermediate states may be coalesced. Callbacks must return in bounded time.
-Normal order is MFA_Status then MFA_StatusDetailed on the same publisher thread.
+Normal order is MFA_Status, MFA_StatusDetailed, then BIT_Status on the same publisher thread.
 Each is admitted independently; concurrent disable/detach can suppress a callback
-not yet admitted, so shutdown does not guarantee complete two-message batches.
+not yet admitted, so shutdown does not guarantee complete three-message batches.
 Inherited communications callbacks remain synchronous on their submitting
 threads and can run concurrently with the publisher.
 
@@ -167,6 +173,12 @@ loaded until every provider object/shared-pointer control block and active
 callback/worker has finished; this feature does not change the DSO contract.
 
 ## Public client demonstration and negative control
+
+The shared worker also publishes current `BIT_Status` from the same captured core
+state and consistently retained completion. It does not infer current faults from
+that completion. See [software BIT](software-bit.md) for the exact two categories,
+retirement, observation times, command semantics and callback rules, and its
+[validation record](software-bit-validation.md) for the new baseline control.
 
 The native loader and separate installed consumer use only published MEL headers
 to discover/attach Health, register both callbacks, enable, wait for Standby and

@@ -155,7 +155,7 @@ void health_surface() {
     auto check_cap = [](const auto& cap) {
         CHECK(cap.getChannelMetadataCapabilities() == (std::set<ir::ChannelMetadataCapabilityType>{
             ir::ChannelMetadataCapabilityType::ChannelCommsTestRep, ir::ChannelMetadataCapabilityType::MFAStatus,
-            ir::ChannelMetadataCapabilityType::MFAStatusDetailed}));
+            ir::ChannelMetadataCapabilityType::MFAStatusDetailed, ir::ChannelMetadataCapabilityType::BITStatus}));
         CHECK(cap.getWidth() == 0 && cap.getHeight() == 0 && cap.getRowPitch() == 0 && cap.getImageSize() == 0 &&
               cap.getBufferSize() == 0 && cap.getBitDepth() == 0 && cap.getNumberOfBands() == 0);
     };
@@ -176,7 +176,6 @@ void health_surface() {
 #define CHECK_HEALTH_UNSUPPORTED(T) \
     CHECK(health->registerMetadataCallback(std::function<void(ir::Channel&, const T*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported)
     CHECK_HEALTH_UNSUPPORTED(ir::LFStatus);
-    CHECK_HEALTH_UNSUPPORTED(mel::BIT_Status);
     CHECK_HEALTH_UNSUPPORTED(ir::SubsystemStatusResp);
     CHECK_HEALTH_UNSUPPORTED(mel::DiscreteStatus);
     CHECK_HEALTH_UNSUPPORTED(mel::MFA_SecurityAuditRecord);
