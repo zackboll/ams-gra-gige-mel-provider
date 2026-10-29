@@ -1,3 +1,11 @@
+# Private implementation dependency
+
+`nlohmann-json/` contains the unmodified nlohmann/json 3.12.0 single header and
+MIT license pinned separately in `json-manifest.json`. Verify offline with
+`python3 scripts/verify_json.py`. The header is private and is not installed.
+See `docs/configuration.md` for provenance and integration details. The existing
+MEL manifest below is unchanged.
+
 # Pinned upstream declarations
 
 This directory contains **unmodified** declarations from three immutable AMS-GRA

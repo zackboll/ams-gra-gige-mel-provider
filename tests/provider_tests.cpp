@@ -78,6 +78,33 @@ ir::CameraCommand camera_command(std::uint32_t id = 17, std::uint32_t width = 64
     return command;
 }
 
+const std::string config_payload = R"({"schema":"gige-mel.camera-config","version":1,"width":64,"height":48,"offset_x":0,"offset_y":0,"frame_rate_hz":120,"exposure_ns":1000000})";
+
+ir::ConfigSetCommand config_command(std::uint32_t id = 18, const std::string& payload = config_payload) {
+    ir::ConfigSetCommand command;
+    command.setCommandID(id);
+    command.setSystemTime(-123ns); // Caller context, not scheduled execution.
+    command.setConfig(payload);
+    return command;
+}
+
+using StatusCallback = std::function<void(ir::Channel&, const ir::CommandStatus*)>;
+using ImageReplyCallback = std::function<void(ir::Channel&, const ir::CameraCommandResp*)>;
+
+void check_status(const ir::CommandStatus& status, std::uint32_t id, ir::CannotComply reason = ir::CannotComply::NotSet) {
+    CHECK(status.getCommandID() == id);
+    CHECK(status.getState() == (reason == ir::CannotComply::NotSet ? ir::CommandState::Accepted : ir::CommandState::Rejected));
+    CHECK(status.getReasonID() == reason);
+    CHECK(status.getReasonDescription().empty() == (reason == ir::CannotComply::NotSet));
+}
+
+std::string replace_once(std::string text, const std::string& from, const std::string& to) {
+    const auto at = text.find(from);
+    CHECK(at != std::string::npos);
+    text.replace(at, from.size(), to);
+    return text;
+}
+
 struct Delivered {
     ir::FrameHeader header;
     std::shared_ptr<ir::Buffer> buffer;
@@ -662,7 +689,7 @@ void unsupported_surfaces_return_real_errors() {
     Fixture fixture;
     constexpr auto unsupported = mel::ErrorCode::Unsupported;
     expect_error(fixture.c2->send(ir::BIT_Command{}), unsupported);
-    expect_error(fixture.c2->send(ir::ConfigSetCommand{}), unsupported);
+    expect_error(fixture.c2->send(ir::ConfigSetCommand{}), mel::ErrorCode::InvalidParameters);
     expect_error(fixture.c2->send(ir::ModeCmd{}), unsupported);
     expect_error(fixture.c2->send(ir::CalibrationConfigurationCmd{}), unsupported);
     expect_error(fixture.c2->send(ir::CalibrationStatusCmd{}), unsupported);
@@ -787,7 +814,9 @@ enum class Transform {
     clock_reset_after_one,
     clock_regression_after_one,
     partial_apply_failure,
-    readback_failure_after_apply
+    readback_failure_after_apply,
+    readback_mismatch,
+    invalid_readback
 };
 
 // Only the first created stream is scripted; later acquisitions use the real
@@ -798,6 +827,7 @@ struct ReceivePlan {
     std::size_t timeouts_before_frame{0};
     bool inject_terminal{true};
     std::atomic<unsigned> creations{0}, starts{0}, timeouts{0};
+    std::atomic<std::uint64_t> last_generation{0};
     std::mutex mutex;
     std::condition_variable changed;
     bool entered{false}, proceed{false}, stop_requested{false}, gate_expired{false};
@@ -825,6 +855,7 @@ public:
         : inner_(std::move(inner)), transform_(transform), plan_(std::move(plan)), scripted_(scripted) {}
     backend::Status start(std::uint64_t generation) override {
         if (plan_) ++plan_->starts;
+        if (plan_) plan_->last_generation = generation;
         return inner_->start(generation);
     }
     void request_stop() noexcept override {
@@ -904,19 +935,35 @@ private:
     std::thread::id worker_id_;
 };
 
+struct ConfigurationProbe {
+    unsigned applies{0};
+    mutable unsigned reads{0};
+    std::vector<backend::CameraConfiguration> requests;
+    std::optional<backend::Error> apply_error;
+};
+
 class TransformDevice final : public backend::ICameraDevice {
 public:
     TransformDevice(std::shared_ptr<backend::ICameraDevice> inner, Transform transform,
-                    std::shared_ptr<ReceivePlan> plan)
-        : inner_(std::move(inner)), transform_(transform), plan_(std::move(plan)) {}
+                    std::shared_ptr<ReceivePlan> plan = {}, std::shared_ptr<ConfigurationProbe> probe = {})
+        : inner_(std::move(inner)), transform_(transform), plan_(std::move(plan)), probe_(std::move(probe)) {}
     backend::CameraCapabilities capabilities() const override { return inner_->capabilities(); }
     backend::Result<backend::CameraConfiguration> configuration() const override {
+        if (probe_) ++probe_->reads;
         if (readback_failed_.load()) {
             return backend::Error{backend::ErrorCode::io_error, "Injected configuration readback failure after apply"};
         }
-        return inner_->configuration();
+        auto actual = inner_->configuration();
+        if (actual && mutated_ && transform_ == Transform::invalid_readback) actual.value().width = 0;
+        return actual;
     }
     backend::Result<backend::CameraConfiguration> apply(const backend::CameraConfiguration& config) override {
+        if (probe_) {
+            ++probe_->applies;
+            probe_->requests.push_back(config);
+            if (probe_->apply_error) return *probe_->apply_error;
+        }
+        mutated_ = true;
         if (transform_ == Transform::partial_apply_failure) {
             auto partial = config;
             partial.width = 96;
@@ -925,7 +972,9 @@ public:
             if (!actual) return actual.error();
             return backend::Error{backend::ErrorCode::io_error, "Injected failure after changing ROI to 96x72"};
         }
-        auto actual = inner_->apply(config);
+        auto request = config;
+        if (transform_ == Transform::readback_mismatch) request.width = 32;
+        auto actual = inner_->apply(request);
         if (actual && transform_ == Transform::readback_failure_after_apply) {
             readback_failed_ = true;
         }
@@ -946,19 +995,21 @@ private:
     Transform transform_;
     std::atomic<bool> readback_failed_{false};
     std::shared_ptr<ReceivePlan> plan_;
+    std::shared_ptr<ConfigurationProbe> probe_;
+    bool mutated_{false};
 };
 
 class TransformBackend final : public backend::ICameraBackend {
 public:
-    explicit TransformBackend(Transform transform, std::shared_ptr<ReceivePlan> plan = {})
-        : transform_(transform), plan_(std::move(plan)) {}
+    explicit TransformBackend(Transform transform, std::shared_ptr<ReceivePlan> plan = {}, std::shared_ptr<ConfigurationProbe> probe = {})
+        : transform_(transform), plan_(std::move(plan)), probe_(std::move(probe)) {}
     std::string_view id() const noexcept override { return "decorated-synthetic"; }
     backend::Result<std::vector<backend::DeviceInfo>> enumerate() override { return inner_->enumerate(); }
     backend::Result<std::shared_ptr<backend::ICameraDevice>> open(std::string_view id) override {
         auto opened = inner_->open(id);
         if (!opened) return opened.error();
         std::shared_ptr<backend::ICameraDevice> device =
-            std::make_shared<TransformDevice>(std::move(opened).value(), transform_, plan_);
+            std::make_shared<TransformDevice>(std::move(opened).value(), transform_, plan_, probe_);
         return device;
     }
 
@@ -966,11 +1017,14 @@ private:
     std::shared_ptr<backend::ICameraBackend> inner_{backend::make_synthetic_backend()};
     Transform transform_;
     std::shared_ptr<ReceivePlan> plan_;
+    std::shared_ptr<ConfigurationProbe> probe_;
 };
 
 void unexpected_stop_is_a_fault_and_explicit_disable_recovers() {
     auto plan = std::make_shared<ReceivePlan>();
     Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan));
+    std::vector<ir::CommandStatus> statuses;
+    CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto* status) { statuses.push_back(*status); }}) == ir::Return::Success);
     fixture.add_buffer();
     CHECK(fixture.image->enable() == ir::Return::Success);
     plan->wait_for(&ReceivePlan::entered);
@@ -984,6 +1038,9 @@ void unexpected_stop_is_a_fault_and_explicit_disable_recovers() {
     CHECK(plan->starts == 1);
     expect_error(fixture.image->send(camera_command()), mel::ErrorCode::InvalidState);
     expect_error(fixture.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+    expect_error(fixture.c2->send(config_command()), mel::ErrorCode::InvalidState);
+    CHECK(statuses.size() == 2);
+    check_status(statuses.back(), 18, ir::CannotComply::StateOrSettings);
 
     CHECK(fixture.image->disable() == ir::Return::Success);
     CHECK(response(fixture.c2->send(camera_command(801, 32, 24)))->getCommandSuccess());
@@ -1198,10 +1255,340 @@ void failed_readback_blocks_enable_even_with_sufficient_buffers() {
     CHECK(fixture.buffers.front()->release() == ir::Return::Fail);
 }
 
+void config_schema_and_no_apply_on_rejection() {
+    auto probe = std::make_shared<ConfigurationProbe>();
+    auto plan = std::make_shared<ReceivePlan>();
+    plan->inject_terminal = false;
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, plan, probe));
+    std::vector<ir::CommandStatus> statuses;
+    CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto* status) { statuses.push_back(*status); }}) == ir::Return::Success);
+    CHECK(*response(fixture.c2->send(config_command())) == ir::Return::Success);
+    const std::string reordered = " \t\r\n" R"({"exposure_ns":1000000,"frame_rate_hz":120,"offset_y":0,"offset_x":0,"height":48,"width":64,"version":1,"schema":"gige-mel.camera-config"})" "\n ";
+    CHECK(*response(fixture.c2->send(config_command(19, reordered))) == ir::Return::Success);
+    CHECK(*response(fixture.c2->send(config_command(20, replace_once(config_payload, "width", R"(\u0077idth)")))) == ir::Return::Success);
+    const auto applies = probe->applies;
+    const auto reads = probe->reads;
+    fixture.add_buffer();
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(1);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    fixture.release_buffers();
+    const auto generation = plan->last_generation.load();
+    std::vector<std::string> invalid{
+        "", "[]", "null", "64", "{}", "{", config_payload + "x", config_payload + " {}",
+        replace_once(config_payload, R"("width":64,)", ""),
+        replace_once(config_payload, "width", "unknown"),
+        replace_once(config_payload, "{", R"({"width":64,)"),
+        replace_once(config_payload, "{", R"({"\u0077idth":64,)"),
+        replace_once(config_payload, "}", ",}"),
+        replace_once(config_payload, "{", "{/* comment */"),
+        replace_once(config_payload, "{", "{// comment\n"),
+        replace_once(config_payload, R"("width":64)", R"("width":{})"),
+        replace_once(config_payload, R"("width":64)", R"("width":[])"),
+        replace_once(config_payload, "gige-mel.camera-config", R"(\uD800)"),
+        replace_once(config_payload, "gige-mel.camera-config", std::string(1, static_cast<char>(0xff))),
+        replace_once(config_payload, "width", R"(\x77idth)"),
+        config_payload + std::string(1, '\0'),
+        std::string(4097, ' '),
+    };
+    for (const auto& member : {"schema", "version", "width", "height", "offset_x", "offset_y", "frame_rate_hz", "exposure_ns"}) {
+        const std::string key = std::string{"\""} + member + "\":";
+        const auto begin = config_payload.find(key);
+        const auto end = config_payload.find_first_of(",}", begin);
+        auto missing = config_payload;
+        if (config_payload[end] == ',') missing.erase(begin, end - begin + 1);
+        else missing.erase(begin - 1, end - begin + 1);
+        invalid.push_back(std::move(missing));
+    }
+    for (const auto& member : {"width", "height", "offset_x", "offset_y", "frame_rate_hz", "exposure_ns", "version"}) {
+        const std::string key = std::string{"\""} + member + "\":";
+        const auto begin = config_payload.find(key) + key.size();
+        const auto end = config_payload.find_first_of(",}", begin);
+        for (const auto& token : {"-1", "1.0", "1e0", "\"1\"", "true", "false", "null", "18446744073709551616", "1e999"}) {
+            auto payload = config_payload;
+            payload.replace(begin, end - begin, token);
+            // Negative integer versions are well-formed but unsupported.
+            if (std::string_view(member) == "version" && std::string_view(token) == "-1") continue;
+            invalid.push_back(std::move(payload));
+        }
+        if (std::string_view(member) != "version") {
+            auto payload = config_payload;
+            payload.replace(begin, end - begin, std::string_view(member) == "exposure_ns" ? "9223372036854775808" : "4294967296");
+            invalid.push_back(std::move(payload));
+        }
+    }
+    for (const auto& member : {"width", "height", "frame_rate_hz", "exposure_ns"}) {
+        const std::string key = std::string{"\""} + member + "\":";
+        const auto begin = config_payload.find(key) + key.size();
+        auto payload = config_payload;
+        payload.replace(begin, config_payload.find_first_of(",}", begin) - begin, "0");
+        invalid.push_back(std::move(payload));
+    }
+    invalid.push_back(replace_once(config_payload, R"("schema":"gige-mel.camera-config")", R"("schema":1)"));
+    for (const auto& payload : invalid) {
+        const auto count = statuses.size();
+        expect_error(fixture.c2->send(config_command(0xffffffffU, payload)), mel::ErrorCode::InvalidParameters);
+        CHECK(statuses.size() == count + 1);
+        check_status(statuses.back(), 0xffffffffU, ir::CannotComply::InvalidInputParameter);
+    }
+    for (const auto& payload : {
+        replace_once(config_payload, "gige-mel.camera-config", "other-schema"),
+        replace_once(config_payload, R"("version":1)", R"("version":2)"),
+        replace_once(config_payload, R"("version":1)", R"("version":-1)")}) {
+        expect_error(fixture.c2->send(config_command(0, payload)), mel::ErrorCode::Unsupported);
+        check_status(statuses.back(), 0, ir::CannotComply::CapabilityUnavailable);
+    }
+    CHECK(probe->applies == applies && probe->reads == reads);
+    CHECK(fixture.image->getCapabilities().getWidth() == 64);
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(2);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    CHECK(plan->last_generation == generation);
+    fixture.release_buffers();
+    auto boundary = config_payload + std::string(4096 - config_payload.size(), ' ');
+    CHECK(*response(fixture.c2->send(config_command(21, boundary))) == ir::Return::Success);
+    boundary += ' ';
+    expect_error(fixture.c2->send(config_command(22, boundary)), mel::ErrorCode::InvalidParameters);
+    CHECK(probe->applies == applies + 1);
+    // Representation maxima reach the backend (rather than being rejected by
+    // synthetic-only parser limits); the camera cannot satisfy these values.
+    const auto before_maxima = probe->applies;
+    for (const auto& payload : {
+        replace_once(config_payload, R"("frame_rate_hz":120)", R"("frame_rate_hz":4294967295)"),
+        replace_once(config_payload, R"("exposure_ns":1000000)", R"("exposure_ns":9223372036854775807)")}) {
+        CHECK(*response(fixture.c2->send(config_command(23, payload))) == ir::Return::Fail);
+        check_status(statuses.back(), 23, ir::CannotComply::InvalidInputParameter);
+    }
+    CHECK(probe->applies == before_maxima + 2);
+}
+
+void config_transaction_status_and_ordering() {
+    auto probe = std::make_shared<ConfigurationProbe>();
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, nullptr, probe));
+    CHECK(*response(fixture.c2->send(config_command())) == ir::Return::Success); // No status callback needed.
+    CHECK(fixture.c2->getCapabilities().getChannelMetadataCapabilities().contains(ir::ChannelMetadataCapabilityType::CommandStatus));
+    const auto& caps = fixture.control->getCapabilities();
+    CHECK(std::any_of(caps.begin(), caps.end(), [](const auto& cap) {
+        return cap.getChannelTypes().front() == ir::ChannelType::CommandAndControl &&
+            cap.getChannelMetadataCapabilities().contains(ir::ChannelMetadataCapabilityType::CommandStatus);
+    }));
+    CHECK(fixture.c2->registerMetadataCallback(StatusCallback{}) == ir::Return::BadPointer);
+    std::vector<ir::CommandStatus> statuses;
+    std::vector<std::string> order;
+    StatusCallback callback = [&](auto&, auto* status) { statuses.push_back(*status); order.push_back("status"); };
+    CHECK(fixture.c2->registerMetadataCallback(callback) == ir::Return::Success);
+    CHECK(fixture.c2->registerMetadataCallback(callback) == ir::Return::Fail);
+    CHECK(fixture.image->registerMetadataCallback(ImageReplyCallback{[&](auto&, auto*) { order.push_back("image"); }}) == ir::Return::Success);
+    auto payload = replace_once(replace_once(config_payload, R"("width":64)", R"("width":40)"), R"("height":48)", R"("height":24)");
+    CHECK(*response(fixture.c2->send(config_command(51, payload))) == ir::Return::Success);
+    CHECK(order == std::vector<std::string>{"status"});
+    check_status(statuses.back(), 51);
+    const auto requested = probe->requests.back();
+    CHECK(response(fixture.c2->send(camera_command(52, 40, 24)))->getCommandSuccess());
+    CHECK(probe->requests.back() == requested);
+    CHECK((order == std::vector<std::string>{"status", "image", "status"}));
+    check_status(statuses.back(), 52);
+    CHECK(response(fixture.image->send(camera_command(53, 40, 24)))->getCommandSuccess());
+    CHECK(statuses.size() == 2 && order.back() == "image");
+    fixture.add_buffer(40 * 24);
+    CHECK(fixture.image->enable() == ir::Return::Success);
+    fixture.listener->wait_for(1);
+    const auto applies = probe->applies;
+    expect_error(fixture.c2->send(config_command(54)), mel::ErrorCode::InvalidState);
+    check_status(statuses.back(), 54, ir::CannotComply::StateOrSettings);
+    expect_error(fixture.c2->send(camera_command(55)), mel::ErrorCode::InvalidState);
+    check_status(statuses.back(), 55, ir::CannotComply::StateOrSettings);
+    CHECK(probe->applies == applies);
+    CHECK(fixture.image->disable() == ir::Return::Success);
+    const auto frame = fixture.listener->at(0);
+    CHECK(frame.header.getWidth() == 40 && frame.header.getHeight() == 24);
+    check_pattern(frame);
+    const auto bytes = copy_image(frame);
+    CHECK(*response(fixture.c2->send(config_command(56))) == ir::Return::Success);
+    CHECK(copy_image(frame) == bytes);
+    CHECK(fixture.image->enable() == ir::Return::Fail); // Outstanding, then undersized.
+    fixture.release_buffers();
+    CHECK(fixture.image->enable() == ir::Return::Fail);
+    CHECK(*response(fixture.c2->send(config_command(57, replace_once(config_payload, R"("width":64)", R"("width":641)")))) == ir::Return::Fail);
+    check_status(statuses.back(), 57, ir::CannotComply::InvalidInputParameter);
+    CHECK(!response(fixture.c2->send(camera_command(58, 641)))->getCommandSuccess());
+    check_status(statuses.back(), 58, ir::CannotComply::InvalidInputParameter);
+    CHECK(statuses.size() == 7);
+    expect_error(fixture.c2->send(ir::BIT_Command{}), mel::ErrorCode::Unsupported);
+    CHECK(statuses.size() == 7);
+}
+
+void config_failure_readback_and_error_mapping() {
+    struct Mapping { backend::ErrorCode backend; mel::ErrorCode mel; ir::CannotComply reason; bool ordinary; };
+    const std::vector<Mapping> mappings{
+        {backend::ErrorCode::invalid_argument, mel::ErrorCode::InvalidParameters, ir::CannotComply::InvalidInputParameter, true},
+        {backend::ErrorCode::unsupported, mel::ErrorCode::Unsupported, ir::CannotComply::CapabilityUnavailable, true},
+        {backend::ErrorCode::invalid_state, mel::ErrorCode::InvalidState, ir::CannotComply::StateOrSettings, false},
+        {backend::ErrorCode::busy, mel::ErrorCode::InvalidState, ir::CannotComply::StateOrSettings, false},
+        {backend::ErrorCode::stopped, mel::ErrorCode::InvalidState, ir::CannotComply::StateOrSettings, false},
+        {backend::ErrorCode::timeout, mel::ErrorCode::InvalidState, ir::CannotComply::StateOrSettings, false},
+        {backend::ErrorCode::not_found, mel::ErrorCode::InvalidId, ir::CannotComply::UnknownID, false},
+        {backend::ErrorCode::resource_exhausted, mel::ErrorCode::InsufficientLocalResources, ir::CannotComply::InsufficientResources, false},
+        {backend::ErrorCode::disconnected, mel::ErrorCode::InsufficientRemoteResources, ir::CannotComply::SubsystemUnavailable, false},
+        {backend::ErrorCode::io_error, mel::ErrorCode::InsufficientRemoteResources, ir::CannotComply::SubsystemFault, false},
+    };
+    for (const auto& mapping : mappings) {
+        auto probe = std::make_shared<ConfigurationProbe>();
+        Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, nullptr, probe));
+        probe->apply_error = backend::Error{mapping.backend, "specific transaction failure"};
+        std::vector<ir::CommandStatus> statuses;
+        unsigned replies = 0;
+        CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto* s) { statuses.push_back(*s); }}) == ir::Return::Success);
+        CHECK(fixture.image->registerMetadataCallback(ImageReplyCallback{[&](auto&, auto*) { ++replies; }}) == ir::Return::Success);
+        const auto reads = probe->reads;
+        if (mapping.ordinary) {
+            CHECK(*response(fixture.c2->send(config_command(61))) == ir::Return::Fail);
+            CHECK(!response(fixture.c2->send(camera_command(62)))->getCommandSuccess());
+        } else {
+            expect_error(fixture.c2->send(config_command(61)), mapping.mel);
+            expect_error(fixture.c2->send(camera_command(62)), mapping.mel);
+        }
+        CHECK(probe->reads == reads + 2);
+        CHECK(replies == (mapping.ordinary ? 1U : 0U));
+        CHECK(statuses.size() == 2);
+        check_status(statuses[0], 61, mapping.reason);
+        check_status(statuses[1], 62, mapping.reason);
+        CHECK(statuses[0].getReasonDescription() == "specific transaction failure");
+    }
+    for (auto transform : {Transform::partial_apply_failure, Transform::readback_failure_after_apply,
+                           Transform::readback_mismatch, Transform::invalid_readback}) {
+        auto probe = std::make_shared<ConfigurationProbe>();
+        auto plan = std::make_shared<ReceivePlan>();
+        plan->inject_terminal = false;
+        Fixture fixture(false, std::make_shared<TransformBackend>(transform, plan, probe));
+        CHECK(fixture.control->init() == ir::Return::Success);
+        fixture.attach();
+        fixture.add_buffer(128 * 96);
+        std::vector<ir::CommandStatus> statuses;
+        CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto* s) { statuses.push_back(*s); }}) == ir::Return::Success);
+        if (transform == Transform::partial_apply_failure || transform == Transform::readback_failure_after_apply)
+            expect_error(fixture.c2->send(config_command(71)), mel::ErrorCode::InsufficientRemoteResources);
+        else CHECK(*response(fixture.c2->send(config_command(71))) == ir::Return::Fail);
+        CHECK(statuses.size() == 1);
+        check_status(statuses[0], 71, transform == Transform::readback_mismatch || transform == Transform::invalid_readback
+            ? ir::CannotComply::Other : ir::CannotComply::SubsystemFault);
+        CHECK(probe->applies == 1 && probe->reads == 2);
+        if (transform == Transform::readback_failure_after_apply || transform == Transform::invalid_readback) {
+            CHECK(fixture.image->enable() == ir::Return::Fail);
+        } else {
+            CHECK(fixture.image->getCapabilities().getWidth() == (transform == Transform::partial_apply_failure ? 96U : 32U));
+            CHECK(fixture.image->enable() == ir::Return::Success);
+            fixture.listener->wait_for(1);
+            CHECK(fixture.image->disable() == ir::Return::Success);
+            CHECK(plan->last_generation == 2);
+            check_pattern(fixture.listener->at(0));
+        }
+    }
+}
+
+void status_reentry_throw_and_detach() {
+    auto probe = std::make_shared<ConfigurationProbe>();
+    auto other_probe = std::make_shared<ConfigurationProbe>();
+    Fixture fixture(true, std::make_shared<TransformBackend>(Transform::none, nullptr, probe));
+    Fixture other(true, std::make_shared<TransformBackend>(Transform::none, nullptr, other_probe));
+    unsigned calls = 0, completed = 0, other_calls = 0;
+    CHECK(other.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) { ++other_calls; }}) == ir::Return::Success);
+    CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) {
+        ++calls;
+        expect_error(fixture.c2->send(config_command(80, "not JSON")), mel::ErrorCode::InvalidState);
+        expect_error(other.c2->send(config_command()), mel::ErrorCode::InvalidState);
+        expect_error(fixture.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+        expect_error(other.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+        CHECK(other.c2->registerMetadataCallback(StatusCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
+        CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
+        ++completed;
+        throw std::runtime_error("status consumer failed");
+    }}) == ir::Return::Success);
+    const auto before = probe->applies;
+    const auto other_before = other_probe->applies;
+    CHECK(*response(fixture.c2->send(config_command())) == ir::Return::Success);
+    CHECK(response(fixture.c2->send(camera_command()))->getCommandSuccess());
+    CHECK(calls == 2 && completed == 2 && other_calls == 0);
+    CHECK(probe->applies == before + 2 && other_probe->applies == other_before);
+    CHECK(gige_mel::provider_statistics(fixture.manager).callback_failures == 2);
+    CHECK(*response(other.c2->send(config_command())) == ir::Return::Success);
+    CHECK(other_calls == 1);
+    CHECK(fixture.control->detachChannel(fixture.c2) == ir::Return::Success);
+    expect_error(fixture.c2->send(config_command()), mel::ErrorCode::InvalidState);
+    expect_error(fixture.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+    CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
+    CHECK(calls == 2 && probe->applies == before + 2);
+
+    Fixture gated;
+    CallbackGate gate;
+    std::atomic<unsigned> drained{0};
+    CHECK(gated.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) {
+        gate.enter_and_wait();
+        ++drained;
+    }}) == ir::Return::Success);
+    auto sent = std::async(std::launch::async, [&] { return response(gated.c2->send(config_command())); });
+    gate.wait_for_entry();
+    auto detached = std::async(std::launch::async, [&] { return gated.control->detachChannel(gated.c2); });
+    eventually([&] { return !gated.c2->sendKeepAliveRep().get(); });
+    const bool waited = detached.wait_for(20ms) == std::future_status::timeout;
+    gate.open();
+    CHECK(sent.wait_for(750ms) == std::future_status::ready);
+    CHECK(*sent.get() == ir::Return::Success);
+    CHECK(detached.wait_for(750ms) == std::future_status::ready);
+    CHECK(detached.get() == ir::Return::Success);
+    CHECK(waited && drained == 1);
+}
+
+void status_suppression_and_lifetime_pins() {
+    Fixture fixture;
+    CallbackGate gate;
+    unsigned statuses = 0, image_completed = 0;
+    CHECK(fixture.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) { ++statuses; }}) == ir::Return::Success);
+    CHECK(fixture.image->registerMetadataCallback(ImageReplyCallback{[&](auto&, auto*) {
+        gate.enter_and_wait();
+        // No mutation/status recursion from an Image response callback either.
+        expect_error(fixture.c2->send(config_command()), mel::ErrorCode::InvalidState);
+        ++image_completed;
+    }}) == ir::Return::Success);
+    auto sent = std::async(std::launch::async, [&] { return response(fixture.c2->send(camera_command())); });
+    gate.wait_for_entry();
+    // The Image callback has been admitted, but the C2 status has not. Detach
+    // must not wait for a prematurely reserved status admission.
+    auto detached = std::async(std::launch::async, [&] { return fixture.control->detachChannel(fixture.c2); });
+    const bool ready = detached.wait_for(100ms) == std::future_status::ready;
+    gate.open();
+    CHECK(sent.wait_for(750ms) == std::future_status::ready);
+    CHECK(sent.get()->getCommandSuccess());
+    CHECK(detached.wait_for(750ms) == std::future_status::ready);
+    CHECK(detached.get() == ir::Return::Success);
+    CHECK(ready && statuses == 0 && image_completed == 1);
+
+    Fixture pinned;
+    unsigned pinned_completed = 0;
+    std::weak_ptr<ir::Control> weak_control = pinned.control;
+    std::weak_ptr<ir::C2Channel> weak_channel = pinned.c2;
+    CHECK(pinned.c2->registerMetadataCallback(StatusCallback{[&](auto& channel, auto*) {
+        pinned.control.reset();
+        pinned.c2.reset();
+        CHECK(!weak_control.expired() && !weak_channel.expired());
+        CHECK(*response(channel.sendKeepAliveRep()) == ir::Return::Success);
+        ++pinned_completed;
+    }}) == ir::Return::Success);
+    auto* raw_channel = pinned.c2.get();
+    CHECK(*response(raw_channel->send(config_command())) == ir::Return::Success);
+    CHECK(pinned_completed == 1 && weak_control.expired() && weak_channel.expired());
+    expect_error(pinned.image->send(camera_command()), mel::ErrorCode::InvalidState);
+}
+
 } // namespace
 
 int main() {
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"ConfigSet schema and rejection without apply", config_schema_and_no_apply_on_rejection},
+        {"ConfigSet shared transaction and status ordering", config_transaction_status_and_ordering},
+        {"configuration failures, readback and reason mapping", config_failure_readback_and_error_mapping},
+        {"status reentry, exceptions and detach drain", status_reentry_throw_and_detach},
+        {"status suppression race and lifetime pins", status_suppression_and_lifetime_pins},
         {"unexpected stream stop and explicit recovery", unexpected_stop_is_a_fault_and_explicit_disable_recovers},
         {"requested cancellation before stopped result", requested_cancellation_precedes_stopped_result},
         {"transient receive timeouts continue acquisition", transient_receive_timeouts_allow_delivery},

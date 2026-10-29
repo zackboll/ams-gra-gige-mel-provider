@@ -133,6 +133,13 @@ Errors raised inside worker or consumer callbacks must not terminate the process
 
 ## Configuration and metadata
 
+C2 ConfigSet and both CameraCommand entry points reuse one internal typed,
+callback-free transaction; ConfigSet does not synthesize a public CameraCommand.
+Per-request outcomes supply futures and C2 terminal status independently of
+global last-error diagnostics. Results are prepared before dispatch; C2
+CameraCommand's Image response precedes C2 status. The private SAX parser and
+precise schema/status contract are documented in [configuration](configuration.md).
+
 `CameraCommand` is a complete camera request, not a patch object: it has no partial-update mask. Its width, height, offsets, integration time, frame rate, image type, and stage/direction fields must receive an explicit profile interpretation. An unsupported scanning request must not be accepted as if it were a staring request. See [CameraCommand][camera-command].
 
 For the initial profile, controls cover ROI, nanosecond integration time, and integer hertz frame rate for one staring Mono8 stream. Configuration is validated before mutation. Reconfiguration while enabled is rejected; the caller disables, submits a complete request, checks the result and current Image channel capabilities, makes its registered buffers large enough, and enables again.

@@ -1,5 +1,45 @@
 # Bootstrap validation record
 
+## GIGE-MEL-003 configuration and command status (2026-10-28)
+
+Starting freshly fetched main: commit
+`d9d4a626ead7a0956702273ca292143164dc2ed5`, tree
+`34b5546c5d225a64898de27d8653a1bee44df8d9`.
+Linux x86-64, GCC 14.2.0, Clang 19.1.7, CMake 3.31.6 and Python 3.13.5;
+all camera coverage uses synthetic sources or test-only decorators.
+
+- GCC development, GCC Release and Clang Debug: CTest **6/6 passed** each.
+- ASan/UBSan: **6/6 passed**, with
+  `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` and
+  `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`.
+- TSan: **6/6 passed**, with `TSAN_OPTIONS=halt_on_error=1`.
+- Native capture, install/export and separate installed-consumer build/run passed
+  against GCC Debug, GCC Release and Clang Debug provider builds. Installed
+  consumers exercise ConfigSet and status with no JSON headers installed.
+- The provider suite retains all 29 previous groups and adds five configuration/
+  status groups: schema/size/encoding and zero-apply rejection, shared transaction
+  and ordering, every backend reason mapping and readback failure/mismatch,
+  same/cross-provider reentry/throw/drain, and suppression/lifetime races.
+  Existing fault-recovery coverage now also checks ConfigSet rejection/status.
+- The complete development provider suite passed **100 consecutive repetitions**.
+- Public-API negative control: `tests/configuration_probe.cpp` was compiled against
+  an isolated starting-main library. With `--expect-unsupported` it confirmed valid
+  ConfigSet returns Unsupported (with/without callback) and status registration
+  returns NotSupported. Without the flag, the corrected feature expectation fails
+  with exit 4. Against the feature, the CTest probe passes with correlated Accepted
+  and both registered/unregistered ConfigSet success. No baseline runtime edits.
+- Both offline dependency verifiers passed: all original 97 MEL files unchanged,
+  plus two nlohmann/json files pinned separately. Parser source bytes were checked
+  against the immutable upstream Git tree's blob identities before locking hashes.
+- Final diff whitespace check passes; the immutable MIT license's original
+  first-line trailing space is retained with a file-specific whitespace attribute.
+- Workflow success criteria and the five hosted jobs are unchanged. Final-head
+  hosted results are recorded in the PR/handoff, not inferred from local passes.
+
+The exact schema, result/reason tables and callback/detach limitations are in
+[configuration](configuration.md). No hardware, network transport, SDK, UTC/PTP,
+automatic recovery or broader MEL conformance is claimed.
+
 ## GIGE-MEL-001 callback correction (2026-10-28)
 
 The callback correction was validated locally on Linux x86-64 with GCC 14.2.0,

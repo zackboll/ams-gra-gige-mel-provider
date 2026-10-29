@@ -56,8 +56,8 @@ ctest --test-dir build/make --output-on-failure
 | Common Channel | Keep-alive, correlated communications replies and callback, enable/disable, registration lifecycle |
 | Buffers | Consumer-owned Host memory, affinity and overlap checks, explicit release, bounded registration count |
 | Images | Mono8, one band, tightly packed rows; padding in a backend frame is copied out |
-| Camera configuration | Complete ROI/exposure/integer-frame-rate commands through either C2 or Image; disabled acquisition required |
-| Metadata | Communications replies and Image camera-command replies; supported callbacks only are advertised |
+| Camera configuration | Complete ROI/exposure/integer-frame-rate CameraCommand through C2 or Image; versioned JSON ConfigSet through C2; disabled acquisition required |
+| Metadata | Communications replies, Image camera-command replies, and correlated C2 configuration CommandStatus |
 | Backend seam | SDK-independent discovery/device/stream interfaces and move-only retained frame leases |
 | Synthetic backend | Deterministic images, bounded native pool, cancellation, validated readback, generation and time metadata |
 | Diagnostics | Project C++ counters and last error; no invented MEL Instrumentation fields |
@@ -203,17 +203,26 @@ the conformance gaps.
 
 ## Pinned dependencies and licensing
 
+C2 `ConfigSetCommand` accepts the provider-defined `gige-mel.camera-config`
+version 1 complete JSON snapshot. See [configuration and status](docs/configuration.md)
+for the working payload, limits, results, callback ordering and detach policy.
+
 | Dependency | Commit |
 | --- | --- |
 | IR MEL | `8d9224519f12b44e0b28815755c56a32a28d24a0` |
 | Common MEL | `f6908437d8fd2f7fb69896f9eb9cfd272d10c439` |
 | AMS Math | `00be45190f0e47d268cece8b8c2f8fb58b5418d2` |
+| nlohmann/json 3.12.0 (private, MIT) | `55f93686c01528224f448c19128836e7df245f72` |
 
 The checked-in closure is 91 unchanged headers plus six original license/intent
 files. It requires no Boost, RF MEL, VITA implementation, or upstream shared
 library. Every normal build verifies the 97 source files against the checked-in
 manifest. Details and source links are in
 [upstream provenance](docs/upstream-provenance.md).
+
+The private parser's single header and license are independently locked in
+`third_party/json-manifest.json` and verified offline by `scripts/verify_json.py`
+on every normal build. Its headers are not installed or exposed to consumers.
 
 Original project sources are licensed under [Apache-2.0](LICENSE). Third-party
 copyright, license, and intent notices remain with their respective sources;

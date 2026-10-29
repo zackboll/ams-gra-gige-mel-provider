@@ -1,5 +1,6 @@
 #include <gige_mel/provider.hpp>
 #include "provider_internal.hpp"
+#include "config_parser.hpp"
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
@@ -50,6 +51,43 @@ mel::ErrorCode map_error(backend::ErrorCode code) {
     }
     return mel::ErrorCode::InvalidState;
 }
+
+ir::CannotComply command_reason(backend::ErrorCode code) {
+    using B = backend::ErrorCode;
+    switch (code) {
+    case B::invalid_argument: return ir::CannotComply::InvalidInputParameter;
+    case B::unsupported: return ir::CannotComply::CapabilityUnavailable;
+    case B::not_found: return ir::CannotComply::UnknownID;
+    case B::resource_exhausted: return ir::CannotComply::InsufficientResources;
+    case B::disconnected: return ir::CannotComply::SubsystemUnavailable;
+    case B::io_error: return ir::CannotComply::SubsystemFault;
+    case B::timeout: case B::busy: case B::stopped: case B::invalid_state:
+        return ir::CannotComply::StateOrSettings;
+    }
+    return ir::CannotComply::Other;
+}
+
+struct ConfigurationOutcome {
+    bool success{false};
+    // invalid_argument/unsupported from apply are ordinary negative responses;
+    // schema errors and transport/readback failures are error-only futures.
+    std::optional<backend::Error> error;
+    ir::CannotComply reason{ir::CannotComply::Other};
+    std::string description;
+
+    static ConfigurationOutcome failure(const backend::Error& failure, bool error_only = true) {
+        return {false, error_only ? std::optional{failure} : std::nullopt,
+                command_reason(failure.code), failure.message};
+    }
+    ir::CommandStatus status(std::uint32_t id) const {
+        ir::CommandStatus result;
+        result.setCommandID(id);
+        result.setState(success ? ir::CommandState::Accepted : ir::CommandState::Rejected);
+        result.setReasonID(success ? ir::CannotComply::NotSet : reason);
+        result.setReasonDescription(success ? "" : description);
+        return result;
+    }
+};
 
 class ChannelCore;
 class ControlImpl;
@@ -132,6 +170,7 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     cap.setChannelTypes({type});
     std::set<ir::ChannelMetadataCapabilityType> metadata{ir::ChannelMetadataCapabilityType::ChannelCommsTestRep};
     if (type == ir::ChannelType::IRSTImage) metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
+    if (type == ir::ChannelType::CommandAndControl) metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
     cap.setChannelMetadataCapabilities(metadata);
     if (config) {
         cap.setPlatform(config->getPlatform());
@@ -409,6 +448,64 @@ protected:
                          std::string(name) + ": not available in the experimental image-stream profile");
     }
 
+    // Callback-free shared transaction. Caller holds operations, has admitted
+    // this submission and pins Control/channel through result and dispatch.
+    ConfigurationOutcome configure_locked(const backend::CameraConfiguration& requested, bool profile_valid = true) {
+        {
+            std::lock_guard lock(runtime_->state_mutex);
+            if (runtime_->image_active)
+                return ConfigurationOutcome::failure({backend::ErrorCode::invalid_state, "disable image acquisition before configuring"});
+        }
+        if (!profile_valid || !valid_layout(requested, runtime_->camera_capabilities)) {
+            const std::string message = "camera configuration cannot be satisfied: requires a complete, valid Mono8 staring configuration";
+            runtime_->report(message);
+            return ConfigurationOutcome::failure({backend::ErrorCode::invalid_argument, message}, false);
+        }
+        auto applied = runtime_->device->apply(requested);
+        // Even an apply failure may have partially mutated the device.
+        auto actual = runtime_->device->configuration();
+        bool valid;
+        {
+            std::lock_guard lock(runtime_->state_mutex);
+            ++runtime_->configuration_generation;
+            valid = actual && valid_layout(actual.value(), runtime_->camera_capabilities);
+            runtime_->configuration_valid = valid;
+            if (valid) runtime_->configuration = actual.value();
+        }
+        ConfigurationOutcome outcome;
+        if (!actual) outcome = ConfigurationOutcome::failure(actual.error());
+        else if (!applied) {
+            const auto code = applied.error().code;
+            outcome = ConfigurationOutcome::failure(applied.error(),
+                code != backend::ErrorCode::invalid_argument && code != backend::ErrorCode::unsupported);
+        } else if (!valid || actual.value() != requested) {
+            outcome.description = "camera readback differs from requested configuration or violates the supported layout";
+        } else outcome.success = true;
+        if (!outcome.success) runtime_->report(outcome.description);
+        return outcome;
+    }
+
+    mel::RequestFor<ir::Return> config_set(const ir::ConfigSetCommand& command) {
+        // Must precede parsing, operation locks and callback admission, including
+        // cross-provider callbacks: a rejection must not recursively send status.
+        if (in_provider_callback())
+            return failed<ir::Return>(mel::ErrorCode::InvalidState, "schedule configuration outside callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<ir::Return>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        ConfigurationOutcome outcome;
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return failed<ir::Return>(mel::ErrorCode::InvalidState, "channel is detached");
+            const auto parsed = parse_camera_config(command.getConfig());
+            outcome = parsed ? configure_locked(parsed.value()) : ConfigurationOutcome::failure(parsed.error());
+        }
+        auto result = outcome.error ? failed<ir::Return>(map_error(outcome.error->code), outcome.description)
+                                    : ready(outcome.success ? ir::Return::Success : ir::Return::Fail);
+        on_command_status(outcome.status(command.getCommandID()));
+        return result;
+    }
+
     mel::RequestFor<ir::CameraCommandResp> camera_command(const ir::CameraCommand& command) {
         if (in_provider_callback())
             return failed<ir::CameraCommandResp>(mel::ErrorCode::InvalidState, "schedule camera changes outside callbacks");
@@ -416,6 +513,7 @@ protected:
         if (!control_pin) return failed<ir::CameraCommandResp>(mel::ErrorCode::InvalidState, "control is closing");
         const auto self = shared_from_this();
         std::shared_ptr<ChannelCore> image_recipient;
+        ConfigurationOutcome outcome;
         ir::CameraCommandResp reply;
         reply.setCommandID(command.getCommandID());
         // size is left at zero: this C++ object has no specified serialized wire
@@ -424,11 +522,6 @@ protected:
             std::lock_guard operation(runtime_->operations);
             if (is_detached()) return failed<ir::CameraCommandResp>(mel::ErrorCode::InvalidState, "channel is detached");
             image_recipient = runtime_->image_channel.lock();
-            {
-                std::lock_guard lock(runtime_->state_mutex);
-                if (runtime_->image_active)
-                    return failed<ir::CameraCommandResp>(mel::ErrorCode::InvalidState, "disable image acquisition before configuring");
-            }
             backend::CameraConfiguration requested;
             requested.width = command.getWidth();
             requested.height = command.getHeight();
@@ -436,43 +529,26 @@ protected:
             requested.offset_y = command.getRowOffset();
             requested.frame_rate_hz = command.getFrameRate();
             requested.exposure = command.getIntegrationTime();
-            if (command.getImageType() != ir::ImageType::Staring || command.getNumberOfStages() != 0 ||
-                !valid_layout(requested, runtime_->camera_capabilities)) {
-                runtime_->report("CameraCommand cannot be satisfied: requires a complete, valid Mono8 staring configuration");
-            } else {
-                auto applied = runtime_->device->apply(requested);
-                // Query after every attempted apply. A future hardware adapter
-                // may have partially changed the device before reporting error.
-                auto actual = runtime_->device->configuration();
-                {
-                    std::lock_guard lock(runtime_->state_mutex);
-                    ++runtime_->configuration_generation;
-                    runtime_->configuration_valid = actual && valid_layout(actual.value(), runtime_->camera_capabilities);
-                    if (runtime_->configuration_valid) runtime_->configuration = actual.value();
-                }
-                if (!actual) {
-                    runtime_->report(actual.error().message);
-                    return failed<ir::CameraCommandResp>(map_error(actual.error().code), actual.error().message);
-                }
-                if (!applied) {
-                    runtime_->report(applied.error().message);
-                    if (applied.error().code != backend::ErrorCode::invalid_argument && applied.error().code != backend::ErrorCode::unsupported)
-                        return failed<ir::CameraCommandResp>(map_error(applied.error().code), applied.error().message);
-                } else {
-                    reply.setCommandSuccess(actual.value() == requested);
-                    if (!reply.getCommandSuccess()) runtime_->report("camera readback differs from requested configuration");
-                }
-            }
+            outcome = configure_locked(requested,
+                command.getImageType() == ir::ImageType::Staring && command.getNumberOfStages() == 0);
         }
+        if (outcome.error) {
+            auto result = failed<ir::CameraCommandResp>(map_error(outcome.error->code), outcome.description);
+            on_command_status(outcome.status(command.getCommandID()));
+            return result;
+        }
+        reply.setCommandSuccess(outcome.success);
         reply.setTimestamp(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()));
         auto result = ready(reply);
         // Camera responses are an Image callback even when C2 submitted the
         // command. No operation/state locks are held across user code.
         if (image_recipient) image_recipient->on_camera_reply(reply);
+        on_command_status(outcome.status(command.getCommandID()));
         return result;
     }
 
     virtual void on_camera_reply(const ir::CameraCommandResp&) {}
+    virtual void on_command_status(const ir::CommandStatus&) {}
     std::shared_ptr<Runtime> runtime_;
     ir::Config config_;
     std::mutex callback_mutex_;
@@ -665,13 +741,22 @@ public:
     GIGE_UNSUPPORTED_SEND(ir::EraseCommand, ir::EraseCommandType)
     GIGE_UNSUPPORTED_SEND(ir::SystemTrackDataResponse, ir::CommandStatus)
     GIGE_UNSUPPORTED_SEND(ir::ModeCmd, ir::MFA_Mode)
-    GIGE_UNSUPPORTED_SEND(ir::ConfigSetCommand, ir::Return)
+    mel::RequestFor<ir::Return> send(ir::ConfigSetCommand command) override { return config_set(command); }
     GIGE_UNSUPPORTED_CALLBACK(mel::BIT_Configuration)
-    GIGE_UNSUPPORTED_CALLBACK(ir::CommandStatus)
+    ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const ir::CommandStatus* const)> callback) override {
+        return register_callback(status_callback_, std::move(callback));
+    }
     GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationConfiguration)
     GIGE_UNSUPPORTED_CALLBACK(ir::CameraProtectCmdResp)
     GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationStatus)
     GIGE_UNSUPPORTED_CALLBACK(mel::BIT_Status)
+private:
+    void on_command_status(const ir::CommandStatus& status) override {
+        Callback<ir::CommandStatus> callback;
+        { std::lock_guard lock(callback_mutex_); callback = status_callback_; }
+        invoke(callback, status);
+    }
+    Callback<ir::CommandStatus> status_callback_;
 };
 #undef GIGE_UNSUPPORTED_SEND
 #undef GIGE_UNSUPPORTED_CALLBACK

@@ -1,3 +1,5 @@
 * text=auto eol=lf
 # These bytes are checksum-locked to upstream; never normalize their newlines.
 /third_party/** -text
+# Retain the immutable MIT license's original first-line trailing space.
+/third_party/nlohmann-json/LICENSE.MIT -whitespace
