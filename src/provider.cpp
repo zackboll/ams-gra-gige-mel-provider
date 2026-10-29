@@ -86,14 +86,28 @@ struct Runtime {
     }
 };
 
-// The guard also covers synchronous metadata callbacks. A nested callback
-// restores the previous guard, rather than clearing another callback's state.
-thread_local const Runtime* callback_runtime = nullptr;
+// Stack frames live on the callback's stack: admission cannot be stranded by
+// allocation failure, and nested callbacks retain every runtime in the chain.
+struct CallbackGuard;
+thread_local const CallbackGuard* callback_context = nullptr;
 struct CallbackGuard {
-    const Runtime* previous;
-    explicit CallbackGuard(const Runtime* runtime) : previous(callback_runtime) { callback_runtime = runtime; }
-    ~CallbackGuard() { callback_runtime = previous; }
+    const Runtime* const runtime;
+    const CallbackGuard* const previous;
+    explicit CallbackGuard(const Runtime* value) noexcept
+        : runtime(value), previous(callback_context) { callback_context = this; }
+    ~CallbackGuard() { callback_context = previous; }
+    CallbackGuard(const CallbackGuard&) = delete;
+    CallbackGuard& operator=(const CallbackGuard&) = delete;
 };
+
+bool in_provider_callback() noexcept { return callback_context != nullptr; }
+
+bool in_runtime_callback(const Runtime* runtime) noexcept {
+    for (auto frame = callback_context; frame; frame = frame->previous) {
+        if (frame->runtime == runtime) return true;
+    }
+    return false;
+}
 
 bool valid_layout(const backend::CameraConfiguration& c, const backend::CameraCapabilities& caps) {
     return caps.mono8 && c.width > 0 && c.height > 0 && c.width <= caps.sensor_width && c.height <= caps.sensor_height &&
@@ -246,7 +260,7 @@ public:
     }
 
     ir::Return registerBuffer(std::shared_ptr<ir::Buffer> buffer) override {
-        if (callback_runtime == runtime_.get()) return ir::Return::Fail;
+        if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
@@ -270,7 +284,7 @@ public:
         return ir::Return::Success;
     }
     ir::Return unregisterBuffer(std::shared_ptr<ir::Buffer> buffer) override {
-        if (callback_runtime == runtime_.get()) return ir::Return::Fail;
+        if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
@@ -283,7 +297,7 @@ public:
         return ir::Return::Success;
     }
     ir::Return enable() override {
-        if (callback_runtime == runtime_.get()) return ir::Return::Fail;
+        if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
@@ -332,7 +346,7 @@ public:
         }
     }
     ir::Return disable() override {
-        if (callback_runtime == runtime_.get()) return ir::Return::Fail;
+        if (in_provider_callback()) return ir::Return::Fail;
         // Pin before taking operations: a callback dropping the last external
         // Control must not run its destructor while this thread joins it.
         const auto control_pin = runtime_->control.load().lock();
@@ -352,7 +366,9 @@ public:
     void detach_locked() {
         detached_ = true;
         stop_locked();
-        if (callback_runtime != runtime_.get()) {
+        // Only defensive destruction involving this runtime may skip its own
+        // drain. External detach must still wait for every admitted callback.
+        if (!in_runtime_callback(runtime_.get())) {
             std::unique_lock lock(callback_mutex_);
             callback_cv_.wait(lock, [this] { return active_metadata_callbacks_ == 0; });
         }
@@ -364,7 +380,7 @@ protected:
     template <class T> using Callback = std::function<void(ir::Channel&, const T*)>;
 
     template <class T> ir::Return register_callback(Callback<T>& slot, Callback<T> callback) {
-        if (callback_runtime == runtime_.get() || is_detached()) return ir::Return::Fail;
+        if (in_provider_callback() || is_detached()) return ir::Return::Fail;
         if (!callback) return ir::Return::BadPointer;
         std::lock_guard lock(callback_mutex_);
         if (is_detached()) return ir::Return::Fail;
@@ -394,7 +410,7 @@ protected:
     }
 
     mel::RequestFor<ir::CameraCommandResp> camera_command(const ir::CameraCommand& command) {
-        if (callback_runtime == runtime_.get())
+        if (in_provider_callback())
             return failed<ir::CameraCommandResp>(mel::ErrorCode::InvalidState, "schedule camera changes outside callbacks");
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return failed<ir::CameraCommandResp>(mel::ErrorCode::InvalidState, "control is closing");
@@ -666,7 +682,7 @@ public:
     }
 
     ir::Return init(const std::string& aperture_config_id) override {
-        if (callback_runtime == runtime_.get()) return ir::Return::Fail;
+        if (in_provider_callback()) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
         if (!aperture_config_id.empty() && aperture_config_id != "mono8-bootstrap") return ir::Return::NotSupported;
         try {
@@ -714,7 +730,7 @@ public:
             "0.1.0 experimental Mono8 image-stream profile against pinned MEL 4.0; not full MEL conformance");
     }
     std::shared_ptr<ir::Channel> attachChannel(const ir::Config& config) override {
-        if (callback_runtime == runtime_.get()) return {};
+        if (in_provider_callback()) return {};
         std::lock_guard operation(runtime_->operations);
         if (!runtime_->initialized) return {};
         const auto type = config.getChannelType();
@@ -733,7 +749,7 @@ public:
         return channel;
     }
     ir::Return detachChannel(std::shared_ptr<ir::Channel> channel) override {
-        if (callback_runtime == runtime_.get()) return ir::Return::Fail;
+        if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
@@ -783,7 +799,7 @@ std::shared_ptr<ir::Control> control_for(std::string_view instance, const std::s
     const auto concrete = std::dynamic_pointer_cast<Manager>(manager);
     if (!concrete || concrete->runtime->settings.instance != instance) return {};
     const auto& runtime = concrete->runtime;
-    if (callback_runtime == runtime.get()) return {};
+    if (in_provider_callback()) return {};
     std::lock_guard operation(runtime->operations);
     if (auto control = runtime->control.load().lock()) return control;
     auto control = std::make_shared<ControlImpl>(runtime);

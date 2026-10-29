@@ -1,5 +1,37 @@
 # Bootstrap validation record
 
+## GIGE-MEL-001 callback correction (2026-10-28)
+
+The callback correction was validated locally on Linux x86-64 with GCC 14.2.0,
+Clang 19.1.7, CMake 3.31.6, Ninja, and Python 3.13.16. This supplements the
+historical bootstrap record below; all camera tests still use synthetic sources.
+
+- GCC development, GCC Release, and Clang development builds: CTest **4/4 passed**
+  in each configuration, including native loading and upstream integrity.
+- ASan/UBSan: CTest **4/4 passed**, with
+  `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` and
+  `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`.
+- TSan: CTest **4/4 passed**, with `TSAN_OPTIONS=halt_on_error=1`.
+- Capture, installation, and separate installed-consumer build/run passed for
+  GCC development, GCC Release, and Clang development provider builds.
+- The provider suite now has **24 test groups**. Its three new groups cover the
+  gated A-to-B nested communications callback versus external A detach,
+  same/cross-provider mutation rejection in image and metadata callbacks, and
+  nested metadata exceptions restoring callback context. Existing buffer lease,
+  external drain, callback exception, and last-Control-reference tests pass.
+- The development provider suite passed **100 consecutive repetitions**.
+- Negative control: the new tests were copied into a disposable worktree at
+  `81d5023eb9b7dde964bf56b666037fc338b26012` without the runtime correction.
+  The first test established admission closure through detached keep-alive,
+  released the nested callback gate, and failed with CTest's **30-second timeout**.
+  With the correction the entire provider suite completes in about 0.33 seconds.
+- `python3 scripts/vendor_upstream.py --verify` verified all 97 pinned files;
+  `git diff --check` passed. No workflow, pinned header, public ABI, or backend
+  interface changes were needed.
+
+The five existing hosted jobs remain unchanged. Their results for the delivered
+PR head are recorded in the PR/handoff, not inferred from these local runs.
+
 ## Executed checks
 
 The bootstrap was compiled and exercised on Linux x86-64 with GCC 13.3.0,

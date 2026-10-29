@@ -58,6 +58,8 @@ All concrete channel families inherit these required members from [Channel][chan
 
 There is no general unregister-metadata-callback overload in this interface. Replacing or clearing a callback must not be invented as a compatible upstream API. Consumers should use channel lifetime and the supported registration contract.
 
+Image and synchronous metadata callbacks share the [profile's callback policy](implementation-profile.md#callbacks-threads-and-shutdown): lifecycle/configuration mutations, including Control lookup/creation, reject calls from any provider callback on the current thread, across provider instances. Explicit buffer release, capability/statistics queries, keep-alive, and correlated communications remain available. Queue mutations to a control thread and return without waiting on work that could depend on callback completion. External detach closes metadata admission and drains admitted callbacks.
+
 ### Buffer and image delivery
 
 All [Buffer][buffer] members are required: `init`, `getBufferAddress`, `getImageAddress`, `getSize`, `getContext`, `release`, `getFlags`, `addFlag`, and `setFlags`.

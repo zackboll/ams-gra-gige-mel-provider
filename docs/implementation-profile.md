@@ -175,15 +175,27 @@ BadPointer and a duplicate returns Fail. Unsupported callback types return
 NotSupported and are absent from metadata capabilities. There is no invented
 unregister-callback overload.
 
-Inside a callback, releasing the delivered buffer, reading capabilities,
-reading project statistics, and keep-alive are supported. Schedule lifecycle or
-configuration changes on a separate control thread: enable, disable, attach,
-detach, register/unregister, and camera mutations reject reentry. Callbacks must
-return in bounded time; a blocking callback can delay external stop.
+Inside an Image callback or synchronous metadata callback, releasing the
+delivered buffer, reading capabilities, reading project statistics, keep-alive,
+and communications requests with their correlated replies remain supported.
+Lifecycle and configuration mutations are rejected from **any provider callback
+on the current thread**, including callbacks of another provider instance and
+nested callbacks. This includes enable/disable, buffer registration and
+unregistration, supported metadata callback registration, camera configuration,
+Control initialization, channel attachment/detachment, and Control lookup/creation.
+The existing API failure forms apply: Fail, InvalidState for camera requests,
+or an empty shared pointer for pointer-returning operations. Unsupported surfaces
+remain unsupported.
+
+Queue lifecycle and configuration work onto a separate control thread and return
+from the callback. A callback must not synchronously wait for queued work that
+could itself depend on callback completion. Callbacks must return in bounded
+time; a blocking callback can delay external stop.
 
 Normal external disable joins the worker, so no Image callback remains running
-when it returns. Detach closes metadata admission and also drains admitted
-metadata callbacks. Destroying the Control detaches its channels. Defensive
+when it returns. External detach closes metadata admission and drains all admitted
+metadata callbacks before returning, including callbacks enclosing nested calls
+to other providers. Destroying the Control detaches its channels. Defensive
 ownership guards handle the last external Control reference disappearing during
 an Image callback without self-join or a join/operation-lock deadlock, but
 applications should perform destruction outside callbacks and retain a control
