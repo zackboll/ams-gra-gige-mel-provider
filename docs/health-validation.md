@@ -31,6 +31,17 @@ and test-decorator sources were exercised; **no hardware or SDK qualification**.
 - `git diff --check`: passed. No upstream declaration, backend public interface,
   factory signature or CI matrix changes.
 
+An additional GCC Release build initially exposed an optimized destructor-path
+abort (also reproduced in a fresh build tree and the existing ConfigSet probe).
+Tracing showed the Health destructor reached during C2 teardown. Auxiliary
+cleanup was moved out of the base-destructor-reachable stop function into the
+explicit disable/detach paths, with Health's own defensive destructor cleanup
+retained. The corrected Release full CTest suite passes 6/6. Development and
+both sanitizer suites were rerun after this correction. This was treated as a
+real validation failure to correct, not dismissed as an environment limitation.
+Optional local Clang execution was unavailable because clang++ is not installed;
+the unchanged hosted Clang job remains the compiler validation gate.
+
 ## Independently built baseline negative control
 
 A disposable detached worktree at the exact starting commit/tree above was

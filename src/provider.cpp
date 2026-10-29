@@ -285,6 +285,8 @@ public:
         // Public detach/disable normally joins first. If a consumer destroys its
         // control graph from a callback, state captured by the thread still owns
         // every object it needs; never join the current thread.
+        // Derived auxiliary cleanup belongs to disable/detach and the derived
+        // destructor, never a virtual hook reached from this base destructor.
         stop_locked();
         for (auto& buffer : buffers_) buffer->unbind();
     }
@@ -407,6 +409,7 @@ public:
         if (!control_pin) return ir::Return::Fail;
         std::lock_guard operation(runtime_->operations);
         if (is_detached()) return ir::Return::Fail;
+        stop_auxiliary_locked();
         stop_locked();
         return ir::Return::Success;
     }
@@ -419,6 +422,7 @@ public:
 
     void detach_locked() {
         detached_ = true;
+        stop_auxiliary_locked();
         stop_locked();
         // Only defensive destruction involving this runtime may skip its own
         // drain. External detach must still wait for every admitted callback.
@@ -574,7 +578,6 @@ protected:
 
 private:
     void stop_locked() {
-        stop_auxiliary_locked();
         const bool owned_stream = static_cast<bool>(stream_state_);
         if (stream_state_) {
             stream_state_->stopping = true;
