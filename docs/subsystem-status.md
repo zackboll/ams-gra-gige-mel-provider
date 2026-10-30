@@ -181,4 +181,3 @@ health, component inventory, safety criticality or connection probing is
 qualified. See the [validation record](subsystem-status-validation.md). The two
 deferred PR #3 notes (fallback text for empty backend rejections; ConfigSet
 UTF-8 BOM policy) remain separate follow-ups.
-

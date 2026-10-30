@@ -1637,6 +1637,7 @@ int main(int argc, char** argv) {
     const std::vector<std::pair<const char*, void (*)()>> tests{
         {"Subsystem surface inventory and registration", subsystem_surface},
         {"Subsystem lifecycle and manager-lifetime counters", subsystem_lifecycle},
+        {"Subsystem independent-manager unwind drains Health", subsystem_lifecycle_unwind},
         {"Subsystem current-state mapping and history", subsystem_state_mapping},
         {"Subsystem BIT revision and sequence semantics", subsystem_counters},
         {"Subsystem coherent held batch versus C2", subsystem_coherent_batch},

@@ -101,4 +101,3 @@ inline void demonstrate_subsystem(const std::shared_ptr<ams::iface::irmel::Contr
     } catch (...) { cleanup(); throw; }
     cleanup();
 }
-

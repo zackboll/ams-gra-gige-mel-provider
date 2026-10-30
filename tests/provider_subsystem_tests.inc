@@ -11,10 +11,23 @@ struct SubsystemReports {
     SubsystemCallback callback() {
         return [this](auto&, auto* value) { record(*value); };
     }
+    // Optional deterministic stop (see stop_after): the admitted callback that
+    // records report number `hold_at` waits at `hold` after recording.
+    std::shared_ptr<WatchdogGate> hold;
+    std::size_t hold_at{0};
     void record(const ir::SubsystemStatusResp& value) {
+        std::shared_ptr<WatchdogGate> held;
         { std::lock_guard lock(mutex); reports.push_back(value); threads.push_back(std::this_thread::get_id());
-          times.push_back(std::chrono::steady_clock::now()); }
+          times.push_back(std::chrono::steady_clock::now());
+          if (hold_at != 0 && reports.size() == hold_at) held = hold; }
         changed.notify_all();
+        if (held) held->enter_and_wait(); // Collector mutex already released.
+    }
+    void arm(std::size_t target) { std::lock_guard lock(mutex); hold = std::make_shared<WatchdogGate>(); hold_at = target; }
+    void release() {
+        std::shared_ptr<WatchdogGate> gate;
+        { std::lock_guard lock(mutex); gate = hold; hold_at = 0; }
+        if (gate) gate->open();
     }
     void wait(std::size_t count) {
         std::unique_lock lock(mutex);
@@ -104,6 +117,40 @@ void check_consecutive(const std::vector<ir::SubsystemStatusResp>& reports) {
         CHECK(reports[i].getStatusSeqNum() == static_cast<std::uint32_t>(reports[i - 1].getStatusSeqNum() + 1U));
 }
 
+// R1-C: deterministic quiescent stop. A plain disable() may suppress a report
+// the worker has just prepared; that consumed sequence is a valid gap, so the
+// last DELIVERED report would not identify the next sequence. Here the worker
+// is held inside the admitted callback recording report `target` (the last
+// callback of its batch) while disable() reaches the actual worker join with
+// publication already stopped. After release the worker exits without
+// preparing another sample: the last delivered report is the last prepared.
+void stop_after(ir::HealthStatusChannel& health, SubsystemReports& reports, std::size_t target) {
+    std::shared_ptr<WatchdogGate> gate;
+    { std::lock_guard lock(reports.mutex); gate = reports.hold; CHECK(gate && reports.hold_at == target); }
+    std::atomic<bool> joining{false};
+    std::future<ir::Return> stopped;
+    TestCleanup cleanup{[&] { reports.release(); if (stopped.valid()) stopped.wait(); }};
+    gate->wait_for_entry();
+    stopped = std::async(std::launch::async, [&] { test_join::Observe observation(joining); return health.disable(); });
+    eventually([&] { return joining.load(std::memory_order_acquire); });
+    reports.release();
+    CHECK(stopped.wait_for(2s) == std::future_status::ready && stopped.get() == ir::Return::Success);
+    gate->check();
+    CHECK(reports.count() == target); // Nothing prepared after the held report.
+}
+
+// Exactly `n` consecutive reports from one enabled interval, stopped by stop_after.
+std::vector<ir::SubsystemStatusResp> held_interval(ir::HealthStatusChannel& health, SubsystemReports& reports,
+                                                   std::size_t n) {
+    const auto before = reports.count();
+    reports.arm(before + n);
+    CHECK(health.enable() == ir::Return::Success);
+    stop_after(health, reports, before + n);
+    auto taken = reports.since(before);
+    check_consecutive(taken);
+    return taken;
+}
+
 void subsystem_surface() {
     SubsystemReports reports; // Outlives the Fixture and every callback.
     Fixture f;
@@ -163,38 +210,132 @@ void subsystem_surface() {
     CHECK(health->registerMetadataCallback(SubsystemCallback{}) == ir::Return::Fail);
 }
 
+// R1-A: one re-enabled interval, selected by fixed index. Precondition: Health
+// is disabled and quiescent, so the baseline precedes every new report. At
+// least two new reports arrive before inspection and Health is drained before
+// the stable collection is read; the latest report has therefore advanced
+// past the first new one, which last() would wrongly select.
+std::vector<ir::SubsystemStatusResp> reenabled_interval(ir::HealthStatusChannel& health, SubsystemReports& reports) {
+    const auto before = reports.count();
+    CHECK(health.enable() == ir::Return::Success);
+    reports.wait(before + 2); // No exact total: further periodic reports are permitted.
+    CHECK(health.disable() == ir::Return::Success);
+    auto interval = reports.since(before);
+    CHECK(interval.size() >= 2);
+    check_consecutive(interval);
+    return interval;
+}
+
+// R1-B: the independent-manager phase of subsystem_lifecycle, shared verbatim
+// with its failure-path regression. Probe state lives OUTSIDE the phase's
+// collector so callbacks, cleanup and a coordinator can observe it safely.
+struct InjectedPhaseFailure : std::runtime_error { using std::runtime_error::runtime_error; };
+
+struct IndependentPhaseProbe {
+    int fail_interval{0}; // 0 ordinary; 1 BIT-only interval; 2 BIT+Subsystem interval.
+    std::shared_ptr<WatchdogGate> gate{std::make_shared<WatchdogGate>()};
+    std::atomic<int> interval{0};
+    std::atomic<bool> held{false}, held_completed{false};
+    std::atomic<bool> collector_alive{false}, destroyed_after_drain{false};
+    std::atomic<unsigned> after_destroy{0}; // Diagnostic lifetime marker only.
+    std::atomic<bool> joining{false}, cleanup_done{false};
+    std::atomic<int> cleanup_disable{-1};
+};
+
+// Marks the collector's lifetime. The destructor body runs before `bits` is
+// destroyed, recording whether the drain guard had already completed.
+struct ObservedBitReports {
+    BitReports bits;
+    IndependentPhaseProbe& probe;
+    explicit ObservedBitReports(IndependentPhaseProbe& p) : probe(p) { probe.collector_alive = true; }
+    ~ObservedBitReports() {
+        probe.destroyed_after_drain = probe.cleanup_done.load();
+        probe.collector_alive = false;
+    }
+    ObservedBitReports(const ObservedBitReports&) = delete;
+    ObservedBitReports& operator=(const ObservedBitReports&) = delete;
+};
+
+// Controlled failure while Health is enabled, after an admitted BIT callback
+// has recorded its payload and is held at the gate. No-op on the ordinary path.
+void inject_phase_failure(IndependentPhaseProbe& probe, int interval) {
+    if (probe.fail_interval != interval) return;
+    probe.gate->wait_for_entry();
+    throw InjectedPhaseFailure("R1-B injected independent-manager phase failure");
+}
+
+// An independent manager starts from its own zero state. Before any Subsystem
+// registration, Health BIT-only samples and C2 executions prepare BIT state
+// (advancing ITS revision) but consume no subsystem sequence.
+void independent_manager_phase(Fixture& other, SubsystemReports& other_reports, IndependentPhaseProbe& probe) {
+    ObservedBitReports observed(probe);
+    auto other_health = attach_health(other);
+    // Declared after every phase-local collector, before the first operation
+    // that can start publication: on any unwind it synchronously disables
+    // (joining the Health worker) while callback state is still alive. Results
+    // are recorded, never asserted, here. Repeating it after an ordinary
+    // disable/detach is harmless.
+    TestCleanup drain{[&] {
+        try {
+            test_join::Observe observation(probe.joining);
+            probe.cleanup_disable = static_cast<int>(other_health->disable());
+        } catch (...) { probe.cleanup_disable = -2; }
+        try { (void)other.control->detachChannel(other_health); } catch (...) {}
+        probe.cleanup_done = true;
+    }};
+    CHECK(other_health->registerMetadataCallback(BitCallback{[&observed, &probe](auto& c, auto* value) {
+        if (!probe.collector_alive) { ++probe.after_destroy; return; } // Never touches `observed`.
+        observed.bits.callback()(c, value); // Records, then releases the collector mutex.
+        if (probe.fail_interval != 0 && probe.interval == probe.fail_interval && !probe.held.exchange(true)) {
+            probe.gate->enter_and_wait();
+            probe.held_completed = true;
+        }
+    }}) == ir::Return::Success);
+    probe.interval = 1;
+    CHECK(other_health->enable() == ir::Return::Success);
+    inject_phase_failure(probe, 1);
+    observed.bits.wait(3);
+    CHECK(other_health->disable() == ir::Return::Success);
+    CHECK(*response(other.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
+    CHECK(*response(other.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
+    CHECK(other_health->registerMetadataCallback(other_reports.callback()) == ir::Return::Success);
+    probe.interval = 2;
+    CHECK(other_health->enable() == ir::Return::Success);
+    inject_phase_failure(probe, 2);
+    other_reports.wait(1);
+    CHECK(other_health->disable() == ir::Return::Success);
+    CHECK(other_reports.at(0).getStatusSeqNum() == 1 && revision(other_reports.at(0)) == 2);
+    CHECK(other.control->detachChannel(other_health) == ir::Return::Success);
+}
+
 // Manager-lifetime counters across re-enable, reattachment and Control
 // recreation; independent managers keep independent counters.
 void subsystem_lifecycle() {
     SubsystemReports reports, other_reports;
     Fixture f, other;
     auto health = attach_health(f);
+    // Every interval stops via stop_after, so the last delivered sequence is
+    // the last consumed one and "+1" below is exact.
+    reports.arm(1);
     CHECK(health->enable() == ir::Return::Success);
     // Late registration while enabled prompts the existing worker, not the caller.
     const auto registering = std::this_thread::get_id();
     CHECK(health->registerMetadataCallback(reports.callback()) == ir::Return::Success);
-    reports.wait(1);
-    CHECK(health->disable() == ir::Return::Success); reports.quiet();
+    stop_after(*health, reports, 1);
     CHECK(reports.at(0).getStatusSeqNum() == 1 && reports.threads.front() != registering);
     // An accepted execution advances the BIT revision once.
     CHECK(*response(f.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
-    auto before = reports.count();
     auto last_sequence = reports.last().getStatusSeqNum();
-    CHECK(health->enable() == ir::Return::Success); // Re-enable: no reset.
-    reports.wait(before + 2);
-    CHECK(health->disable() == ir::Return::Success); reports.quiet();
-    auto interval = reports.since(before);
+    auto interval = held_interval(*health, reports, 2); // Re-enable: no reset.
     CHECK(interval.front().getStatusSeqNum() == last_sequence + 1); // Disabled: nothing consumed.
-    check_consecutive(interval);
     for (const auto& report : interval) CHECK(revision(report) == 1);
     // Detach and reattach: fresh registration state, same manager counters.
     CHECK(f.control->detachChannel(health) == ir::Return::Success);
     health = attach_health(f);
-    before = reports.count(); last_sequence = reports.last().getStatusSeqNum();
+    last_sequence = reports.last().getStatusSeqNum();
     CHECK(health->registerMetadataCallback(reports.callback()) == ir::Return::Success);
-    CHECK(health->enable() == ir::Return::Success); reports.wait(before + 1);
-    CHECK(health->disable() == ir::Return::Success); reports.quiet();
-    CHECK(reports.at(before).getStatusSeqNum() == last_sequence + 1 && revision(reports.at(before)) == 1);
+    interval = held_interval(*health, reports, 1);
+    CHECK(interval.front().getStatusSeqNum() == last_sequence + 1 && revision(interval.front()) == 1);
     // Control recreation within the same surviving runtime.
     CHECK(f.control->detachChannel(health) == ir::Return::Success);
     CHECK(f.control->detachChannel(f.c2) == ir::Return::Success);
@@ -203,37 +344,65 @@ void subsystem_lifecycle() {
     f.control = ir::getControl("synthetic", f.manager);
     CHECK(f.control && f.control->init() == ir::Return::Success); f.attach();
     health = attach_health(f);
-    before = reports.count(); last_sequence = reports.last().getStatusSeqNum();
+    last_sequence = reports.last().getStatusSeqNum();
     CHECK(health->registerMetadataCallback(reports.callback()) == ir::Return::Success);
-    CHECK(health->enable() == ir::Return::Success); reports.wait(before + 1);
-    CHECK(health->disable() == ir::Return::Success); reports.quiet();
-    CHECK(reports.at(before).getStatusSeqNum() == last_sequence + 1 && revision(reports.at(before)) == 1);
+    interval = held_interval(*health, reports, 1);
+    CHECK(interval.front().getStatusSeqNum() == last_sequence + 1 && revision(interval.front()) == 1);
     CHECK(f.control->detachChannel(health) == ir::Return::Success);
     // An independent manager starts from its own zero state. Before any
     // Subsystem registration, Health BIT-only samples and C2 executions prepare
     // BIT state (advancing ITS revision) but consume no subsystem sequence.
-    BitReports other_bits;
-    auto other_health = attach_health(other);
-    CHECK(other_health->registerMetadataCallback(other_bits.callback()) == ir::Return::Success);
-    CHECK(other_health->enable() == ir::Return::Success); other_bits.wait(3);
-    CHECK(other_health->disable() == ir::Return::Success);
-    CHECK(*response(other.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
-    CHECK(*response(other.c2->send(ir::BIT_Command{42,{1},{},{}})) == ir::Return::Success);
-    CHECK(other_health->registerMetadataCallback(other_reports.callback()) == ir::Return::Success);
-    CHECK(other_health->enable() == ir::Return::Success); other_reports.wait(1);
-    CHECK(other_health->disable() == ir::Return::Success);
-    CHECK(other_reports.at(0).getStatusSeqNum() == 1 && revision(other_reports.at(0)) == 2);
-    CHECK(other.control->detachChannel(other_health) == ir::Return::Success);
+    IndependentPhaseProbe ordinary; // No injection: the ordinary path through the same guard.
+    independent_manager_phase(other, other_reports, ordinary);
+    CHECK(ordinary.cleanup_done && ordinary.destroyed_after_drain && ordinary.after_destroy == 0);
     // f's counters were not affected by the other manager.
     health = attach_health(f);
-    before = reports.count(); last_sequence = reports.last().getStatusSeqNum();
+    last_sequence = reports.last().getStatusSeqNum();
     CHECK(health->registerMetadataCallback(reports.callback()) == ir::Return::Success);
-    CHECK(health->enable() == ir::Return::Success); reports.wait(before + 1);
-    CHECK(health->disable() == ir::Return::Success);
-    CHECK(reports.at(before).getStatusSeqNum() == last_sequence + 1 && revision(reports.at(before)) == 1);
+    interval = held_interval(*health, reports, 1);
+    CHECK(interval.front().getStatusSeqNum() == last_sequence + 1 && revision(interval.front()) == 1);
     CHECK(f.control->detachChannel(health) == ir::Return::Success);
 }
 
+
+// R1-B regression: a controlled exception while the independent manager's
+// Health is enabled, in each enabled interval, through the SAME phase and drain
+// guard as subsystem_lifecycle. The scenario runs on its own thread, holding
+// every Control/channel owner; the coordinator holds only probe state.
+void subsystem_lifecycle_unwind() {
+    for (const int fail_interval : {1, 2}) {
+        IndependentPhaseProbe probe; // Outlives the scenario, its collector and every callback.
+        probe.fail_interval = fail_interval;
+        std::future<std::string> scenario;
+        // Declared after the future: opens the gate BEFORE the future's destructor waits.
+        TestCleanup release{[&] { probe.gate->open(); if (scenario.valid()) (void)scenario.wait_for(5s); }};
+        scenario = std::async(std::launch::async, [&probe]() -> std::string {
+            try {
+                SubsystemReports other_reports;
+                Fixture other;
+                independent_manager_phase(other, other_reports, probe);
+                return "completed without injection";
+            } catch (const InjectedPhaseFailure&) {
+                return "injected";
+            } catch (const std::exception& error) {
+                return std::string("unexpected: ") + error.what();
+            }
+        });
+        probe.gate->wait_for_entry(); // Admitted BIT callback recorded and held.
+        // Unwind reaches the actual Health-worker join while the callback is held.
+        eventually([&] { return probe.joining.load(std::memory_order_acquire); });
+        CHECK(probe.collector_alive && !probe.held_completed && !probe.cleanup_done);
+        CHECK(scenario.wait_for(0ms) == std::future_status::timeout);
+        CHECK(probe.interval == fail_interval);
+        probe.gate->open();
+        CHECK(scenario.wait_for(2s) == std::future_status::ready);
+        CHECK(scenario.get() == "injected");
+        probe.gate->check(); // Entered, no watchdog expiry.
+        CHECK(probe.held_completed && probe.cleanup_done);
+        CHECK(probe.cleanup_disable == static_cast<int>(ir::Return::Success));
+        CHECK(probe.destroyed_after_drain && !probe.collector_alive && probe.after_destroy == 0);
+    }
+}
 
 // Current readiness from one captured core state; historical counters,
 // diagnostics and a retained failed BIT completion do not degrade it.
@@ -304,14 +473,11 @@ void subsystem_state_mapping() {
 // background commit can interleave with a C2 execution between assertions.
 ir::SubsystemStatusResp sample(const std::shared_ptr<ir::HealthStatusChannel>& health, SubsystemReports& reports,
                                std::size_t samples = 1) {
-    const auto before = reports.count();
-    CHECK(health->enable() == ir::Return::Success);
-    reports.wait(before + samples);
-    CHECK(health->disable() == ir::Return::Success); // Quiesced.
-    const auto taken = reports.since(before);
-    check_consecutive(taken);
+    // Quiesced by stop_after: no suppressed report consumed a sequence, so a
+    // later "last delivered + 1" expectation is exact.
+    const auto taken = held_interval(*health, reports, samples);
     for (const auto& report : taken) CHECK(revision(report) == revision(taken.front())); // Unchanged samples.
-    return reports.at(before);
+    return taken.front();
 }
 
 void subsystem_counters() {
@@ -622,11 +788,12 @@ void subsystem_shutdown() {
         reports.quiet();
         if (!detach) {
             CHECK(health->registerMetadataCallback(BitCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
-            CHECK(health->enable() == ir::Return::Success); reports.wait(reports.count() + 1);
             // Delivered or suppressed, the first prepared report consumed
-            // sequence 1, so the first report of the new interval carries 2.
-            CHECK(reports.last().getStatusSeqNum() == 2);
-            CHECK(health->disable() == ir::Return::Success);
+            // sequence 1, so the exact first report of the new interval
+            // carries 2, although the latest one has already advanced.
+            const auto interval = reenabled_interval(*health, reports);
+            CHECK(interval.front().getStatusSeqNum() == 2);
+            CHECK(interval.back().getStatusSeqNum() >= 3);
         }
     }
 }
@@ -708,4 +875,3 @@ void subsystem_clock_failure() {
     CHECK(paired.getFaults().size() == 1);
     CHECK(before <= paired.getFaults().front().getDetectionTime()); // Not an earlier failed attempt's time.
 }
-

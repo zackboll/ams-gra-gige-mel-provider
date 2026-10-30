@@ -205,10 +205,201 @@ The feature expectation therefore fails specifically on missing Subsystem
 support against the baseline, and passes against the feature provider. The two
 DSOs differ (SHA-256 prefixes `d515ad2b…` baseline, `57728f86…` feature).
 
+## R1 correction: subsystem test synchronization and failure cleanup
+
+The sections above are historical evidence for the reviewed revision. This
+section records the corrective revision.
+
+| | Commit | Tree |
+| --- | --- | --- |
+| Main at review (PR base) | `c3d80f2ed6200b08593ec51f12fe5796bf4403a6` | `d146dc6d19fe82c4d9595d64971f4ae30600bfca` |
+| Reviewed and actual starting PR head | `2dd65e08d9fe711d6d6d664d16cbd63f7da5ae0f` | `07a13b200a219f2ffe1b28ada78875ab1713afd3` |
+
+The branch had not advanced since review, and the worktree and index were clean
+at start. The independent review found two P2 **test** defects and no
+production defect. This correction changes only
+`tests/provider_subsystem_tests.inc`, one scenario registration in
+`tests/provider_tests.cpp`, and this document. It also removes the extra
+blank line at end of file from four new files. `src/`, `include/`, CMake
+files and version definitions, `third_party/`, the manifests, scripts and
+`.github/` are byte-identical to the reviewed revision.
+
+### R1-A: the re-enable check read the wrong report
+
+`subsystem_shutdown` enabled Health, waited for `reports.count() + 1` and
+then asserted that `reports.last()` carried sequence 2. Two valid schedules
+break that check:
+
+- Sequence 2 is delivered before the count is read, so the test waits for 3.
+- Sequence 3 arrives between the wait and `last()`.
+
+The provider correctly delivered 2 and then 3.
+
+**Correction.** The new `reenabled_interval()` helper is used by all four
+shutdown paths that re-enable (both the admitted-first and suppressed-first
+cases):
+
+1. It captures the baseline while Health is disabled and quiescent, then
+   enables Health.
+2. It waits for **at least two** reports beyond the baseline, so the latest
+   report has necessarily advanced. No exact total is required, so further
+   periodic reports are allowed.
+3. It drains Health with `disable()` and copies the stable collection from
+   the fixed baseline index.
+
+The scenario asserts that the exact first new report carries **== 2** and the
+last carries >= 3. The existing cleanup guard, drain checks, admission
+milestones and suffix-suppression assertions are unchanged.
+
+### R1-B: the collector could be destroyed before Health was drained
+
+In `subsystem_lifecycle`, the independent manager's `other_bits` collector was
+declared after `Fixture other`, and that Health publisher had no exception-safe
+cleanup. Suppose a wait or check throws while it is enabled:
+
+- Dropping the local Health handle does not detach it; Control still owns it.
+- The collector is destroyed first.
+- A BIT callback that captured the collector's `this` pointer can still run.
+
+**Correction.** The phase was extracted into `independent_manager_phase()`.
+The ordinary scenario and the failure regression both call it.
+
+- The phase-local collector (`ObservedBitReports`) is declared first.
+- A `TestCleanup` drain guard follows immediately, installed before the first
+  operation that can start publication.
+- The guard covers both enabled intervals: BIT-only, and BIT plus Subsystem.
+- On any unwind it synchronously calls `disable()`, which joins the Health
+  worker, and then `detachChannel()`. Both run while every collector and
+  callback capture is still alive.
+- The guard records its results in probe state that outlives the phase and
+  never throws. Repeating it after the ordinary disable/detach is harmless:
+  the ordinary path checks `cleanup_done`, `destroyed_after_drain`, and zero
+  callbacks after destruction.
+
+### R1-C: a third instance found and fixed during R1 validation
+
+While building the before/after controls, the same race appeared in
+`subsystem_lifecycle`'s other re-enable checks and in the `subsystem_counters`
+`sample()` helper. Each of these did:
+
+    enable → wait → disable → (later) last().seq + 1 == next interval's first seq
+
+A plain `disable()` may suppress a Subsystem report that the worker already
+**prepared**. That consumed sequence is a valid gap (see the shutdown scenario),
+so "last delivered + 1" is not a valid expectation. The corrected tests showed
+this intermittently against the unchanged reviewed provider:
+`last_delivered_sequence=1 reenabled_first_sequence=3`, which failed in about
+1 of 14 runs under `LD_DEBUG` slowdown.
+
+**Correction.** New test-only helpers `stop_after()` and `held_interval()`:
+
+1. They hold the worker inside the admitted callback that records the target
+   report, which is the last callback of its batch.
+2. They call `disable()` on another thread and wait until it reaches the
+   actual worker `pthread_join`. At that point publication has stopped.
+3. They release the callback. The worker then exits without preparing another
+   sample, so the last delivered report is the last prepared one, and the
+   exact `+1` assertions stay unweakened.
+4. They check `reports.count() == target` and that the gate did not expire.
+
+`subsystem_lifecycle` and `sample()` now use these helpers.
+
+### Permanent regressions
+
+- **`subsystem_shutdown`** (R1-A): every re-enabled path now inspects the
+  exact first report after at least one further report has arrived. This
+  covers both the admitted-first and suppressed-first initial conditions.
+- **`subsystem_lifecycle_unwind`** (new, R1-B) runs once per enabled interval
+  (1 and 2). Steps:
+  1. The scenario runs on its own `std::async` thread, which holds every
+     Control and channel owner. The coordinator holds only probe state, which
+     outlives the scenario.
+  2. An admitted BIT callback records its payload, releases the collector
+     mutex and waits at a gate. The phase then throws a distinctive
+     `InjectedPhaseFailure`.
+  3. The coordinator observes that the drain guard's `disable()` has reached
+     the actual Health-worker `pthread_join`, via `test_join::Observe` around
+     the real cleanup call. It then checks four things at that point: the
+     collector is alive, the held callback has not completed, cleanup has not
+     completed, and the scenario future has not finished.
+  4. It releases the gate and requires the following:
+     - the scenario finishes within 2 s with exactly "injected";
+     - the gate was entered with no watchdog expiry;
+     - the callback completed and the cleanup `disable()` returned `Success`;
+     - the collector was destroyed only after draining finished;
+     - no callback ran after destruction.
+
+  The gate-opening guard is declared after the future, so it opens the gate
+  before the future's destructor can wait.
+- **`subsystem_lifecycle`** (R1-B and R1-C) runs the ordinary path through
+  the same `independent_manager_phase()`, and stops every interval with
+  `stop_after()`.
+- **`subsystem_counters`** (R1-C) uses the corrected `sample()`.
+
+The total is now **74 provider scenarios**: the 73 previous ones, all retained,
+including the BIT R1 and Health R1 regressions, plus
+`Subsystem independent-manager unwind drains Health`.
+
+### Before/after evidence against unchanged production
+
+- **Production.** I built the reviewed commit `2dd65e0` unchanged in a
+  disposable detached worktree with one ordinary dev build of the provider and
+  the backend. `libgige_mel_provider.so.0.1.0` has SHA-256 `b0699b78…`.
+- **Test copies.** Each disposable test copy was compiled with the dev flags
+  and linked to that DSO. `ldd` and `LD_DEBUG=files` (`calling init:`) show it
+  was the library actually loaded in every run.
+- **Diagnostic edits.** Every diagnostic edit is a recorded diff against the
+  reviewed or corrected test source. All the diagnostic copies are
+  disposable; none of them is committed.
+
+| Control | Test source | Result |
+| --- | --- | --- |
+| R1-A old test, admitted-first (path 0) | Reviewed + forced schedule A: wait for the first new report, then evaluate the original `count() + 1` expression | **FAIL** (intended), rc 1: `first_new_sequence=2 observed_last_sequence=3`; original `last() == 2` assertion fails |
+| R1-A old test, suppressed-first (paths 2–3) | Same, starting at path 2 | **FAIL** (intended), rc 1: `first_new_sequence=2 observed_last_sequence=3` |
+| R1-A selector mutant (paths 0 and 2) | Corrected, but asserts `last()` again | **FAIL** (intended), rc 1: `first_new_sequence=2 last_sequence=3`. The corrected fixed-index selection of 2 holds while the latest has advanced |
+| R1-B old cleanup | Reviewed + controlled exception while independent Health is enabled; static lifetime markers before/after the collector; the callback never touches destroyed storage | **FAIL** (intended), rc 1: `collector_destroyed=1 health_drained_yet=0 callback_after_collector_destroy=1` |
+| R1-B guard mutant | Corrected, drain guard body reduced to bookkeeping | **FAIL** (intended), rc 1: the regression never observes the cleanup join (watchdog expiry) |
+| R1-C old test | Reviewed + forced schedule: batch 2 prepared and held in a diagnostic BIT callback until `disable()` reaches the join | **FAIL** (intended), rc 1: `last_delivered_sequence=1 reenabled_first_sequence=3` |
+| Corrected tests | Committed test source, unmodified | **PASS**: `74 provider tests passed`, rc 0 |
+
+The R1-B old-cleanup control is a **safely observed lifetime-order violation**:
+a BIT callback reached the interval after the collector was destroyed and
+before the Health worker was drained. It is not a sanitizer report. The probe
+deliberately never dereferences destroyed storage, and no ASan use-after-free
+was observed or claimed.
+
+### R1 local validation (corrective working tree)
+
+| Configuration | CTest | Provider scenarios | Sanitizer reports |
+| --- | --- | --- | --- |
+| Dev | 6/6 | 74/74 | — |
+| Release | 6/6 | 74/74 | — |
+| ASan/UBSan (`detect_leaks=1:halt_on_error=1`; `halt_on_error=1:print_stacktrace=1`) | 6/6 | 74/74 | 0 |
+| TSan (`halt_on_error=1`) | 6/6 | 74/74 | 0 |
+
+- The sanitizer runtimes were active: the test `pthread_join` forwarding target
+  resolved to `libasan.so.8` and `libtsan.so.2` respectively. No sanitizer
+  failed to initialize, and no configuration was reduced.
+- Both offline verifiers pass: 97 MEL files and 2 JSON files.
+- The `native_loader` CTest passed in all four configurations. It runs Health,
+  BIT, Subsystem and registered image delivery through the public headers
+  against the corrective build.
+- Bounded repetition: 5 dev runs and 5 TSan runs each of `subsystem_shutdown`,
+  `subsystem_lifecycle_unwind`, `subsystem_lifecycle` and `subsystem_counters`.
+  All 40 passed. Repetition supplements, and does not replace, the
+  deterministic controls above.
+- Local `clang++` is not installed, so the hosted Clang job is the Clang
+  evidence.
+- Capture, installation and the separate consumer were not re-run locally for
+  this test-only correction. The hosted normal-build jobs exercise them.
+- The 14 production mutation controls were not re-run, because production is
+  unchanged.
+- Hosted results for the corrective head are recorded on the PR. The earlier
+  hosted success for `2dd65e0` is not evidence for this revision.
+
 ## Limitations
 
 No hardware, SDK, camera, transport performance, packet loss, physical health,
 component inventory, assigned criticality or connection probing was qualified.
 These software tests do not substitute for that qualification. Hosted CI results
 are recorded on the PR, not here. The two deferred PR #3 notes remain separate.
-
