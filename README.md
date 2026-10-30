@@ -58,6 +58,12 @@ check through C2, a catalogue and latest result/current software faults through
 C2 and Health. Command execution success is distinct from a test Pass/Fail. It
 performs no device I/O and does not certify connectivity or future acquisition.
 
+[Provider software subsystem status](docs/subsystem-status.md) publishes Health
+`SubsystemStatusResp` for one software subsystem containing this provider's CSCI
+(version 0.1.0): current readiness, a committed BIT-state revision and a
+prepared-report sequence. It is not a physical inventory, criticality rating or
+camera connection probe.
+
 | Area | Bootstrap behavior |
 | --- | --- |
 | Dynamic factories | Exact `getAPI_Manager`, `getControl`, and `getBuffer` symbols |
@@ -70,7 +76,7 @@ performs no device I/O and does not certify connectivity or future acquisition.
 | Metadata | Communications replies, Image camera-command replies, correlated C2 configuration/BIT CommandStatus, C2 BIT catalogue, C2/Health BIT results and current software faults |
 | Backend seam | SDK-independent discovery/device/stream interfaces and move-only retained frame leases |
 | Synthetic backend | Deterministic images, bounded native pool, cancellation, validated readback, generation and time metadata |
-| Diagnostics | Partial Health MFA_Status/MFA_StatusDetailed periodic current snapshots plus project C++ counters and last error; no invented MEL Instrumentation fields |
+| Diagnostics | Partial Health MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp periodic current snapshots plus project C++ counters and last error; no invented MEL Instrumentation fields |
 | Build and distribution | Offline upstream verification, CMake presets, shared library, install/export package, example and tests |
 
 Read [the implementation profile](docs/implementation-profile.md) before

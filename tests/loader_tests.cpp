@@ -5,6 +5,7 @@
 #include <irmel/library/irmel-types/ImageListener.h>
 #include "public_health_demo.hpp"
 #include "public_bit_demo.hpp"
+#include "public_subsystem_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -212,9 +213,13 @@ void run(const char* library_path, const std::string& mode) {
     if (mode == "--bit-only" || mode == "--expect-no-bit") {
         demonstrate_bit(session.control, mode == "--expect-no-bit"); return;
     }
+    if (mode == "--subsystem-only" || mode == "--expect-no-subsystem") {
+        demonstrate_subsystem(session.control, mode == "--expect-no-subsystem"); return;
+    }
     demonstrate_health(session.control, mode == "--expect-no-health");
     if (!mode.empty()) return;
     demonstrate_bit(session.control);
+    demonstrate_subsystem(session.control);
 
     const auto capabilities = session.control->getCapabilities();
     const auto selected = std::find_if(capabilities.begin(), capabilities.end(), [](const auto& capability) {
@@ -272,7 +277,9 @@ int main(int argc, char** argv) {
             mode == "--health-only" ? "PASS: public MEL Health discovery, attachment and both current reports\n" :
             mode == "--expect-no-bit" ? "PASS: baseline BIT metadata/registrations absent; valid initiation Unsupported\n" :
             mode == "--bit-only" ? "PASS: public MEL BIT catalogue, acceptance, completed result and Health faults\n" :
-            "PASS: native factory loading, BIT, Health snapshots, registered Mono8 delivery, and teardown\n");
+            mode == "--expect-no-subsystem" ? "PASS: baseline SubsystemStatusResp unadvertised; valid registration NotSupported\n" :
+            mode == "--subsystem-only" ? "PASS: public MEL SubsystemStatusResp inventory, stable BIT_report and updated revision\n" :
+            "PASS: native factory loading, BIT, Health snapshots, SubsystemStatusResp, registered Mono8 delivery, and teardown\n");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

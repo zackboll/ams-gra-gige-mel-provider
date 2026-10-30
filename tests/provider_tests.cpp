@@ -1628,12 +1628,25 @@ void status_suppression_and_lifetime_pins() {
 
 #include "provider_health_tests.inc"
 #include "provider_bit_tests.inc"
+#include "provider_subsystem_tests.inc"
 
 } // namespace
 
 int main(int argc, char** argv) {
     test_join::prepare();
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"Subsystem surface inventory and registration", subsystem_surface},
+        {"Subsystem lifecycle and manager-lifetime counters", subsystem_lifecycle},
+        {"Subsystem independent-manager unwind drains Health", subsystem_lifecycle_unwind},
+        {"Subsystem current-state mapping and history", subsystem_state_mapping},
+        {"Subsystem BIT revision and sequence semantics", subsystem_counters},
+        {"Subsystem coherent held batch versus C2", subsystem_coherent_batch},
+        {"Subsystem no device I/O and retained bytes", subsystem_no_io},
+        {"Subsystem no-I/O gated receive failure cleanup", subsystem_no_io_unwind},
+        {"Subsystem callback reentry and contained exceptions", subsystem_callbacks},
+        {"Subsystem shutdown drain and suffix suppression", subsystem_shutdown},
+        {"Subsystem final owner release", subsystem_owners},
+        {"Subsystem clock failure preserves committed state", subsystem_clock_failure},
         {"BIT surface catalogue and registration", bit_surface},
         {"BIT command validation and precedence", bit_commands},
         {"BIT configuration faults recovery and UTC observations", bit_configuration},

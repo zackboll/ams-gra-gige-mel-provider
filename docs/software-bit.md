@@ -166,7 +166,9 @@ Health is disabled. Registered report order is **MFA_Status, MFA_StatusDetailed,
 BIT_Status** from one core capture and consistently captured retained completion.
 Each callback has independent admission; shutdown may suppress a suffix. The
 twelve detailed keys and state mapping are unchanged. Slow callbacks delay later
-samples; no catch-up/history queue is added.
+samples; no catch-up/history queue is added. The [subsystem profile](subsystem-status.md)
+appends SubsystemStatusResp to that batch and commits a BIT-state revision with
+each semantic BIT-state change; BIT identities, items and categories are unchanged.
 
 No callback runs under provider locks. Exceptions are independently contained and
 counted/reported, preserve future and stored completion, and allow later eligible

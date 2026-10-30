@@ -31,6 +31,9 @@ width, height, row pitch, and buffer requirements. The bootstrap reports API
 version 4 and library version 1 in the numeric VersionInfo fields; the detailed
 description identifies project version 0.1.0 and its partial profile. This is
 a local numeric convention, not a claim of a standardized version packing.
+The same project version (from CMake) also appears in MFA_Status About text and
+as the Health subsystem CSCI `Version(source 0, major 0, minor 1, engineering 0)`;
+none of these is a pinned dependency revision.
 
 ## Image layout and synthetic camera
 
@@ -250,13 +253,21 @@ correlated CommandStatus and Health BIT_Status. Latest completion and two curren
 software fault categories are manager-local, not hardware diagnosis. Host UTC
 wall-clock epoch nanoseconds for these reports do not change image timestamps.
 
+The [bounded provider software subsystem profile](subsystem-status.md) adds
+Health `SubsystemStatusResp`: one software subsystem (ID 1, unassigned
+criticality 0) with one CSCI `ams-gra-gige-mel-provider` at
+`Version(0, 0, 1, 0)`, current readiness from the Health capture, a committed
+BIT-state revision (`BIT_report`) and a prepared-report sequence
+(`statusSeqNum`). `connectionEstablished` reports the in-process software
+association, not camera reachability.
+
 Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
 documented BIT_Command subset, Image
 NavigationReport, and metadata other than communications, Image camera responses
 and C2 configuration/BIT CommandStatus, C2 BIT_Configuration/BIT_Status or Health
-MFA_Status/MFA_StatusDetailed/BIT_Status
+MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
 return unsupported.
 Some of these are upstream **required** methods, not optional capabilities; this
 is why the implementation is called a bootstrap rather than conformant MEL.

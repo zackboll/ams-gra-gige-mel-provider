@@ -19,19 +19,20 @@ attachment per manager is allowed. No Image listener or buffers are required.
 Reattachment after detach creates fresh callback-registration state.
 
 The exact Health metadata capability set is `ChannelCommsTestRep`, `MFAStatus`,
-`MFAStatusDetailed`, and `BITStatus`, independent of callback registration. All image
-geometry
+`MFAStatusDetailed`, `BITStatus`, and `SubsystemStatusResp`, independent of
+callback registration. All image geometry
 and storage fields (width, height, pitch, image/buffer size, bit depth, bands)
 are zero. No reserved capability enum is repurposed.
 
 Implemented Health-specific registrations are `MFA_Status`,
-`MFA_StatusDetailed`, and `BIT_Status`. The first nonempty callback succeeds; empty
-returns
+`MFA_StatusDetailed`, `BIT_Status`, and `SubsystemStatusResp` (the bounded
+[provider software subsystem profile](subsystem-status.md)). The first nonempty
+callback succeeds; empty returns
 BadPointer on a usable channel; duplicate returns Fail. Registration on a
 detached channel or from **any provider callback on the thread**, including
 another manager's callback, fails. There is no replacement or unregister API.
-The other five registrations return NotSupported: LFStatus,
-SubsystemStatusResp, DiscreteStatus, MFA_SecurityAuditRecord, and NUC_TempData.
+The other four registrations return NotSupported: LFStatus, DiscreteStatus,
+MFA_SecurityAuditRecord, and NUC_TempData.
 
 Inherited keep-alive and correlated communications remain available even while
 Health reporting is disabled. Health accepts no image buffers: both register
@@ -138,9 +139,10 @@ The nominal interval is **100 milliseconds**, using interruptible waiting after
 dispatch. This is best effort, not real time. There is no history queue, catch-up
 burst or exactly-once transition guarantee. Slow callbacks delay later reports;
 intermediate states may be coalesced. Callbacks must return in bounded time.
-Normal order is MFA_Status, MFA_StatusDetailed, then BIT_Status on the same publisher thread.
-Each is admitted independently; concurrent disable/detach can suppress a callback
-not yet admitted, so shutdown does not guarantee complete three-message batches.
+Normal order is MFA_Status, MFA_StatusDetailed, BIT_Status, then SubsystemStatusResp
+on the same publisher thread, all from one captured core state. Each is admitted
+independently; concurrent disable/detach can suppress a callback not yet
+admitted, so shutdown does not guarantee complete four-message batches.
 Inherited communications callbacks remain synchronous on their submitting
 threads and can run concurrently with the publisher.
 
@@ -180,10 +182,18 @@ that completion. See [software BIT](software-bit.md) for the exact two categorie
 retirement, observation times, command semantics and callback rules, and its
 [validation record](software-bit-validation.md) for the new baseline control.
 
+It also publishes `SubsystemStatusResp` last in the same batch: one software
+subsystem/CSCI, current readiness from the same captured state, a committed
+BIT-state revision in `BIT_report` paired with that batch's BIT payload, and a
+prepared-report `statusSeqNum`. See [subsystem status](subsystem-status.md) and
+its [validation record](subsystem-status-validation.md).
+
 The native loader and separate installed consumer use only published MEL headers
 to discover/attach Health, register both callbacks, enable, wait for Standby and
 schema-1 idle diagnostics, disable and detach. Existing image capture and
-ConfigSet/correlated CommandStatus demonstrations remain in place.
+ConfigSet/correlated CommandStatus demonstrations remain in place. The loader's
+`--subsystem-only` / `--expect-no-subsystem` modes provide the matching
+Subsystem demonstration and baseline control.
 
 The loader also accepts `--health-only` and `--expect-no-health`. The former must
 fail against starting main with `missing required HealthAndStatus discovery

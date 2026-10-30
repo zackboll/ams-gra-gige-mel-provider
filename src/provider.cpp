@@ -20,11 +20,39 @@
 #include <time.h>
 #include <utility>
 
+// The provider software version is the CMake project version, supplied as
+// private definitions. It is distinct from the MEL API version and from the
+// pinned upstream dependency revisions.
+#if !defined(GIGE_MEL_VERSION_MAJOR) || !defined(GIGE_MEL_VERSION_MINOR) || !defined(GIGE_MEL_VERSION_PATCH)
+#error "GIGE_MEL_VERSION_MAJOR/MINOR/PATCH must be defined from the CMake project version"
+#endif
+#define GIGE_MEL_STRINGIFY_IMPL(value) #value
+#define GIGE_MEL_STRINGIFY(value) GIGE_MEL_STRINGIFY_IMPL(value)
+#define GIGE_MEL_VERSION_TEXT GIGE_MEL_STRINGIFY(GIGE_MEL_VERSION_MAJOR) "." \
+    GIGE_MEL_STRINGIFY(GIGE_MEL_VERSION_MINOR) "." GIGE_MEL_STRINGIFY(GIGE_MEL_VERSION_PATCH)
+
 namespace gige_mel {
 namespace {
 namespace ir = ams::iface::irmel;
 namespace mel = ams::iface::mel;
 using namespace std::chrono_literals;
+
+// Private software identity shared by MFA_Status About, VersionInfo text and the
+// SubsystemStatusResp CSCI version.
+struct ProviderSoftware {
+    static constexpr const char* name = "ams-gra-gige-mel-provider";
+    static constexpr const char* version_text = GIGE_MEL_VERSION_TEXT;
+    static constexpr std::uint32_t major = GIGE_MEL_VERSION_MAJOR;
+    static constexpr std::uint32_t minor = GIGE_MEL_VERSION_MINOR;
+    static constexpr std::uint32_t patch = GIGE_MEL_VERSION_PATCH;
+};
+
+// Both Health counters use explicit modulo-2^32 wrap; no signed overflow or
+// saturation. Compile-time boundary evidence, not a runtime setter.
+constexpr std::uint32_t next_counter(std::uint32_t value) noexcept {
+    return static_cast<std::uint32_t>(value + 1U);
+}
+static_assert(next_counter(0) == 1 && next_counter(std::numeric_limits<std::uint32_t>::max()) == 0);
 
 template <class T> mel::RequestFor<T> ready(T value) {
     std::promise<mel::ErrorOr<std::shared_ptr<T>>> promise;
@@ -119,6 +147,11 @@ struct Runtime {
     // Manager lifetime; bounded latest completion and two category observations.
     std::shared_ptr<const mel::CompletedBIT> completed_bit;
     std::array<std::optional<std::chrono::nanoseconds>, 2> fault_observations;
+    // Manager lifetime, guarded by state_mutex. bit_revision is committed with
+    // completed_bit/fault_observations; subsystem_sequence is consumed only by a
+    // successfully prepared SubsystemStatusResp. Zero is the initial state.
+    std::uint32_t bit_revision{0};
+    std::uint32_t subsystem_sequence{0};
 
     ~Runtime() {
         if (device) {
@@ -189,6 +222,7 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
         metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatus);
         metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatusDetailed);
         metadata.insert(ir::ChannelMetadataCapabilityType::BITStatus);
+        metadata.insert(ir::ChannelMetadataCapabilityType::SubsystemStatusResp);
     }
     cap.setChannelMetadataCapabilities(metadata);
     if (config) {
@@ -328,17 +362,65 @@ struct HealthSnapshot {
     ProviderStatistics statistics;
     std::optional<mel::BIT_Status> bit;
     std::exception_ptr bit_error;
+    // Committed BIT-state revision paired with `bit` in this same capture.
+    std::uint32_t bit_revision;
+    std::optional<ir::SubsystemStatusResp> subsystem;
+    std::exception_ptr subsystem_error;
 };
+
+// Provider-defined software subsystem profile; see docs/subsystem-status.md.
+// Identifier 1 is scoped to this manager's provider software subsystem, not a
+// globally allocated physical identifier. Zero criticality/source mean
+// "unassigned in this profile", not a safety or mission-criticality rating.
+constexpr std::uint32_t provider_subsystem_id = 1;
+constexpr std::uint32_t unassigned_criticality = 0;
+constexpr std::uint32_t unassigned_version_source = 0;
+
+// Pure mapping from one captured core state; no I/O, no runtime reads. The
+// caller assigns statusSeqNum only after this payload has been formed.
+ir::SubsystemStatusResp subsystem_report(const HealthSnapshot& s) {
+    // Major: this profile currently cannot provide its image acquisition
+    // function. It is not a hardware diagnosis; Critical is never substituted.
+    const bool unable = !s.configuration_valid || (s.active && s.failed);
+    const auto failure = !s.initialized ? ir::Failure::NA : unable ? ir::Failure::Major : ir::Failure::Available;
+    const auto mode = !s.initialized || unable ? ir::CSCIMode::Unknown :
+        s.active ? ir::CSCIMode::Imaging : ir::CSCIMode::Idle;
+    ir::SubsystemCSCIInfo csci;
+    csci.setCsci(ProviderSoftware::name);
+    csci.setMode(mode);
+    // Pinned order: Version(source, majorRevision, minorRevision, engineeringRevision).
+    csci.setVersion(ir::Version(unassigned_version_source, ProviderSoftware::major,
+                                ProviderSoftware::minor, ProviderSoftware::patch));
+    csci.setCriticality(unassigned_criticality);
+    csci.setFailureLevel(failure);
+    csci.setBIT_report(s.bit_revision);
+    // In-process software association only: not camera reachability, SDK
+    // transport, heartbeat, packet delivery or a future-acquisition promise.
+    csci.setConnectionEstablished(s.initialized);
+    ir::SubsystemStatusResp report;
+    report.setSubsystemId(provider_subsystem_id);
+    report.setCriticality(unassigned_criticality);
+    report.setFailureLevel(failure);
+    report.setSubsystems({});
+    report.setSubsystemCount(0);
+    report.setCSCI({csci});
+    report.setCsciCount(1);
+    return report;
+}
 
 // No operations mutex or backend I/O. The temporary acquisition owner is
 // destroyed while state_mutex is held, under the established unpublication rule.
-HealthSnapshot health_snapshot(Runtime& r, bool execute = false, bool prepare_bit = true) {
+// One transaction prepares BIT state (and optionally the subsystem report) from
+// the same core capture; candidate state is committed only after formation.
+HealthSnapshot health_snapshot(Runtime& r, bool execute = false, bool prepare_bit = true,
+                               bool prepare_subsystem = false) {
     std::lock_guard lock(r.state_mutex);
     const auto acquisition = r.acquisition.lock();
     HealthSnapshot s{r.initialized, r.configuration_valid, r.image_active,
         acquisition && acquisition->failed.load(), r.configuration_generation,
         {r.delivered.load(), r.dropped.load(), r.rejected.load(),
-         r.callback_failures.load(), r.stream_failures.load(), r.last_error}, {}, {}};
+         r.callback_failures.load(), r.stream_failures.load(), r.last_error}, {}, {},
+        r.bit_revision, {}, {}};
     if (!prepare_bit) return s;
     try {
         auto observations = r.fault_observations;
@@ -370,10 +452,28 @@ HealthSnapshot health_snapshot(Runtime& r, bool execute = false, bool prepare_bi
         }
         s.bit.emplace(std::vector<mel::ActiveBIT>{}, completion ? std::vector<mel::CompletedBIT>{*completion} :
                       std::vector<mel::CompletedBIT>{}, std::move(faults));
+        // One revision per committed semantic change: a newly completed
+        // execution (even with an identical result/time) and/or an observed
+        // fault creation, retirement or recurrence. Unchanged samples keep it.
+        const bool changed = execute || observations != r.fault_observations;
+        const auto revision = changed ? next_counter(r.bit_revision) : r.bit_revision;
         // Commit only after the complete immutable payload has been formed.
         r.completed_bit = std::move(completion);
         r.fault_observations = observations;
+        r.bit_revision = revision;
+        s.bit_revision = revision;
     } catch (...) { s.bit_error = std::current_exception(); }
+    // A subsystem report requires the paired canonical BIT commit. Its own
+    // failure never rolls back that commit and consumes no sequence number.
+    if (prepare_subsystem && s.bit) {
+        try {
+            auto report = subsystem_report(s);
+            const auto sequence = next_counter(r.subsystem_sequence);
+            report.setStatusSeqNum(sequence);
+            s.subsystem.emplace(std::move(report));
+            r.subsystem_sequence = sequence;
+        } catch (...) { s.subsystem.reset(); s.subsystem_error = std::current_exception(); }
+    }
     return s;
 }
 
@@ -1027,7 +1127,16 @@ public:
         if (result == ir::Return::Success) prompt();
         return result;
     }
-    GIGE_UNSUPPORTED_CALLBACK(ir::SubsystemStatusResp)
+    ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const ir::SubsystemStatusResp* const)> callback) override {
+        // Same registration contract and lifetime pins as BIT_Status; dispatch
+        // only on the existing Health worker, never inline on this thread.
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        const auto self = shared_from_this();
+        const auto result = register_callback(subsystem_callback_, std::move(callback));
+        if (result == ir::Return::Success) prompt();
+        return result;
+    }
     GIGE_UNSUPPORTED_CALLBACK(mel::DiscreteStatus)
     GIGE_UNSUPPORTED_CALLBACK(mel::MFA_SecurityAuditRecord)
     GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)
@@ -1056,13 +1165,19 @@ private:
         Callback<mel::MFA_Status> status_callback;
         Callback<mel::MFA_StatusDetailed> detailed_callback;
         Callback<mel::BIT_Status> bit_callback;
+        Callback<ir::SubsystemStatusResp> subsystem_callback;
         {
             std::lock_guard lock(callback_mutex_);
             status_callback = status_callback_;
             detailed_callback = detailed_callback_;
             bit_callback = bit_callback_;
+            subsystem_callback = subsystem_callback_;
         }
-        const auto s = health_snapshot(*runtime_, false, static_cast<bool>(bit_callback));
+        // Subsystem-only subscribers still need the canonical BIT commit: its
+        // revision and current-fault observations feed BIT_report.
+        const bool want_subsystem = static_cast<bool>(subsystem_callback);
+        const auto s = health_snapshot(*runtime_, false, static_cast<bool>(bit_callback) || want_subsystem,
+                                       want_subsystem);
         const auto state = !s.initialized ? mel::MFA_State::Unknown :
             !s.configuration_valid || (s.active && s.failed) ? mel::MFA_State::Degraded :
             s.active ? mel::MFA_State::Operate : mel::MFA_State::Standby;
@@ -1074,7 +1189,7 @@ private:
         mel::MFA_Status status(state, description,
             "Experimental Mono8 image-stream profile with provider-software BIT; no task scheduling, scanning, hardware BIT, calibration or ModeCmd",
             mel::StateTransitionStatus::NotTransitioning,
-            mel::About("ams-gra-gige-mel-provider (software provider)", "", "0.1.0", "", ""), {});
+            mel::About(std::string(ProviderSoftware::name) + " (software provider)", "", ProviderSoftware::version_text, "", ""), {});
         mel::MFA_StatusDetailed detailed;
         const auto add = [&](const char* name, std::string value) {
             detailed.addStatus(mel::NameValuePair(std::string("gige_mel.") + name, std::move(value)));
@@ -1093,11 +1208,20 @@ private:
         add("last_error_history", s.statistics.last_error);
         invoke(status_callback, status, &publisher.running);
         invoke(detailed_callback, detailed, &publisher.running);
+        // A failed canonical BIT preparation suppresses both BIT-derived
+        // reports for this sample; Status/Detailed above remain published.
         if (s.bit) invoke(bit_callback, *s.bit, &publisher.running);
         else if (s.bit_error) {
             try { std::rethrow_exception(s.bit_error); }
             catch (const std::exception& error) { runtime_->report(std::string("Health BIT publication preparation failed: ") + error.what()); }
             catch (...) { runtime_->report("Health BIT publication preparation failed"); }
+        }
+        // Appended last; dispatches the revision paired with this capture.
+        if (s.subsystem) invoke(subsystem_callback, *s.subsystem, &publisher.running);
+        else if (s.subsystem_error) {
+            try { std::rethrow_exception(s.subsystem_error); }
+            catch (const std::exception& error) { runtime_->report(std::string("Health subsystem publication preparation failed: ") + error.what()); }
+            catch (...) { runtime_->report("Health subsystem publication preparation failed"); }
         }
     }
     static void run(const std::shared_ptr<Publisher>& state, const std::weak_ptr<ChannelCore>& weak,
@@ -1124,6 +1248,7 @@ private:
     Callback<mel::MFA_Status> status_callback_;
     Callback<mel::MFA_StatusDetailed> detailed_callback_;
     Callback<mel::BIT_Status> bit_callback_;
+    Callback<ir::SubsystemStatusResp> subsystem_callback_;
     std::shared_ptr<Publisher> publisher_; // writes under callback_mutex AND operations
     std::thread worker_; // operations; defensive destructor on its own worker
 };
@@ -1188,8 +1313,10 @@ public:
     }
     const std::vector<ir::ChannelCapability>& getCapabilities() const override { return capabilities_; }
     mel::VersionInfo getVersionInfo() const override {
-        return mel::VersionInfo(4, 1, "ams-gra-gige-mel-provider",
-            "0.1.0 experimental Mono8 image-stream profile against pinned MEL 4.0; not full MEL conformance");
+        // API version 4 / numeric library version 1 are unchanged local fields;
+        // the text carries the provider software version.
+        return mel::VersionInfo(4, 1, ProviderSoftware::name, std::string(ProviderSoftware::version_text) +
+            " experimental Mono8 image-stream profile against pinned MEL 4.0; not full MEL conformance");
     }
     std::shared_ptr<ir::Channel> attachChannel(const ir::Config& config) override {
         if (in_provider_callback()) return {};
