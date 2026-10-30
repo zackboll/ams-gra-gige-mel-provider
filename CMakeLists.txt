@@ -93,6 +93,16 @@ if(BUILD_TESTING)
   target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=clock_gettime)
   add_test(NAME provider_contract COMMAND provider_tests)
 
+  # Backend portability: the same MEL-facing scenarios against the synthetic
+  # backend and an independent test-only fixture backend. The fixture source is
+  # compiled only into this test executable and is never installed.
+  add_executable(provider_backend_contract_tests tests/provider_backend_contract_tests.cpp
+    tests/support/contract_fixture_camera.cpp tests/join_observer.cpp)
+  target_link_libraries(provider_backend_contract_tests PRIVATE gige_mel_provider gige_mel_backend
+    gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
+  target_link_options(provider_backend_contract_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join)
+  add_test(NAME provider_backend_portability COMMAND provider_backend_contract_tests)
+
   add_executable(configuration_probe tests/configuration_probe.cpp)
   target_link_libraries(configuration_probe PRIVATE gige_mel_provider gige_mel_build_options)
   add_test(NAME configuration_public_api COMMAND configuration_probe)
@@ -103,7 +113,8 @@ if(BUILD_TESTING)
   add_test(NAME native_loader COMMAND loader_tests $<TARGET_FILE:gige_mel_provider>)
   add_test(NAME upstream_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify)
   add_test(NAME json_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py)
-  set_tests_properties(backend_contract provider_contract configuration_public_api native_loader PROPERTIES TIMEOUT 30)
+  set_tests_properties(backend_contract provider_contract provider_backend_portability configuration_public_api
+    native_loader PROPERTIES TIMEOUT 30)
 endif()
 
 configure_package_config_file(cmake/GigeMelProviderConfig.cmake.in
