@@ -92,9 +92,16 @@ flowchart TD
     MEL --> Runtime["Shared provider runtime"]
     Runtime --> Contract["Internal C++ backend contract"]
     Contract --> Synthetic["Synthetic backend · implemented"]
+    Contract --> Fixture["Contract-fixture backend · test only"]
     Contract -.-> SDK1["First GigE SDK adapter · planned"]
     Contract -.-> SDK2["Second adapter · planned"]
 ```
+
+The same MEL-facing portability scenarios pass against the synthetic backend
+and an independently implemented, test-only fixture backend through
+`make_api_manager` ([backend portability](docs/backend-portability.md)). That
+is evidence that the seam is reusable. It is not a real SDK adapter, a second
+production backend or hardware qualification.
 
 The common provider owns MEL objects, capabilities, futures, callbacks,
 configuration sequencing, destination buffers, and publication rules. A backend
@@ -117,7 +124,9 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `src/provider.cpp` | MEL objects, shared runtime, channels, registered buffers, and image publication |
 | `src/backends/synthetic.cpp` | Working reference backend with bounded ownership |
 | `examples/capture.cpp` | Standalone MEL consumer that dynamically loads the provider |
-| `tests/backend_tests.cpp` | Backend lifetime, cancellation, validation, and pool contracts |
+| `tests/backend_tests.cpp` | Synthetic-specific backend lifetime, cancellation, validation, and pool contracts |
+| `tests/provider_backend_contract_tests.cpp` | Shared MEL-provider portability scenarios run against the synthetic backend and an independent test-only backend |
+| `tests/support/` | Test-only contract-fixture camera backend; never installed or selectable by the exported factories |
 | `tests/provider_tests.cpp` | MEL semantics, host memory, metadata, reentry, and shutdown regressions |
 | `tests/loader_tests.cpp` | Native ABI/export and image-delivery test with no provider link dependency |
 | `tests/install_consumer/` | Separate `find_package` client for install/export validation |
@@ -194,7 +203,9 @@ all MEL channel code.
    target. Keep SDK types private. Reuse the normal registered-host copy path.
 3. Map a characterized camera profile to the typed configuration. Validate
    feature availability, units, increments, write ordering, and actual readback.
-4. Run the shared contracts plus SDK/camera-specific disconnect, stream, packet
+4. Add a case to the shared MEL-provider portability scenarios
+   ([backend portability](docs/backend-portability.md)), write adapter-specific
+   direct contract tests, then SDK/camera-specific disconnect, stream, packet
    loss, and timestamp tests. Report exact qualified combinations.
 5. Add a narrow second backend before committing to a generic feature tree or
    direct-buffer optimization. It should not need changes to MEL channel code.

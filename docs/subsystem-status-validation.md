@@ -306,8 +306,9 @@ this intermittently against the unchanged reviewed provider:
 
 ### Permanent regressions
 
-- **`subsystem_shutdown`** (R1-A): every re-enabled path now inspects the
-  exact first report after at least one further report has arrived. This
+- **`subsystem_shutdown`** (R1-A): both re-enabled paths in the four-path
+  shutdown scenario now inspect the exact first report after at least one
+  further report has arrived. This
   covers both the admitted-first and suppressed-first initial conditions.
 - **`subsystem_lifecycle_unwind`** (new, R1-B) runs once per enabled interval
   (1 and 2). Steps:
