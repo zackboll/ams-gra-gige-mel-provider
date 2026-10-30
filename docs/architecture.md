@@ -209,7 +209,7 @@ The next development sequence is:
 
 1. Keep native MEL loading, memory ownership, and synthetic lifecycle tests green.
 2. Add the required operational C2, Image metadata/navigation, and Health surfaces with an explicit sensor/profile interpretation.
-3. Implement one real SDK adapter and camera profile using the portable copy path.
+3. Implement one real SDK adapter and camera profile using the portable copy path. The [backend portability](backend-portability.md) suite already runs the same MEL-facing scenarios against the synthetic backend and an independent test-only fixture backend. It shows that the existing provider code is not tied to synthetic assumptions, but it is not this step.
 4. Add a second narrow SDK adapter to test whether the internal contract is genuinely reusable.
 5. Add format/time features and direct registered-storage acquisition only after their qualification criteria are satisfied.
 

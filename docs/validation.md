@@ -1,5 +1,90 @@
 # Bootstrap validation record
 
+## GIGE-MEL-007 backend portability (2026-10-30)
+
+Branch `test/gige-mel-007-backend-portability` was created from freshly fetched
+`origin/main`, which had not advanced:
+
+- Commit `14326c899eadd91417d3f48c0654d604eac41a51`
+- Tree `cf9f5d8635e09497f7aa607429e6fcb9a6f23933`
+
+Environment: Linux 6.12.113+deb13-amd64, GCC 14.2.0, Clang 19.1.7
+(`clang++-19`), CMake 3.31.6, Ninja 1.12.1 and Python 3.13.5. No camera,
+network or SDK was used.
+
+**Production is unchanged.** The PR does not touch `src/`, `include/`, the 99
+pinned dependency files, the factory signatures or the five-job workflow. The
+new evidence qualifies the existing implementation. Added:
+
+- `tests/support/contract_fixture_camera.{hpp,cpp}`: the independent test-only
+  backend;
+- `tests/provider_backend_contract_tests.cpp`: the shared scenarios;
+- one CTest registration inside `BUILD_TESTING`;
+- documentation in [backend portability](backend-portability.md).
+
+| Configuration | CTest | Existing provider | Existing backend | New portability suite |
+| --- | --- | --- | --- | --- |
+| GCC dev | **7/7** | 74/74 | 8/8 | 12 shared runs (2 cases × 6) + 2 fixture checks |
+| GCC Release | **7/7** | 74/74 | 8/8 | 12 + 2 |
+| ASan/UBSan (`detect_leaks=1:halt_on_error=1`; `halt_on_error=1:print_stacktrace=1`) | **7/7** | 74/74 | 8/8 | 12 + 2 |
+| TSan (`halt_on_error=1`) | **7/7** | 74/74 | 8/8 | 12 + 2 |
+| Clang 19.1.7 Debug (`CXX=clang++-19`, separate `build/clang-dev`) | **7/7** | 74/74 | 8/8 | 12 + 2 |
+
+CTest now has **seven** entries. The six previous ones are unchanged, and the
+new one is `provider_backend_portability`. The test `pthread_join` forwarding
+target resolved to `libasan.so.8` and `libtsan.so.2` respectively, so both
+sanitizer runtimes were active. There were no sanitizer initialization
+failures and no reduced settings.
+
+Other checks:
+
+- **Release build.** The first Release build of the new test failed because
+  GCC 14 at `-O3` reported a `-Wfree-nonheap-object` false positive on a
+  span-to-vector temporary. The test helper was rewritten (explicit copy plus
+  an in-place `std::equal`); warnings were not relaxed.
+- **Offline verifiers.** Both pass (97 MEL files and 2 JSON files).
+- **Capture, install and consumer.** The synthetic capture works. The dev
+  install and the separate installed consumer pass. The installed tree
+  contains no fixture source, header or symbol. Only the documentation
+  directory (`docs/backend-portability.md`) mentions it.
+- **Whitespace.** `git diff --check origin/main` passes over the whole change.
+- **Bounded repetition.** Five dev runs each of the drain, fixture-direct and
+  Health/BIT scenarios passed (15/15). Five TSan runs each of the drain and
+  fixture-direct scenarios passed (10/10). Repetition supplements the
+  deterministic join/gate/watchdog synchronization; it does not replace it.
+
+### Starting-main and negative controls
+
+- **Starting main.** An isolated detached worktree at `14326c8` was built with
+  the dev preset; its own CTest passed 6/6. The provider DSO SHA-256 is
+  `d0fec4bc…0b56`. The new test and fixture sources were compiled with the
+  starting-main headers and linked to that DSO. `ldd` and `LD_DEBUG=files`
+  (`calling init:`) confirmed `/tmp/gm7/base/build/dev/libgige_mel_provider.so.0`
+  was loaded. Result: rc 0, 12 shared runs and 2 fixture checks passed. The
+  existing provider needed no correction.
+- **Mutation controls.** Each control is a disposable copy of starting main,
+  one line changed in `src/provider.cpp`, with only the provider rebuilt. The
+  same unchanged test binary was run against each mutated DSO using
+  `LD_LIBRARY_PATH` (RUNPATH binary), and `calling init:` confirmed the loaded
+  library each time.
+
+| Control | Mutation | `[synthetic]` | `[contract-fixture]` |
+| --- | --- | --- | --- |
+| A (`3091dac6…`) | Row-by-row repack replaced by one `memcpy(destination, source, width*height)` | rc 0, 6/6 pass (tight rows hide it) | **rc 1**: `image publication and row repacking: pixel mismatch at x=0 y=1 frame=4294967280: got 165, model 127` (0xA5 padding leaked) |
+| B (`d33b2e97…`) | Detailed `backend_id` reported as literal `"synthetic"` | rc 0, 6/6 pass | **rc 1**: `identity, instance lookup and discovery: values.at("gige_mel.backend_id") == kase.backend_id` |
+
+The mutated copies were discarded, and final validation used the unmodified
+provider. No broader mutation campaign was run.
+
+### Limitations
+
+Both cases are software backends. This record does not qualify a GigE Vision
+SDK, physical camera, transport, packet behavior, disconnection, trigger
+timing, clock mapping, PTP/UTC or calibration. It does not complete the
+roadmap's "first real camera" or "second implementation" milestones. Hosted CI
+results for the final head are recorded on the PR, not here. The two deferred
+PR #3 notes remain separate and untouched.
+
 ## GIGE-MEL-003 configuration and command status (2026-10-28)
 
 Starting freshly fetched main: commit

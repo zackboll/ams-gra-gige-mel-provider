@@ -236,7 +236,7 @@ The tests and hardware evidence for each claimed milestone should cover these be
 | Callback behavior | Duplicate registration, unsupported registration, reentry policy, callback failure, and no user callback under internal locks |
 | Metadata | Correct dimensions/stride/time/configuration generation; incomplete or stale frames are not delivered as valid |
 | Real SDK | Device unavailable/busy/disconnected, interrupted receive, late callbacks, packet loss, timestamp reset/wrap, and reconnection policy |
-| Second backend | Same contract tests and MEL client; no new vendor types in common headers |
+| Second backend | Same shared MEL-provider portability scenarios and MEL client; no new vendor types in common headers. The scenarios already pass for the synthetic backend and a test-only fixture backend ([backend portability](backend-portability.md)); that does not complete P2 or P3 |
 
 These are release criteria, not assertions that hardware qualification has occurred. The README's validation section records what was actually run for this bootstrap.
 

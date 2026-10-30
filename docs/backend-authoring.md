@@ -2,7 +2,19 @@
 
 ## Starting point
 
-The internal source contract is [`include/gige_mel/backend.hpp`](../include/gige_mel/backend.hpp), in namespace `gige_mel::backend`. The first implementation is [`src/backends/synthetic.cpp`](../src/backends/synthetic.cpp). Its executable contract tests are [`tests/backend_tests.cpp`](../tests/backend_tests.cpp).
+The internal source contract is [`include/gige_mel/backend.hpp`](../include/gige_mel/backend.hpp), in namespace `gige_mel::backend`. The first implementation is [`src/backends/synthetic.cpp`](../src/backends/synthetic.cpp).
+
+There are three distinct levels of test evidence:
+
+| Level | Where | What it establishes |
+| --- | --- | --- |
+| Synthetic-specific backend tests | [`tests/backend_tests.cpp`](../tests/backend_tests.cpp) (`backend_contract`) | The synthetic backend's own discovery, validation, pool, cancellation and lease behavior. Its numbers (pool of four, IDs from 1, 640 × 480) are not adapter requirements |
+| Shared MEL-provider portability scenarios | [`tests/provider_backend_contract_tests.cpp`](../tests/provider_backend_contract_tests.cpp) (`provider_backend_portability`) | The same MEL-facing scenarios pass against the synthetic backend **and** an independent test-only fixture backend with different identities, limits, padded rows, frame IDs, clock and apply semantics. See [backend portability](backend-portability.md) |
+| Future SDK/hardware qualification | Not yet available | Real SDK, camera, transport, timing and disconnection behavior; nothing in the first two levels substitutes for it |
+
+A new adapter adds a `BackendCase` to the portability suite and writes its own
+direct contract checks. It does not edit the shared scenarios to accommodate
+itself.
 
 The backend interface contains project-owned C++ values. It must not contain MEL classes, Aravis buffers, pylon grab results, eBUS handles, `GenApi::INodeMap`, vendor exception classes, or platform-specific SDK structures. Keep those inside the adapter implementation. Build the adapter with the provider; this interface is not a stable binary plugin ABI.
 
@@ -163,7 +175,8 @@ Before an adapter is called supported:
 
 - Record SDK version, supported platform/compiler, licensing/redistribution requirements, camera models/firmware, and feature profile.
 - Make SDK dependency discovery optional; the synthetic/core build and tests must still work without that SDK installed.
-- Run the reusable backend contract tests for unknown device, exclusive/open behavior, full configuration validation, readback, receive timeout, stop wakeup, and close.
+- Add a `BackendCase` for the adapter and pass the shared MEL-provider portability scenarios ([backend portability](backend-portability.md)) with its own identities, capabilities, configurations and documented frame/time facts.
+- Write adapter-specific direct contract tests for unknown device, exclusive/open behavior, full configuration validation, readback, receive timeout, stop wakeup, and close. The synthetic `backend_contract` suite is synthetic-specific and is not reusable as-is.
 - Hold a source lease across additional frames, pool exhaustion, stream stop, and logical device close; verify immutable bytes and valid final release.
 - Verify source-pool bounds and recovery after release, including release from another allowed thread.
 - Verify frame completion status, stride/payload validation, native ID behavior, generation boundaries, and time conversion.
