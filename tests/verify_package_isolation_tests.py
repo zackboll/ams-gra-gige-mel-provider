@@ -258,7 +258,7 @@ class FilesystemOrderResolutionCases(VerifierFixture):
     def assert_actual_and_lexical(self, link: Path, actual: Path, lexical: Path | None) -> None:
         """The kernel resolves `link` to `actual`; lexical normalization (as
         in R2) selects the distinct, existing regular file `lexical`."""
-        self.assertEqual(Path(os.path.realpath(link, strict=True)), actual.resolve(strict=True))
+        self.assertEqual(link.resolve(strict=True), actual.resolve(strict=True))
         if lexical is not None:
             normalized = Path(os.path.normpath(link.parent / os.readlink(link)))
             self.assertEqual(normalized, lexical)

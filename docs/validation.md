@@ -1,5 +1,78 @@
 # Bootstrap validation record
 
+## GIGE-MEL-008-R4 Python 3.9 compatibility of the verifier tests (2026-11-01)
+
+This is an ordinary corrective commit on the reviewed R3 head, commit
+`ab0ad422d751726b2be0d99cd0853fcb3ff946d2`, tree
+`4f9391f644ea647b003bdc6e89338a2b6eb71007`. The local branch, the remote
+branch and the PR #8 head all matched that revision, and the worktree was
+clean. Main was unchanged: `039de755644ad2b15dd5827878ae71c028218e8f`, tree
+`01476757e59fec54f66de1f3fa0820f0429b7375`. Only
+`tests/verify_package_isolation_tests.py` and this record changed.
+`scripts/verify_package_isolation.py` is byte-identical to R3. The C++
+sources and tests, public headers and factories, CMake (including
+`find_package(Python3 3.9 …)`), the workflow, manifests, vendored files,
+provisioning and tools are unchanged.
+
+**Finding.** R3's fixture helper `assert_actual_and_lexical()` called
+`os.path.realpath(link, strict=True)`. CPython 3.9.0–3.9.22 has no `strict`
+parameter (`def realpath(filename):`). The keyword reached the 3.9 series
+only in 3.9.23. CMake accepts any 3.9 interpreter, so on those versions every
+case that uses the helper raised `TypeError`. The R3 verifier itself and its
+resolver evidence are unaffected.
+
+**Correction.** The helper now uses the `pathlib` equivalent, which has
+accepted `strict` since Python 3.6. The fixture check is still strict and
+still independent of the verifier's component walker:
+
+```python
+self.assertEqual(link.resolve(strict=True), actual.resolve(strict=True))
+```
+
+The lexical-target comparison and the distinct-target assertion are
+unchanged, as are all fixture arrangements, expectations and the 29 cases.
+
+**Before/after on a native affected interpreter.** The tests ran in a
+disposable container, with the system interpreter and the repository left
+untouched. The image was `docker.io/library/python:3.9.22-slim-bookworm`
+(`sha256:aff2066ec8914f7383e115bbbcde4d24da428eac377b0d4bb73806de992d240f`).
+
+- **Interpreter:** `/usr/local/bin/python3`, reporting
+  `3.9.22 (main, May 21 2025, 23:30:35) [GCC 12.2.0]` (CPython). Its
+  signatures are `os.path.realpath(filename)` and
+  `pathlib.Path.resolve(self, strict=False)`. Its `posixpath.py` is Git blob
+  `af2814bdb0580410c25a2920b6a8b86a64d45042`, the CPython v3.9.22 blob.
+- **Inputs:** both test files ran from read-only mounts, as a non-root user,
+  against the same R3 verifier blob `bb2f7ebd…`. The test module itself
+  reported the paths it selected.
+  - The reviewed test file was extracted from `ab0ad42`, and its blob
+    `1c2c974f…` was checked against the commit.
+  - The corrected test file is blob `d09fc9bc…`.
+- **Reviewed file, case 10:** errors with
+  `TypeError: realpath() got an unexpected keyword argument 'strict'` at the
+  helper.
+- **Reviewed file, full suite:** 29 run, 21 pass, and 8 error with that
+  `TypeError` in cases 10, 11, 12, 12b, 12c, 13, 14b and 14c.
+- **Corrected file:** case 10 passes, and the full suite passes 29/29.
+
+### Other local checks
+
+- **Current interpreter:** 29/29 on `/usr/bin/python3` (3.13.5).
+- **CTest:** `package_isolation_verifier` passes in the existing builds,
+  which use `/home/zboll/.local/bin/python3.13` (3.13.16):
+  - `build/dev` (SDK-free) passes 8/8;
+  - `build/aravis-dev` (Aravis 0.8.36) passes 11/11.
+
+  No C++ was rebuilt, and no sanitizer suite, real-install run or earlier
+  R1–R3 control was repeated, because only a test helper changed.
+- **Integrity:** `vendor_upstream.py --verify` (97 files) and `verify_json.py`
+  (2 files) pass.
+- **Whitespace:** `git diff --check` is clean over the R4 range and the full
+  PR range.
+
+The final commit, its tree and its hosted CI results are recorded in the R4
+section of the PR #8 description.
+
 ## GIGE-MEL-008-R3 filesystem-order symlink resolution (2026-11-01)
 
 This is an ordinary corrective commit on the R2 head, commit
