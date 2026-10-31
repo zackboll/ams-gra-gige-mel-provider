@@ -374,13 +374,33 @@ Result<ArvGcCommand*> command_node(ArvDevice* device, std::string_view name) {
     return ARV_GC_COMMAND(node);
 }
 
-Status execute_command(ArvDevice* device, std::string_view name, const TestHooks* hooks) {
+// Adapter command/lifecycle state of camera acquisition (GIGE-MEL-009-R1):
+// what the adapter knows about the outcome of ITS OWN AcquisitionStart and
+// AcquisitionStop commands. It is not a measurement of camera exposure or
+// readout, and it is distinct from ownership of a native receiver (a Run).
+enum class Acquisition {
+    none,     // no unresolved acquisition command
+    owned,    // AcquisitionStart succeeded and a run owns the acquisition
+    uncertain // a start/stop command was attempted and its outcome is unknown
+};
+
+// `outcome` becomes `uncertain` immediately BEFORE the SDK call that may have
+// a camera side effect. It is a plain store (no allocation), so the state
+// survives any exception while the error diagnostic is built. A failure
+// before that point (command missing, unavailable or not writable; a
+// throwing test hook) leaves `outcome` unchanged: no command was attempted.
+// No SDK error is classified as side-effect-free: once the executor was
+// called, the caller decides the outcome only on success.
+Status execute_command(ArvDevice* device, std::string_view name, const TestHooks* hooks, Acquisition& outcome) {
     auto node = command_node(device, name);
     if (!node) return node.error();
     if (hooks && hooks->before_command) hooks->before_command(name, device);
     ErrorSlot error;
+    outcome = Acquisition::uncertain;
     arv_gc_command_execute(node.value(), error.out());
     if (error.failed()) return translate("execute", name, *error.take());
+    if (hooks && hooks->command_result)
+        if (auto substituted = hooks->command_result(name, device)) return std::move(*substituted);
     return {};
 }
 
@@ -520,9 +540,26 @@ struct DeviceCore {
     const CameraCapabilities caps;
     const profile::NativeSnapshot envelope;
     const std::shared_ptr<const TestHooks> hooks;
+    // Three distinct private concepts (GIGE-MEL-009-R1):
+    //  - receiver ownership: `active`, the run owning a native stream;
+    //  - camera-command outcome: `acquisition` and the wrapper token `owner`
+    //    that started it or must recover it (meaningful unless `none`);
+    //  - history: `fault`, a failure from the void stop() interface kept for
+    //    one report by close(); never itself an admission gate.
+    // Invariants after every public operation: `owned` <=> `active` is set;
+    // `uncertain` => no active run. Retiring a native receiver never proves
+    // that AcquisitionStop succeeded; only a successful command clears it.
     std::shared_ptr<Run> active; // the run owning native acquisition, if any
     std::shared_ptr<Run> latest; // most recent successful run (restart lease rule)
-    std::optional<Error> stop_failure; // first failed AcquisitionStop not yet reported by close()
+    Acquisition acquisition{Acquisition::none};
+    std::uint64_t owner{0};             // AravisStream token; 0 = none
+    const char* attempted{nullptr};     // command(s) behind the current state (static text)
+    std::uint64_t attempted_generation{0};
+    struct Fault {
+        Error error;                       // first unrecovered failure, with context
+        const char* recovered_by{nullptr}; // set (no allocation) once a later stop succeeded
+    };
+    std::optional<Fault> fault; // not yet reported by close()
 };
 
 std::string text(const CameraConfiguration& c) {
@@ -539,10 +576,41 @@ Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
     return profile::configuration_from(native.value());
 }
 
+// One bounded AcquisitionStop attempt (device lock held, device present): a
+// single SDK command, no internal retry loop. Success clears the current
+// uncertainty and marks an unreported historical failure recovered. Any
+// failure - before or after execution - leaves the outcome `uncertain`,
+// because the caller is retiring (or has retired) the receiver while the
+// camera may still be acquiring.
+Status stop_command_locked(DeviceCore& core, const char* recovered_by) {
+    auto stopped = execute_command(core.device.get(), "AcquisitionStop", core.hooks.get(), core.acquisition);
+    if (!stopped) {
+        core.acquisition = Acquisition::uncertain;
+        return stopped;
+    }
+    core.acquisition = Acquisition::none;
+    core.owner = 0;
+    if (core.fault && !core.fault->recovered_by) core.fault->recovered_by = recovered_by;
+    return {};
+}
+
+// Keeps the first unrecovered failure of the void stop() interface for one
+// report by close(). A new failure after a recovered one is chained onto it,
+// so neither episode is lost and the report reflects the latest outcome.
+void record_fault(DeviceCore& core, Error error) {
+    if (core.fault && !core.fault->recovered_by) return; // same unresolved episode
+    if (core.fault)
+        error.message = core.fault->error.message + "; recovered by " + core.fault->recovered_by + "; later: " +
+                        error.message;
+    core.fault = DeviceCore::Fault{std::move(error), nullptr};
+}
+
 // Retires core.active (device lock held, device reference still present when
 // `closing` is false or close() has not yet dropped it). Order:
 //   1. cancel: receive returns within one polling slice;
-//   2. AcquisitionStop through the SDK (failure recorded, never hidden);
+//   2. AcquisitionStop through the SDK; a failure leaves the outcome
+//      `uncertain` (never hidden) and is recorded for close(), or handed to
+//      close() itself through `close_failure`;
 //   3. mark retired, take the stream out, and wait (at most one slice) until
 //      no receive is inside a native pop; lease releases now free storage;
 //   4. drop the last native-stream reference: the SDK finalizer joins its own
@@ -550,23 +618,30 @@ Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
 //      register (GigE) while this device's lock and reservation are held;
 //      queued buffers are freed by that finalizer, leased ones by their lease.
 // No second explicit thread stop is issued; arv_shutdown() is never called.
-void retire_locked(DeviceCore& core, bool closing) noexcept {
+// The receiver is retired whatever the command outcome. Until AcquisitionStop
+// succeeds the outcome is `uncertain` (plain stores made before the command,
+// so an exception while describing a failure cannot lose them); the run's
+// wrapper stays the recovery owner.
+void retire_locked(DeviceCore& core, bool closing, std::optional<Error>* close_failure = nullptr) noexcept {
     const std::shared_ptr<Run> run = std::move(core.active);
     if (!run) return;
     if (closing) run->closed.store(true); // before cancel: receive reports disconnected
     run->cancel.store(true);
+    core.acquisition = Acquisition::uncertain;
+    core.attempted = "AcquisitionStop";
+    core.attempted_generation = run->stream_generation;
     if (core.device) {
         try {
-            if (auto stopped = execute_command(core.device.get(), "AcquisitionStop", core.hooks.get()); !stopped) {
-                if (!core.stop_failure)
-                    core.stop_failure = Error{stopped.error().code,
-                                              stopped.error().message + " (stream generation " +
-                                                  std::to_string(run->stream_generation) +
-                                                  "); local stream resources were retired anyway; the camera may "
-                                                  "still be acquiring"};
+            if (auto stopped = stop_command_locked(core, "a later successful AcquisitionStop"); !stopped) {
+                Error failure{stopped.error().code, stopped.error().message + " (stream generation " +
+                                                        std::to_string(run->stream_generation) +
+                                                        "); local stream resources were retired anyway"};
+                if (close_failure) *close_failure = std::move(failure);
+                else record_fault(core, std::move(failure));
             }
         } catch (...) {
-            // Allocation failure while describing the error: keep retiring.
+            // Allocation failure while describing the error: the outcome
+            // stays `uncertain`; keep retiring.
         }
     }
     GObjectPtr<ArvStream> stream;
@@ -579,6 +654,23 @@ void retire_locked(DeviceCore& core, bool closing) noexcept {
     stream.reset(); // synchronous SDK finalization (sole strong reference)
 }
 
+// Admission refusal while an acquisition-command outcome is uncertain (device
+// lock held). Built only on the refusal path; `what` says what was refused.
+Error uncertain_refusal(const DeviceCore& core, const std::string& what) {
+    std::string message = "the outcome of " + std::string(core.attempted ? core.attempted : "an acquisition command") +
+                          " (stream generation " + std::to_string(core.attempted_generation) +
+                          ") is uncertain, so the camera may still be acquiring; configuration and acquisition are "
+                          "refused until stop() on the stream that owns this outcome succeeds in AcquisitionStop, or "
+                          "the device is closed; " + what;
+    if (core.fault && !core.fault->recovered_by) message += "; last failure: " + core.fault->error.message;
+    return fail(ErrorCode::invalid_state, std::move(message));
+}
+
+// Process-wide, never reused, never 0: a stable private recovery identity for
+// each wrapper, compared under the device lock. It is a number, not a
+// pointer, so no dangling reference or ownership cycle can arise.
+std::atomic<std::uint64_t> stream_tokens{0};
+
 // Lightweight wrapper. create_stream() performs no native work; start()
 // creates a FRESH native stream and pool for every run. Several wrappers may
 // exist for one device, but DeviceCore::active admits one acquisition at a
@@ -586,8 +678,12 @@ void retire_locked(DeviceCore& core, bool closing) noexcept {
 // Statistics are per wrapper and accumulate across that wrapper's runs.
 class AravisStream final : public IFrameStream {
 public:
-    explicit AravisStream(std::shared_ptr<DeviceCore> core) : core_(std::move(core)) {}
-    ~AravisStream() override { stop(); } // caller has joined its receiving thread
+    explicit AravisStream(std::shared_ptr<DeviceCore> core)
+        : core_(std::move(core)), token_(stream_tokens.fetch_add(1) + 1) {}
+    // The caller has joined its receiving thread. Destruction makes the same
+    // bounded attempt as stop(); if it fails, the outcome stays uncertain and
+    // is NOT handed to another wrapper: only close() can then resolve it.
+    ~AravisStream() override { stop(); }
     AravisStream(const AravisStream&) = delete;
     AravisStream& operator=(const AravisStream&) = delete;
 
@@ -598,12 +694,32 @@ public:
         if (const auto run = current()) run->cancel.store(true);
     }
 
+    // Retires this wrapper's active run (receiver always retired; a failed
+    // AcquisitionStop leaves the outcome uncertain). Explicit recovery: when
+    // the outcome THIS wrapper owns is uncertain and no native stream remains,
+    // one bounded AcquisitionStop attempt is made; success clears the
+    // uncertainty, failure keeps it. A wrapper that does not own the current
+    // outcome (never started, obsolete, or another wrapper's) does nothing.
+    // The restart lease rule is unaffected.
     void stop() noexcept override {
         std::lock_guard lock(core_->mutex);
-        const auto run = current();
-        if (!run) return;
-        run->cancel.store(true);
-        if (core_->active == run) retire_locked(*core_, false);
+        DeviceCore& core = *core_;
+        if (const auto run = current()) {
+            run->cancel.store(true);
+            if (core.active == run) {
+                retire_locked(core, false);
+                return;
+            }
+        }
+        if (!core.device || core.active || core.acquisition != Acquisition::uncertain || core.owner != token_) return;
+        try {
+            if (auto stopped = stop_command_locked(core, "an explicit stop() retry"); !stopped)
+                record_fault(core, Error{stopped.error().code,
+                                         stopped.error().message + " (explicit stop() retry; generation " +
+                                             std::to_string(core.attempted_generation) + ")"});
+        } catch (...) {
+            // Allocation failure while describing the error: still uncertain.
+        }
     }
 
     StreamStatistics statistics() const override {
@@ -633,21 +749,35 @@ private:
     }
 
     const std::shared_ptr<DeviceCore> core_;
-    mutable std::mutex mutex_; // W: guards run_ only
+    const std::uint64_t token_; // private recovery identity (see stream_tokens)
+    mutable std::mutex mutex_;  // W: guards run_ only
     std::shared_ptr<Run> run_;
     std::atomic<std::uint64_t> delivered_{0}, incomplete_{0}, timeouts_{0}, starvation_{0};
 };
 
 // Start order (device lock held throughout, so apply()/close()/other starts
 // are serialized and see either no run or a fully published one):
-//   reject closed / active acquisition / outstanding leases of the previous
-//   run -> fresh snapshot + profile preconditions + representable readback ->
+//   reject closed / active acquisition / uncertain acquisition outcome /
+//   outstanding leases of the previous run -> READ-ONLY PREFLIGHT of the
+//   fresh snapshot (profile preconditions, structural limits, current ROI
+//   geometry, the open-envelope comparison, representability) ->
 //   AcquisitionMode Continuous, commands present and writable, PayloadSize ->
 //   checked pool plan -> native stream (receiver starts) -> allocate & queue
-//   the fixed pool -> AcquisitionStart -> publish. AcquisitionStart is the
-//   last native step, so any failure after the native stream exists retires
-//   it WITHOUT AcquisitionStop and frees every queued buffer before
-//   returning; nothing is published.
+//   the fixed pool -> AcquisitionStart -> publish.
+//
+// Failure handling (GIGE-MEL-009-R1):
+//  - Before the SDK command executor is called (preflight, preparation,
+//    allocation, a missing/unwritable command): no command was attempted.
+//    The partial native stream/pool is retired, the outcome stays `none`, and
+//    an explicit retry/configuration remains available.
+//  - After AcquisitionStart was attempted: an SDK error does not prove the
+//    command was unapplied. The ORIGINAL start error is preserved; one
+//    compensating AcquisitionStop is attempted while the device and its
+//    reservation are held; the partial stream/pool is retired whatever that
+//    yields. If the stop succeeds, the result is still the start failure and
+//    later explicit use is permitted. If it fails, the outcome stays
+//    `uncertain`, owned by this wrapper for explicit stop() recovery, and the
+//    diagnostic carries both failures. AcquisitionStart is never retried.
 Status AravisStream::start(std::uint64_t configuration_generation) {
     std::lock_guard device_lock(core_->mutex);
     DeviceCore& core = *core_;
@@ -656,6 +786,8 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
         return fail(ErrorCode::busy, "an acquisition is already active on this Aravis device (stream generation " +
                                          std::to_string(core.active->stream_generation) +
                                          "); stop it before starting another; no native stream was created");
+    if (core.acquisition == Acquisition::uncertain)
+        return uncertain_refusal(core, "no native stream was created and no command was sent");
     if (core.latest) {
         std::lock_guard run_lock(core.latest->mutex);
         if (core.latest->outstanding != 0)
@@ -667,9 +799,8 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
     ArvDevice* device = core.device.get();
     auto snapshot = read_snapshot(device);
     if (!snapshot) return snapshot.error();
-    if (auto ok = profile::check_preconditions(snapshot.value()); !ok) return ok.error();
-    auto frozen = profile::configuration_from(snapshot.value());
-    if (!frozen) return fail(frozen.error().code, "current configuration is not representable: " + frozen.error().message);
+    auto frozen = profile::acquisition_preflight(snapshot.value(), core.envelope);
+    if (!frozen) return fail(frozen.error().code, frozen.error().message + "; no native stream was created");
     auto mode = read_string(device, "AcquisitionMode");
     if (!mode) return mode.error();
     if (mode.value() != profile::acquisition_mode)
@@ -690,13 +821,10 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
         if (error.failed()) return translate("create stream on", "", *error.take());
         if (!run->stream) return fail(ErrorCode::io_error, "Aravis returned no stream object; nothing was started");
     }
-    if (core.hooks->after_stream_created) core.hooks->after_stream_created(run->stream.get());
-    // Partial-setup cleanup. AcquisitionStart is the last native step, so a
-    // failure never needs AcquisitionStop. Cancel, retire, and drop the sole
-    // native-stream reference: the SDK finalizer stops its receiver and frees
-    // every queued pool buffer. Nothing was published; configuration was not
-    // written; start() can be retried explicitly.
-    const auto abandon = [&](Error error) -> Status {
+    // Local partial-setup retirement: cancel, retire, and drop the sole
+    // native-stream reference; the SDK finalizer stops its receiver and frees
+    // every queued pool buffer. Nothing was published; nothing was written.
+    const auto retire_partial = [&]() noexcept {
         run->cancel.store(true);
         GObjectPtr<ArvStream> stream;
         {
@@ -705,29 +833,80 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
             stream = std::move(run->stream);
         }
         stream.reset();
-        return error;
+    };
+    // After an ATTEMPTED AcquisitionStart: compensate, then retire. The
+    // outcome was set to `uncertain` by execute_command() before the SDK
+    // call; this wrapper is recorded as the recovery owner before anything
+    // that allocates, so an exception cannot leave an unowned uncertainty.
+    bool compensated = false; // at most ONE compensating attempt per start()
+    const auto compensate = [&]() noexcept -> std::optional<Error> {
+        compensated = true;
+        core.owner = token_;
+        core.attempted = "AcquisitionStart";
+        core.attempted_generation = run->stream_generation;
+        std::optional<Error> cleanup;
+        try {
+            if (auto stopped = stop_command_locked(core, "a compensating AcquisitionStop"); !stopped)
+                cleanup = stopped.error();
+        } catch (...) {
+            core.acquisition = Acquisition::uncertain; // the diagnostic failed, not the state
+        }
+        retire_partial();
+        return cleanup;
+    };
+    const auto attempted_failure = [&](const Error& primary) -> Status {
+        const auto cleanup = compensate();
+        const std::string retired = "; the native stream and " + std::to_string(run->buffer_count) +
+                                    " queued buffers were released; configuration is unchanged";
+        if (core.acquisition != Acquisition::uncertain)
+            return fail(primary.code, primary.message + retired +
+                                          "; a compensating AcquisitionStop succeeded; retry start() explicitly");
+        // History keeps both failures but no current-state claim, so a later
+        // report can truthfully say "recovered"; the returned error adds it.
+        Error history{primary.code, primary.message + retired + "; the compensating AcquisitionStop also failed: " +
+                                        (cleanup ? cleanup->message : std::string("(no diagnostic)"))};
+        record_fault(core, history);
+        history.message += "; the camera may still be acquiring; configuration and start() are refused until stop() "
+                           "on this stream succeeds, or the device is closed";
+        return history;
     };
     try {
+        if (core.hooks->after_stream_created) core.hooks->after_stream_created(run->stream.get());
         for (std::size_t i = 0; i < run->buffer_count; ++i) {
             GObjectPtr<ArvBuffer> buffer(arv_buffer_new_allocate(run->buffer_bytes));
-            if (!buffer) return abandon(fail(ErrorCode::resource_exhausted, "Aravis buffer allocation failed"));
+            if (!buffer) {
+                retire_partial();
+                return fail(ErrorCode::resource_exhausted, "Aravis buffer allocation failed; no command was sent");
+            }
             if (core.hooks->after_buffer_allocated) core.hooks->after_buffer_allocated(buffer.get());
             arv_stream_push_buffer(run->stream.get(), buffer.release()); // transfer full
         }
-        if (auto ok = execute_command(device, "AcquisitionStart", core.hooks.get()); !ok)
-            return abandon(fail(ok.error().code, ok.error().message + "; the native stream and " +
-                                                     std::to_string(run->buffer_count) +
-                                                     " queued buffers were released; configuration is unchanged; "
-                                                     "retry start() explicitly"));
+        if (auto ok = execute_command(device, "AcquisitionStart", core.hooks.get(), core.acquisition); !ok) {
+            if (core.acquisition != Acquisition::uncertain) {
+                // The executor was never called: nothing to compensate.
+                retire_partial();
+                return fail(ok.error().code, ok.error().message +
+                                                 "; AcquisitionStart was not executed; the native stream and queued "
+                                                 "buffers were released; retry start() explicitly");
+            }
+            return attempted_failure(ok.error());
+        }
         {
             std::lock_guard lock(mutex_);
             run_ = run;
         }
         core.active = run;
         core.latest = run;
+        core.acquisition = Acquisition::owned;
+        core.owner = token_;
+        core.attempted = "AcquisitionStart";
+        core.attempted_generation = run->stream_generation;
         return {};
     } catch (...) {
-        (void)abandon(fail(ErrorCode::io_error, "start failed"));
+        // Unexpected exception (test hook or allocation). If the executor was
+        // reached, compensate first; otherwise only retire locally.
+        if (!compensated && core.acquisition == Acquisition::uncertain && core.active != run) (void)compensate();
+        else retire_partial();
         throw;
     }
 }
@@ -884,6 +1063,9 @@ public:
             return fail(ErrorCode::invalid_state, "an acquisition is active on this Aravis device (stream generation " +
                                                       std::to_string(core.active->stream_generation) +
                                                       "); stop it before applying configuration; nothing was written");
+        // No active receiver is NOT proof that reuse is safe: an unresolved
+        // AcquisitionStart/Stop outcome refuses configuration before writes.
+        if (core.acquisition == Acquisition::uncertain) return uncertain_refusal(core, "nothing was written");
         auto current = read_snapshot(core.device.get());
         if (!current) return current.error();
         // Requires the stopped/manual profile; nothing is normalized.
@@ -917,28 +1099,68 @@ public:
         return std::unique_ptr<IFrameStream>(std::make_unique<AravisStream>(core_));
     }
 
-    // Idempotent logical close. Order: retire the active run (cancel, SDK
+    // Idempotent logical close; it has authority over the device's outstanding
+    // acquisition state whichever wrapper owns it. Order, while the device
+    // reference and reservation are held: retire an active run (cancel, SDK
     // AcquisitionStop, wait for in-flight native waits, synchronous native
-    // stream finalization) while the device reference and reservation are
-    // held; then drop the native device; then release the reservation, so a
-    // reopen cannot overlap old native I/O. Outstanding leases stay valid.
-    // Reports (once) an AcquisitionStop failure recorded by stop() or here.
-    // Never calls arv_shutdown().
+    // stream finalization); or, with NO native stream but an `uncertain`
+    // outcome, still attempt one AcquisitionStop. Then drop the native device;
+    // then release the reservation, so a reopen cannot overlap old native I/O.
+    // The device closes whatever the command outcome. Outstanding leases stay
+    // valid. Returns (once) an unreported stop() failure - marked recovered if
+    // a later stop succeeded - and/or this close's own stop failure, stating
+    // that the camera outcome remains uncertain. A repeated close performs no
+    // device I/O. Close is not proof the camera stopped. Never arv_shutdown().
     Status close() override {
         GObjectPtr<ArvDevice> retired;
         std::unique_ptr<Reservation> released;
-        std::optional<Error> stop_failure;
+        std::optional<DeviceCore::Fault> history;
+        std::optional<Error> now;
+        bool unresolved = false;
         {
             std::lock_guard lock(core_->mutex);
-            retire_locked(*core_, true);
-            retired = std::move(core_->device);
-            released = std::move(core_->reservation);
-            stop_failure = std::exchange(core_->stop_failure, std::nullopt);
+            DeviceCore& core = *core_;
+            if (core.device) {
+                if (core.active) {
+                    retire_locked(core, true, &now);
+                } else if (core.acquisition != Acquisition::none) {
+                    try {
+                        if (auto stopped = stop_command_locked(core, "AcquisitionStop during close()"); !stopped)
+                            now = stopped.error();
+                    } catch (...) {
+                        core.acquisition = Acquisition::uncertain;
+                    }
+                }
+                unresolved = core.acquisition != Acquisition::none;
+            }
+            retired = std::move(core.device);
+            released = std::move(core.reservation);
+            history = std::exchange(core.fault, std::nullopt);
+            core.acquisition = Acquisition::none; // logically closed: no further device I/O
+            core.owner = 0;
         }
         retired.reset();
         released.reset();
-        if (stop_failure) return *stop_failure;
-        return {};
+        if (!history && !now && !unresolved) return {};
+        const ErrorCode code = history ? history->error.code : now ? now->code : ErrorCode::io_error;
+        try {
+            std::string message;
+            if (history) {
+                message = history->error.message;
+                if (history->recovered_by) message += "; recovered: " + std::string(history->recovered_by) + " succeeded";
+            }
+            if (now) message += (message.empty() ? "" : "; ") + std::string("close(): ") + now->message;
+            if (unresolved)
+                message += (message.empty() ? "" : "; ") +
+                           std::string("the camera acquisition outcome remains uncertain (the camera may still be "
+                                       "acquiring); the device was closed and its native resources released");
+            return fail(code, std::move(message));
+        } catch (...) {
+            // Out of memory while describing: return what exists (no allocation).
+            if (history) return std::move(history->error);
+            if (now) return std::move(*now);
+            return Error{code, {}};
+        }
     }
 
     bool with_native(const std::function<void(ArvDevice*)>& fn) {

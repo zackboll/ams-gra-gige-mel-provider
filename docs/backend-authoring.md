@@ -179,7 +179,10 @@ direct tests (`aravis_adapter`) cover the unknown-device, exclusive-open,
 validation, readback and close items from the checklist below, using Aravis's
 in-process Fake device. GIGE-MEL-009 adds `IFrameStream`: SDK-buffer-backed
 leases that survive stop and close, a bounded pool, receive timeout, stop and
-close wakeup, restart and failure cleanup (`aravis_stream_contract`). It is
+close wakeup, restart and failure cleanup, and (GIGE-MEL-009-R1) an uncertain
+acquisition-command outcome that blocks reuse until an explicit stop or close
+resolves it, plus a fresh read-only acquisition preflight
+(`aravis_stream_contract`). It is
 **not yet a supported adapter**: timestamps are deliberately invalid (no time
 mapping), so the common provider rejects its frames; disconnection handling, a
 portability `BackendCase` and any hardware qualification are pending. See

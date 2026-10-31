@@ -421,6 +421,12 @@ void native_fact_validation_malformed(const profile::NativeSnapshot& n, const ba
         auto s = n;
         c.arrange(s);
         expect_rejected(profile::plan_writes(request, s, s), c.code, c.part);
+        // GIGE-MEL-009-R1 (finding C): the acquisition preflight applies the
+        // SAME structural/current-geometry checks to a fresh snapshot.
+        const auto preflight = profile::acquisition_preflight(s, s);
+        CHECK(!preflight && preflight.error().code == c.code);
+        if (!contains(preflight.error().message, c.part))
+            throw std::runtime_error("preflight: expected '" + std::string(c.part) + "' in: " + preflight.error().message);
     }
 }
 
@@ -494,6 +500,63 @@ void native_fact_validation() {
 
 // R1 (finding B): prevalidation uses the FRESH snapshot's limits; the
 // open-time envelope only detects an incompatible profile change.
+// GIGE-MEL-009-R1 (finding C), SDK-FREE table: the read-only acquisition
+// preflight over constructed snapshots. Each open-envelope fact uses the SAME
+// comparison and "close and reopen" diagnostic as apply(); dynamic maxima,
+// truthful readback and the existing recovery cases are not turned into
+// rejections. Real SDK arrangements live in aravis_stream_contract.
+void acquisition_preflight_profile() {
+    const auto open_time = snapshot_model();
+    CHECK(profile::acquisition_preflight(open_time, open_time).value() ==
+          profile::configuration_from(open_time).value());
+    using Arrange = void (*)(profile::NativeSnapshot&);
+    const struct { Arrange arrange; std::string_view part; } reopen[] = {
+        {[](auto& m) { m.sensor_width = 1024; }, "SensorWidth changed from 2048 at open to 1024"},
+        {[](auto& m) { m.sensor_height = 1024; }, "SensorHeight changed from 2048 at open to 1024"},
+        // Structurally valid new grids (minimum on the new increment), so only
+        // the envelope comparison can explain the rejection.
+        {[](auto& m) { m.width.minimum = 2; m.width.increment = 2; }, "Width increment changed from 1 at open to 2"},
+        {[](auto& m) { m.height.minimum = 2; m.height.increment = 2; }, "Height increment changed from 1 at open to 2"},
+        {[](auto& m) { m.offset_x.increment = 2; }, "OffsetX increment changed from 1 at open to 2"},
+        {[](auto& m) { m.offset_y.increment = 2; }, "OffsetY increment changed from 1 at open to 2"},
+        {[](auto& m) { m.exposure_feature = "ExposureTime"; }, "selected exposure feature changed"},
+    };
+    for (const auto& c : reopen) {
+        auto fresh = open_time;
+        c.arrange(fresh);
+        const auto refused = profile::acquisition_preflight(fresh, open_time);
+        CHECK(!refused && refused.error().code == backend::ErrorCode::unsupported);
+        if (!contains(refused.error().message, c.part) || !contains(refused.error().message, "close and reopen"))
+            throw std::runtime_error("preflight reopen: expected '" + std::string(c.part) + "' in: " +
+                                     refused.error().message);
+        // Same definition as apply(): plan_writes() rejects it identically.
+        CHECK(profile::plan_writes(profile::configuration_from(open_time).value(), fresh, open_time).error().message ==
+              refused.error().message);
+    }
+    // Not reopen conditions: changed dynamic maxima (and a current exposure
+    // above a lowered maximum, still reported truthfully), and an off-grid
+    // current value - none was ever a profile-envelope fact.
+    auto dynamic = open_time;
+    dynamic.width.maximum = 1024;
+    dynamic.exposure_us.maximum = 500.0;
+    CHECK(profile::acquisition_preflight(dynamic, open_time).value().exposure == 10ms);
+    auto off_grid = open_time;
+    off_grid.width = {515, 8, 2048, 1};
+    CHECK(profile::acquisition_preflight(off_grid, open_time).value().width == 515);
+    // Representability stays the final check, with its existing diagnostic;
+    // configuration_from() itself remains representability-only.
+    auto fractional = open_time;
+    fractional.frame_rate_hz.value = 30.000300003000032;
+    const auto unrepresentable = profile::acquisition_preflight(fractional, open_time);
+    CHECK(!unrepresentable && contains(unrepresentable.error().message, "current configuration is not representable"));
+    auto outside = open_time; // ROI outside the sensor: configuration_from() alone accepts it
+    outside.height.value = 512;
+    outside.offset_y.value = 1600;
+    CHECK(profile::configuration_from(outside));
+    CHECK(contains(profile::acquisition_preflight(outside, open_time).error().message,
+                   "OffsetY reads back 1600 with Height 512, outside the sensor extent 2048"));
+}
+
 void fresh_constraints() {
     const auto open_time = snapshot_model();
     // Fresh exposure maximum below the request with the rate unchanged:
@@ -1322,6 +1385,7 @@ int main(int argc, char** argv) {
         {"profile translation, prevalidation and write order", profile_translation},
         {"native fact validation and overflow-safe planning", native_fact_validation},
         {"fresh native constraints in prevalidation", fresh_constraints},
+        {"acquisition preflight profile table (SDK-free)", acquisition_preflight_profile},
         {"fresh ROI maxima by write order", roi_maxima_by_write_order},
         {"construction without I/O and copied discovery", construction_and_discovery},
         {"exact device selection", exact_selection},

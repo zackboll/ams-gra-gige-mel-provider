@@ -1,5 +1,255 @@
 # Bootstrap validation record
 
+## GIGE-MEL-009-R1 review corrections (2026-11-01)
+
+**Starting point.** This is one ordinary corrective commit on
+`feature/gige-mel-009-aravis-stream` (PR #9). Before editing, the following
+were freshly fetched and agreed:
+
+| Item | Commit | Tree |
+| --- | --- | --- |
+| Local HEAD, remote branch and PR head (the reviewed head) | `c333a2af90a5c303f4d169eff7ed82967b5731ba` | `8a06d13fd39d0c4eb0710e088eabd9e4c4254ce7` |
+| Main (not advanced) | `ae8de93c6749378e7b4254935bd3ce7cf08cbe06` | `9d6fd135bd96037f5e6cd7404c3ee5b39549ac58` |
+
+The worktree was clean and there was no intervening work, so all five
+findings applied as reviewed.
+
+**Scope.** The following changed:
+
+- the private adapter (`aravis_backend.cpp`), with a new test-only
+  `TestHooks::command_result` in `aravis_private.hpp`;
+- the profile helpers (`camera_profile.*`, adding `acquisition_preflight`);
+- three Aravis tests and the TSan support comment;
+- documentation.
+
+The following are unchanged:
+
+- `include/gige_mel/*` and `src/provider.cpp`;
+- factories and `getAPI_Manager()`;
+- `FrameTimestamp{}` and provider timestamp admission;
+- pins and manifests;
+- Aravis 0.8.36 and its provisioning;
+- the default-OFF option;
+- the workflow, the five lanes, presets and sanitizer options;
+- the two suppression patterns;
+- the verifier and its 29 tests;
+- the two deferred PR #3 notes.
+
+No public recovery API, generic GenICam API, automatic restart or reconnect,
+timestamp qualification or hardware claim was added.
+
+### Corrections
+
+| Finding | Correction |
+| --- | --- |
+| A. A failed `AcquisitionStart` was treated as proof the camera never started | `uncertain` is recorded before the SDK executor runs. After an attempted start, the original error is kept, one compensating `AcquisitionStop` is made, and the partial stream and pool are retired. If that stop fails, the outcome stays uncertain and owned. Pre-execution failures invent no uncertainty. |
+| B. A failed `AcquisitionStop` left configuration and restart permitted | `apply()` and `start()` refuse an uncertain outcome before writes, streams, pools or commands. The owning wrapper's later `stop()` makes one bounded recovery attempt. `close()` attempts a stop with no native stream, and its diagnostics say "recovered" or "remains uncertain" truthfully. |
+| C. Acquisition skipped fresh-limit and current-ROI validation | A read-only `acquisition_preflight()` reuses preconditions, `check_limits`, `check_current`, the `apply()` envelope comparison and `configuration_from()` before any acquisition side effect. |
+| D. Two Health assertions could select a stale captured batch | Payload predicates (`running`/`idle` plus valid configuration) replace `[](auto&){return true;}`. A forced stale-batch schedule is now permanent for both directions. |
+| E. TSan qualification overstated coverage | The comment and documents now state the whole-report suppression blind spot. The patterns are unchanged. |
+| 8A. `cancel_blocked()` cleanup | A shared `ReceiverCleanup` (request_stop, then join, then stop) is installed before start. It is also used by scenario I, and exercised by a throw while receive is blocked. |
+| 8B. "nothing is allocated per frame" | Now reads "no additional pixel buffers are allocated after pool setup". The per-lease owner record is still allocated. |
+
+The precise contract is described in
+[Acquisition-command outcome and recovery](aravis-integration.md#acquisition-command-outcome-and-recovery-gige-mel-009-r1).
+
+> **Superseded current claims** (earlier records are kept unchanged as history):
+> "a failed start never requires `AcquisitionStop`"; "no active receiver
+> implies configuration/restart is safe" (the stop failure was only reported
+> by `close()`); "project code stays fully checked" despite the TSan
+> suppressions; "nothing is allocated per frame".
+
+### Before/after controls
+
+The unchanged reviewed production was built once in a disposable detached
+worktree, `/tmp/gm9r1/wt-reviewed`, at `c333a2a` with 0 changed files, into
+`/tmp/gm9r1/build-reviewed`. No control variant was committed.
+
+**Production corrections (A, B, C), real SDK Fake.** One source,
+`/tmp/gm9r1/control/lifecycle_control.cpp`, uses only `TestHooks` fields
+present in both revisions, and its failures are SDK-arranged (imposed
+read-only access). It was compiled against each revision's **own** private
+headers and static archives:
+
+- reviewed `aravis_private.hpp` `35e7a17b…`, `libgige_mel_aravis.a`
+  `9f565c11…`;
+- corrected header `242dd038…`.
+
+The `acquisition_preflight` symbol appears 0 times in the reviewed binary and
+1 time in the corrected one. Neither binary loads a `gige_mel` DSO. `ldd`
+resolves the SDK separately to `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`
+in both.
+
+| Case | Reviewed `c333a2a` | Corrected |
+| --- | --- | --- |
+| A. `AcquisitionStart` executed and rejected by the SDK | commands `[AcquisitionStart]`: no compensating stop — **FAIL** | `[AcquisitionStart, AcquisitionStop]` — PASS |
+| B. Stop rejected by the SDK (register 1), lease released, stop writable again | `apply` SUCCESS with 2 writes; `start` SUCCESS with 1 new stream — **FAIL** | `apply` refused with 0 writes; `start` refused with 0 streams ("the outcome of AcquisitionStop (stream generation 2) is uncertain …"); the owner's `stop()` then recovers (register 0) — PASS |
+| C. SDK readback Height 512, OffsetY 1600 (sensor 2048) | `start` SUCCESS: 1 stream, 4 buffers, 1 command — **FAIL** | refused: 0 / 0 / 0, "OffsetY reads back 1600 with Height 512, outside the sensor extent 2048 …" — PASS |
+
+The reviewed binary exits 1 ("3 control expectation(s) failed"); the
+corrected binary exits 0. The failures are the reviewed defects: there are no
+setup, header or loader failures.
+
+**Test correction (D): Health selectors against unchanged production.**
+
+- The corrected `aravis_embedding_probe.cpp` was built in a second disposable
+  worktree, `/tmp/gm9r1/wt-health` at `c333a2a`, where only that test file
+  differs. It links `/tmp/gm9r1/build-health/libgige_mel_provider.so.0` and
+  the same SDK.
+- It passed 3/3. In both directions the forced schedule delivered the stale
+  report at the fixed baseline index, carrying the old state (`idle` after
+  enable, `running` after disable). The old unconditional selector accepted
+  it; the corrected predicate rejected it.
+- Diagnostic variant: with only the post-enable selector swapped back to the
+  old one, the probe failed 3/3 at its next assertion, "`acquisition_state ==
+  running`". That is exactly the reviewed hazard.
+- The reviewed probe itself (old selectors, no forced schedule) passes 3/3
+  under the ordinary schedule, which is why the defect was latent.
+
+**Test correction (8A): join-only versus cancellation-first cleanup.** This
+was a source-level variant in a disposable copy of the corrected tree
+(`/tmp/gm9r1/cleanup-diag`), not a real-SDK reproduction of a production
+defect.
+
+- With `JOIN_ONLY=1`, `ReceiverCleanup` only joins. A recorded 3 s watchdog
+  keeps it bounded, and its activation fails the control.
+- Scenario D then fails with "WATCHDOG fired: cleanup did not release the
+  blocked receive", in 3.2 s.
+- The committed cancellation-first cleanup passes D, including 3 thrown
+  repeats, in 0.7 s. The watchdog never counts as successful cleanup.
+
+**Qualification correction (E): suppression semantics.** These are
+`/tmp/gm9r1/tsan/suppression_semantics.cpp` (TSan-instrumented, system GLib)
+and the actual SDK reports.
+
+- *Semantics control (a deliberate race, not adapter code).* The test is a
+  write/write race between two instrumented project functions. The pattern
+  used is `race:g_queue_foreach`, the same mechanism as the two embedded
+  patterns.
+
+  | Mode | No suppressions | With the pattern |
+  | --- | --- | --- |
+  | Racing write called by `g_queue_foreach` | 1 report, exit 66 | **0 reports, exit 0** (the whole project race suppressed) |
+  | Plain call, no GLib frame | 1 report | 1 report |
+
+- *Retained unsuppressed reports (GIGE-MEL-009 reviewed run, preserved).*
+  The file is `/tmp/gm9r1/evidence/tsan-all.log`, a copy of the original
+  `/tmp/gm9/tsan-all.log`. It has 63 reports:
+  - 45 with `g_queue_pop_tail` (GLib `free` on the SDK receiver thread);
+  - 18 with `memset` under `arv_buffer_set_n_parts`.
+
+  The first access stack of each report has no project frame at #1. In every
+  report, the other access is GLib `g_malloc`/`g_malloc0` by the test's main
+  thread under the adapter's own locks.
+- *R1 focused diagnostic, not an acceptance run.* The corrected contract
+  object was relinked **without** `tsan_uninstrumented_sdk.cpp`
+  (`/tmp/gm9r1/evidence/contract-tsan-nosupp`, with 0
+  `__tsan_default_suppressions` symbols) and run with
+  `halt_on_error=0`. Expected findings, labelled separately:
+  - 98 reports: 65 `g_queue_pop_tail` and 33 `memset` under
+    `arv_buffer_set_n_parts`;
+  - 0 reports without a GLib/Aravis frame;
+  - 0 whose first access stack has a project frame at #1;
+  - every previous access is a GLib allocator call;
+  - all 15 scenarios passed (exit 66 only because reports were printed).
+
+  The new K/L/M scenarios appear only as callers of those allocations.
+- *Analysis kept from GIGE-MEL-009.* The system GLib's `g_mutex_lock` is an
+  inline `lock cmpxchg` futex, which TSan cannot observe, so the correctly
+  locked `GAsyncQueue` buffer handoff appears as a race. The patterns are
+  therefore kept unchanged. A green run is **not** unrestricted coverage of
+  that boundary.
+
+### Permanent regressions and counts
+
+- **`aravis_stream_contract`** grows from 11 to **15** scenario entries: new
+  K, L, M and N.
+  - D now also runs a fourth, *thrown* canceller three times.
+  - G's obsolete assertions were updated. Its blanket "no stop for a failed
+    start" became "a compensating stop was issued". B1 then refuses
+    configuration with 0 writes and, after the lease is released, refuses
+    restart with no stream or command. An explicit `stop()` then recovers
+    with no native stream, and `close()` reports the history as recovered.
+- **`aravis_adapter`** grows from 21 to **22**: a new SDK-free
+  `acquisition_preflight` table. The existing malformed-fact table now also
+  runs every case through the preflight.
+- **`aravis_mel_embedding`** remains one probe, now with the forced stale
+  batch in both directions.
+- **New scenarios: 5** (K, L, M, N and the preflight table), plus the thrown
+  D variant. No existing scenario was removed.
+- **CTest totals are unchanged:** 8 SDK-free and 12 SDK-enabled.
+
+| Required case | Where | Evidence type |
+| --- | --- | --- |
+| A1. Known pre-execution failure (hook before the executor throws; partial stream and 4 buffers retired; register 0; retry) | K | real Fake |
+| A2. Applied start (register observed 1), then an injected error; the compensating stop succeeds; the original `timeout` error is kept; reuse | K | injected command-result fault |
+| A3. As A2, but the compensating stop is rejected by the SDK: local retirement; `apply()` with 0 writes; `start()` from both wrappers with no stream, pool or command; recovery by the owner's `stop()` | K | injected + SDK-arranged |
+| B1. Successful start, then a rejected stop (register stays 1): configuration and restart are blocked with the lease released; explicit retry | G | SDK-arranged |
+| B2. Uncertain, then `close()` with no stream, for a final stop that succeeds and one that fails | L | SDK-arranged |
+| B3. Obsolete, never-started and destroyed wrappers; held-lease refusal after recovery; byte validity; history not blocking reuse | M, L | real Fake + SDK-arranged |
+| C1. ROI outside the sensor (Height 512, OffsetY 1600, SDK readback) | N | SDK-arranged |
+| C2. Invalid explicit `<Inc>0</Inc>` (the SDK returns 0 with no `GError`); restored to 1, then start succeeds | N | SDK-arranged |
+| C3. Width increment 1→2, Width 64 → "close and reopen" | N | SDK-arranged |
+| Remaining envelope and structural cases | `aravis_adapter` | SDK-free |
+
+In N, every rejected start has zero deltas in streams, buffers, commands and
+configuration writes. Native reads do occur. The first N arrangement follows
+a completed run, a stop and a lease release.
+
+### Local results (executed)
+
+The environment and SDK are as in the GIGE-MEL-009 record. `PKG_CONFIG_PATH`
+is `/tmp/gm8/aravis-prefix/lib/pkgconfig` plus the sysroot GLib directory.
+
+| Configuration | CTest | `aravis_adapter` | `aravis_stream_contract` | MEL probe |
+| --- | --- | --- | --- | --- |
+| GCC dev + Aravis | **12/12** | 22/22 | 15/15 | pass |
+| GCC Release + Aravis | **12/12** | pass | pass | pass |
+| Clang 19 + Aravis | **12/12** | pass | pass | pass |
+| ASan/UBSan + Aravis (`detect_leaks=1:halt_on_error=1`) | **12/12** | pass | pass | pass |
+| TSan + Aravis (`halt_on_error=1`, the two documented patterns) | **12/12** | pass | pass | pass |
+| GCC dev, SDK-free | **8/8** | — | — | — |
+
+The SDK-free dev run passes provider 74, backend 8 and portability 12 + 2.
+
+- **Bounded repeats.**
+  - TSan: the contract 3× (all 15 scenarios each time, 704 matched
+    suppressions per run: 595 `g_queue_pop_tail`, 109
+    `arv_buffer_set_n_parts`) and the probe 3×.
+  - ASan/UBSan: the contract 3×.
+  - Dev: K, L, M and N 3× each, and the probe 3×.
+
+  All passed.
+- **Offline verifiers.** `vendor_upstream.py --verify` passes on 97 files and
+  `verify_json.py` on 2. The verifier tests pass 29/29.
+- **Package isolation.** `verify_package_isolation.py` reports "package
+  isolation verified" on real installs from `aravis-dev`, `aravis-release`
+  and `aravis-clang`. A separately configured installed consumer, built
+  against the `aravis-dev` install with `PKG_CONFIG_PATH` unset, passes.
+- **Other checks.**
+  - Synthetic capture writes `P5 64 48`.
+  - The diagnostic's `--help` exits 0; `capture` with no arguments exits 2.
+  - Direct capture and negative MEL admission pass (scenario J and the
+    probe).
+- **Whitespace.** `git diff --check` is clean over the corrective range and
+  the full PR range.
+
+**Not run locally.** The SDK-free Release, ASan, TSan and Clang lanes were
+not rerun, because the SDK-free build contains no changed file. The hosted
+matrix runs them.
+
+### Remaining limitations
+
+- The applied-then-error cases use an injected command result. There is no
+  physical-camera, GVSP, packet-loss or lost-acknowledgment evidence.
+- The adapter records command outcomes only. It does not measure camera
+  exposure or readout, and has no persistent cross-session recovery registry.
+  A reopen is not evidence that an earlier failed stop was resolved.
+- The TSan patterns leave the reporting blind spot described above. No
+  instrumented SDK/GLib build was made.
+- There is still no timestamp, PTP/UTC, successful Aravis MEL Image
+  publication, hardware or conformance qualification.
+
 ## GIGE-MEL-009 Aravis Mono8 source acquisition (2026-11-01)
 
 **Starting point.** Branch `feature/gige-mel-009-aravis-stream` was created
@@ -72,7 +322,10 @@ inside GLib/Aravis queue internals: `g_queue_pop_tail` (546 matches) and
 disassembles to an inline `lock cmpxchg` futex, which TSan cannot observe. The
 two SDK-driving test executables therefore embed
 `__tsan_default_suppressions()` for exactly those two functions. `TSAN_OPTIONS`,
-presets and lanes were not changed, and project code stays fully checked. A
+presets and lanes were not changed, and project code stays fully checked
+*(superseded by GIGE-MEL-009-R1: these whole-report patterns also suppress
+reports in which project code participates when a matching SDK/GLib frame is
+in a stack)*. A
 broader `called_from_lib` variant was tried and rejected, because it caused a
 spurious GObject lock-order report in the provider probe. Project sanitizer
 coverage is **not** instrumented SDK coverage.

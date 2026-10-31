@@ -76,6 +76,12 @@ template <class T> struct Reports {
     }
     std::size_t count() { std::lock_guard lock(mutex); return items.size(); }
     T last() { std::lock_guard lock(mutex); CHECK(!items.empty()); return items.back(); }
+    // The report at a fixed index, waiting (bounded) until it exists.
+    T at(std::size_t index) {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 5s, [&] { return items.size() > index; }));
+        return items[index];
+    }
     template <class Predicate> T wait_match(std::size_t after, Predicate predicate) {
         std::unique_lock lock(mutex);
         std::optional<T> found;
@@ -93,6 +99,52 @@ std::map<std::string, std::string> detail_values(const mel::MFA_StatusDetailed& 
     for (const auto& pair : report.getStatus()) values.emplace(pair.getName(), pair.getValue());
     return values;
 }
+
+// GIGE-MEL-009-R1 (finding D) corrected Detailed-Health selector: the
+// required acquisition state AND a valid configuration in the payload.
+auto health_is(std::string state) {
+    return [state = std::move(state)](const mel::MFA_StatusDetailed& r) {
+        const auto v = detail_values(r);
+        return v.count("gige_mel.acquisition_state") && v.at("gige_mel.acquisition_state") == state &&
+               v.at("gige_mel.configuration_valid") == "true";
+    };
+}
+// The reviewed GIGE-MEL-009 selector, kept only to demonstrate the stale
+// batch it accepts; never used to select a report for an assertion.
+bool old_unconditional_selector(const mel::MFA_StatusDetailed&) { return true; }
+
+// Holds ONE MFA_Status callback while armed. Publication calls Status and
+// then Detailed from the same already-captured batch, so the held batch's
+// Detailed report necessarily carries the state captured BEFORE whatever
+// the test does while it is held. Watchdog: expiry is recorded and fails
+// the check; it never counts as a successful release. Lifetime: declared
+// before the publisher is enabled and released before Health is disabled.
+struct StatusGate {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool armed{false}, held{false}, released{false}, expired{false};
+    std::function<void(ir::Channel&, const mel::MFA_Status*)> callback() {
+        return [this](ir::Channel&, const mel::MFA_Status*) {
+            std::unique_lock lock(mutex);
+            if (!armed) return;
+            armed = false;
+            held = true;
+            changed.notify_all();
+            if (!changed.wait_for(lock, 5s, [&] { return released; })) expired = true;
+            held = false;
+        };
+    }
+    void arm() { std::lock_guard lock(mutex); armed = true; held = released = false; }
+    void wait_held() {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 5s, [&] { return held; }));
+    }
+    void release() {
+        { std::lock_guard lock(mutex); released = true; armed = false; }
+        changed.notify_all();
+    }
+    void check() { std::lock_guard lock(mutex); CHECK(!expired); }
+};
 
 // Counts image callbacks; none may ever arrive.
 class CountingListener final : public ir::ImageListener {
@@ -235,6 +287,7 @@ void embedding_probe() {
     Reports<ir::CommandStatus> statuses;
     Reports<ir::CameraCommandResp> replies;
     Reports<mel::MFA_StatusDetailed> details;
+    StatusGate status_gate; // outlives the Health publisher (released in cleanup)
     std::vector<std::vector<std::byte>> storage;
     auto listener = std::make_shared<CountingListener>();
     auto frames = std::make_shared<FrameLog>(); // outlives the provider worker
@@ -279,11 +332,15 @@ void embedding_probe() {
     CHECK(c2->registerMetadataCallback(statuses.callback()) == ir::Return::Success);
     CHECK(image->registerMetadataCallback(replies.callback()) == ir::Return::Success);
     CHECK(health->registerMetadataCallback(details.callback()) == ir::Return::Success);
+    CHECK(health->registerMetadataCallback(status_gate.callback()) == ir::Return::Success);
 
+    // Installed before Health is enabled. Every gate is released before
+    // Health is disabled/drained.
     struct Cleanup {
         std::function<void()> run;
         ~Cleanup() { try { run(); } catch (...) {} }
     } cleanup{[&] {
+        status_gate.release();
         (void)image->disable();
         (void)health->disable(); // drains admitted Health callbacks
         (void)control->detachChannel(image);
@@ -369,7 +426,19 @@ void embedding_probe() {
         buffers.push_back(buffer);
     }
     const auto before = gige_mel::provider_statistics(manager);
+    // FORCED STALE BATCH, idle -> running (R1 finding D). Hold MFA_Status of
+    // a batch captured while idle, enable Image from THIS (external) thread,
+    // record the Detailed count while Status is still held, then release.
+    status_gate.arm();
+    status_gate.wait_held();
+    const std::size_t enable_baseline = details.count(); // held batch's Detailed is not yet delivered
     CHECK(image->enable() == ir::Return::Success); // AcquisitionStart through the real SDK
+    status_gate.release();
+    const auto stale_idle = details.at(enable_baseline); // first new report, by fixed baseline index
+    CHECK(detail_values(stale_idle).at("gige_mel.acquisition_state") == "idle"); // the OLD state
+    CHECK(old_unconditional_selector(stale_idle)); // the reviewed selector would accept it
+    CHECK(!health_is("running")(stale_idle));      // the corrected predicate rejects it
+    status_gate.check();
     {
         // Observe actual returned backend frames AND the provider rejecting them.
         std::unique_lock lock(frames->mutex);
@@ -390,15 +459,26 @@ void embedding_probe() {
         CHECK(frames->default_timestamp == frames->frames);
         CHECK(frames->last_configuration == recovery);
     }
-    baseline = details.count();
-    values = detail_values(details.wait_match(baseline, [](const auto&) { return true; }));
+    // A later report in the required state, by payload (not by count).
+    values = detail_values(details.wait_match(enable_baseline, health_is("running")));
     CHECK(values.at("gige_mel.acquisition_state") == "running"); // owned, not faulted
     // Configuration is rejected while acquisition is owned (existing meaning).
     const auto blocked = error_of(image->send(camera_command(8007, initial)));
     CHECK(contains(blocked.getDescription(), "disable image acquisition before configuring"));
 
     // Explicit disable joins and drains the provider worker (AcquisitionStop).
+    // FORCED STALE BATCH, running -> idle: the held batch was captured while
+    // running; disable runs from this thread while its Status is held.
+    status_gate.arm();
+    status_gate.wait_held();
+    const std::size_t disable_baseline = details.count();
     CHECK(image->disable() == ir::Return::Success);
+    status_gate.release();
+    const auto stale_running = details.at(disable_baseline);
+    CHECK(detail_values(stale_running).at("gige_mel.acquisition_state") == "running"); // the OLD state
+    CHECK(old_unconditional_selector(stale_running));
+    CHECK(!health_is("idle")(stale_running));
+    status_gate.check();
     const auto after = gige_mel::provider_statistics(manager);
     CHECK(after.rejected_frames >= before.rejected_frames + 3);
     CHECK(after.delivered_frames == before.delivered_frames && after.dropped_no_buffer == before.dropped_no_buffer);
@@ -413,8 +493,7 @@ void embedding_probe() {
         std::lock_guard lock(frames->mutex);
         CHECK(after.rejected_frames - before.rejected_frames <= frames->frames && frames->frames >= observed);
     }
-    baseline = details.count();
-    values = detail_values(details.wait_match(baseline, [](const auto&) { return true; }));
+    values = detail_values(details.wait_match(disable_baseline, health_is("idle")));
     CHECK(values.at("gige_mel.acquisition_state") == "idle" && values.at("gige_mel.configuration_valid") == "true");
 
     // Recovery: configuration works again, buffers clean up, and a second

@@ -144,9 +144,25 @@ Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& request,
 // Acquisition profile (GIGE-MEL-009). SDK-free decisions consumed by the
 // adapter's stream; the SDK mechanics stay in aravis_backend.cpp.
 
+// Read-only acquisition admission over the FRESH snapshot that start() read
+// under the device lock (GIGE-MEL-009-R1, finding C). Reuses, in order, the
+// existing responsibilities: check_preconditions, check_limits (structural
+// native limits), check_current (current ROI geometry inside the sensor and
+// finite current timing), the same immutable-profile comparison apply() uses
+// against `envelope` (sensor extent, any ROI increment or the selected
+// exposure feature changed -> the existing "close and reopen" diagnostic),
+// and finally configuration_from() (representability). Returns the validated
+// configuration to freeze for the run. It plans no writes and applies no
+// write-ordering or coupled-maximum rule; dynamic maxima and scalar bounds
+// stay governed by the existing profile rules, and current values still need
+// not lie on the advertised grid or inside the reported bounds.
+Result<CameraConfiguration> acquisition_preflight(const NativeSnapshot& current, const NativeSnapshot& envelope);
+
 // Fixed source pool and explicit allocation limits. A run allocates exactly
 // pool_buffers SDK buffers of PayloadSize bytes each, once, before the
-// acquisition-start command; nothing is allocated per frame afterwards.
+// acquisition-start command. No additional pixel buffers are allocated after
+// pool setup; each delivered lease still allocates its small shared owner
+// record (not pixel storage).
 inline constexpr std::size_t pool_buffers = 4;
 inline constexpr std::size_t maximum_frame_bytes = std::size_t{64} << 20; // 64 MiB per buffer
 inline constexpr std::size_t maximum_pool_bytes = std::size_t{256} << 20; // 256 MiB per run

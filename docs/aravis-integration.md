@@ -547,11 +547,12 @@ therefore cannot run after a reopen. `arv_shutdown()` is never called.
   `busy` and creates no native stream. Several wrappers may exist, but a wrapper
   that never started cannot stop another wrapper's run.
 - **Configuration.** `apply()` fails with `invalid_state` before any native
-  write while a run is active. Start, stop and retirement hold D, so no
-  intermediate state is visible to `apply()`.
-- **Each run** re-reads a fresh snapshot, requires the unchanged
-  `aravis-mono8-free-running-v1` preconditions and a representable
-  configuration, and freezes that configuration and the
+  write while a run is active, or while an acquisition-command outcome is
+  uncertain (R1). Start, stop and retirement hold D, so no intermediate state
+  is visible to `apply()`.
+- **Each run** re-reads a fresh snapshot, passes the read-only acquisition
+  preflight (R1: preconditions, structural limits, current ROI geometry, the
+  open-envelope comparison and representability), and freezes that configuration and the
   `configuration_generation` passed to `start()`. It gets a new, process-wide
   `stream_generation`, including when the wrapper is new. It also gets a
   **fresh native stream and pool**, so stale buffers from an earlier run cannot
@@ -575,18 +576,103 @@ therefore cannot run after a reopen. `arv_shutdown()` is never called.
 - **`close()`** wakes `receive()`, which then returns `disconnected`. It retires
   native work and blocks later device operations. The existing caller contract
   still applies: join the receiving thread before destroying a stream wrapper.
-- **Start failure after partial setup.** `AcquisitionStart` is the last native
-  step. If it fails (or allocation fails), the adapter cancels, retires and
-  drops the new native stream; its finalizer stops the receiver and frees every
-  queued buffer. Nothing is published, no acquisition owner remains, and
-  configuration is unchanged. The error keeps the SDK operation context and
-  says to retry `start()` explicitly. `AcquisitionStop` is not sent for a start
-  that did not succeed.
-- **Stop-command failure.** Local resources are still retired. The first
-  failure, with its operation, feature and generation context, is kept and
-  returned once by `close()`: "… local stream resources were retired anyway;
-  the camera may still be acquiring". The diagnostic reports it as a cleanup
-  failure. The camera is never claimed to have stopped.
+- **Start and stop failures.** See
+  [Acquisition-command outcome and recovery (GIGE-MEL-009-R1)](#acquisition-command-outcome-and-recovery-gige-mel-009-r1).
+  *(Superseded GIGE-MEL-009 statements, kept as history: "`AcquisitionStop`
+  is not sent for a start that did not succeed", and "a failed stop is only
+  reported by `close()`" with configuration and restart then permitted.
+  Both treated receiver retirement as if it settled the camera command.)*
+
+### Acquisition-command outcome and recovery (GIGE-MEL-009-R1)
+
+The adapter keeps three **private** concepts apart:
+
+| Concept | Meaning |
+| --- | --- |
+| Receiver ownership (`DeviceCore::active`) | A run owns a native stream and its receiver |
+| Camera-command outcome (`none` / `owned` / `uncertain`, plus the owning wrapper's token) | What the adapter knows about the result of **its own** `AcquisitionStart`/`AcquisitionStop` |
+| Historical diagnostic | The first unrecovered failure of the void `stop()` interface, kept for one report by `close()` |
+
+These are adapter command/lifecycle states. They are not measurements of
+camera exposure or readout completion. **Retiring the native receiver never
+establishes that `AcquisitionStop` succeeded.** `apply()` and `start()` are
+gated on the current outcome, not on whether a historical error was retained.
+
+- **Uncertainty is recorded first.** `execute_command()` sets `uncertain`
+  immediately before calling the SDK command executor. The store is plain and
+  allocation-free, so the state survives an exception while the diagnostic is
+  being built. Only a successful command settles the outcome.
+- **Failure before execution** (preflight, preparation, `PayloadSize`, pool
+  planning, stream creation, buffer allocation, a missing or unwritable
+  command): no command was attempted. The partial stream and pool are retired,
+  no uncertainty is invented, and explicit retry or configuration remains
+  available.
+- **Failure after `AcquisitionStart` was attempted.** No translated SDK error
+  is treated as proof that the command was not applied. The original start
+  error is kept, and **one** compensating `AcquisitionStop` is attempted while
+  the device and its reservation are held. The partial stream and pool are
+  retired whatever happens.
+  - If the stop succeeds, the result is still the start failure, now reporting
+    "a compensating AcquisitionStop succeeded". Later explicit use is
+    permitted.
+  - If it fails, the outcome stays `uncertain` and this wrapper owns it. The
+    error contains both failures. `apply()` is refused before any write, and
+    `start()` before any stream, pool or command. Read-only `configuration()`
+    and `capabilities()` remain available.
+  - `AcquisitionStart` is never retried automatically.
+- **Failed stop.** `stop()` still retires the receiver, and outstanding leases
+  stay valid. The outcome becomes `uncertain`. Configuration and new
+  acquisition are refused with `invalid_state`, quoting the failure.
+- **Explicit recovery** goes through the existing `stop()`. A later `stop()`
+  from the **owning** wrapper, made after its native stream is gone, issues
+  one bounded `AcquisitionStop` with no internal retry loop.
+  - Success clears the uncertainty; failure keeps it.
+  - `request_stop()` remains prompt, non-blocking cancellation signalling and
+    sends no command.
+  - Recovery does not bypass the restart lease rule: a start is still refused
+    while the previous run's leases are held.
+- **Recovery ownership.** Each wrapper has a stable private numeric token: a
+  never-reused process counter, so there is no pointer, cycle or shared
+  interface.
+  - A never-started or obsolete wrapper, and an old wrapper's destructor,
+    cannot stop another wrapper's run or recover its fault.
+  - A failed start, which never publishes a run, still records its wrapper as
+    owner, so that wrapper's later `stop()` is not a no-op.
+  - The destructor makes the same single attempt as `stop()`. If that attempt
+    fails, the uncertainty is not cleared or handed to another wrapper.
+- **`close()`** has authority over the device's outstanding state.
+  - With an active run, it retires the run as before.
+  - With no native stream but an `owned` or `uncertain` outcome, it still
+    attempts one `AcquisitionStop`.
+  - It then drops the native device and only then the reservation, and closes
+    logically whatever the command outcome.
+  - It returns the unreported historical failure, if any. If a later stop
+    succeeded, it marks that failure "recovered: … succeeded"; otherwise it
+    adds its own failure and "the camera acquisition outcome remains
+    uncertain".
+  - A start error keeps the primary start failure as well as the cleanup
+    failure.
+  - A repeated close performs no device I/O.
+  - Close or reopen alone is **not** evidence that a failed camera stop was
+    resolved. There is no cross-session recovery registry and no
+    hardware-state qualification.
+- **Fresh acquisition preflight.** Under the device lock, before any stream,
+  allocation or command, `start()` calls the SDK-free
+  `aravis_profile::acquisition_preflight(fresh, envelope)`. It applies the
+  existing checks in order:
+  - profile preconditions;
+  - structural native limits;
+  - current ROI geometry inside the sensor;
+  - the same open-envelope comparison and "close and reopen" diagnostic that
+    `apply()` uses, for the sensor extent, the four ROI increments and the
+    exposure feature;
+  - representability.
+
+  It returns the configuration to freeze. It is read-only: it does not run
+  `apply()` or write planning, and it adds no write-ordering or
+  coupled-maximum rule. Dynamic maxima and scalar bounds stay governed by the
+  existing profile rules. A current value need not lie on the advertised grid.
+  `configuration_from()` remains representability-only.
 
 **Command evidence.** Starting and stopping are verified independently of
 frame arrival. The Fake receiver produces frames whether or not acquisition
@@ -599,7 +685,7 @@ Fake acquisition register (address `0x124`, written only by
 
 | Item | Value |
 | --- | --- |
-| Buffers per run | 4 (`aravis_profile::pool_buffers`), allocated with `arv_buffer_new_allocate()` before `AcquisitionStart`; never per frame |
+| Buffers per run | 4 (`aravis_profile::pool_buffers`), allocated with `arv_buffer_new_allocate()` before `AcquisitionStart`. No additional pixel buffers are allocated after pool setup; each delivered lease still allocates its small shared owner record (R1 wording correction) |
 | Buffer size | The `PayloadSize` readback; it must be positive and at least width × height |
 | Per-buffer limit | 64 MiB |
 | Pool limit | 256 MiB |
@@ -750,13 +836,31 @@ receiver threads and SDK buffers:
 | A | Commands and a single acquisition owner |
 | B | Every pixel checked against `(x + y + native_frame_id) % 255` at 10 000 µs exposure and gain 0, a setup verified by readback |
 | C | Pool exhaustion and release |
-| D | Cancellation of a receive proven blocked in native waits, via `request_stop`, `stop` and `close`, three times each |
+| D | Cancellation of a receive proven blocked in native waits, via `request_stop`, `stop` and `close`, and (R1) the shared cancellation-first failure cleanup after a throw, three times each |
 | E | Lease lifetime beyond stop, close and owner destruction; release on another thread; reopen |
 | F | Restart policy |
-| G | SDK-arranged command failures |
+| G | SDK-arranged command failures; R1: failed stop blocks configuration and restart (lease released first), explicit `stop()` recovery |
 | H | Real SDK arrangements, allocation limits, and the labelled decoded-facts seam (see below) |
 | I | Exception unwind while receive is blocked |
 | J | The shared capture routine, with an independent PGM check |
+| K | R1: start outcomes — known pre-execution failure; applied start + **injected command-result fault** with compensating stop that succeeds / that the SDK rejects; recovery without a native stream |
+| L | R1: uncertain outcome then `close()` with no native stream, final stop succeeding and failing |
+| M | R1: recovery ownership across wrappers and generations, owner destruction, held-lease rule |
+| N | R1: fresh acquisition preflight on real SDK arrangements, zero side-effect deltas |
+
+**Evidence types (R1).** Each case is one of the following:
+
+- **Real Fake-device execution.**
+- **SDK-arranged condition.** The SDK itself rejects a command (an imposed
+  GenICam access mode) or reports a value written or arranged through its
+  public API, and the test reads that value back before relying on it.
+- **Injected command-result fault.** `TestHooks::command_result` runs only
+  after the SDK executed the command **successfully**, and the test proves
+  the Fake acquisition register changed. It then substitutes an error. That
+  models an uncertain native command result after a genuine effect. Recovery
+  decisions remain in production code. It is **not** packet-loss or
+  lost-acknowledgment qualification.
+- **SDK-free profile tables** (`aravis_adapter`).
 
 **Decoded-facts seam.** The `TestHooks::decoded_facts` seam edits only the
 *facts* decoded from real popped buffers before the production validator sees
@@ -783,10 +887,28 @@ races.
 
 The two SDK-driving test executables link
 `tests/support/tsan_uninstrumented_sdk.cpp`. Its
-`__tsan_default_suppressions()` lists exactly those two SDK functions.
-`TSAN_OPTIONS`, presets and CI lanes are unchanged, and accesses by the
-project's own code, including reads of leased pixels, remain checked with
-`halt_on_error=1`.
+`__tsan_default_suppressions()` lists exactly those two patterns:
+`race:g_queue_pop_tail` and `race:arv_buffer_set_n_parts`. `TSAN_OPTIONS`,
+presets and CI lanes are unchanged.
+
+**What the patterns cost (R1 correction).** A `race:` pattern suppresses the
+**whole report** whenever the named function appears in any frame of either
+racing stack. Project code stays instrumented. Even so, a report in which
+project code participates is also suppressed when the other access passes
+through one of these GLib/Aravis frames. This is a specific reporting blind
+spot at the SDK buffer-handoff ownership boundary. A green TSan run with these
+patterns is therefore **not** unrestricted race coverage of that boundary.
+Reports that match neither pattern still halt with `halt_on_error=1`.
+
+The review's intentional-race control demonstrated these suppression
+semantics; it did not discover a production adapter race. The basis for the
+patterns, the unsuppressed reports and the analysis behind them, is kept in
+the GIGE-MEL-009 and GIGE-MEL-009-R1 records in
+[validation](validation.md#gige-mel-009-r1-review-corrections-2026-11-01).
+
+*Superseded (GIGE-MEL-009):* "accesses by the project's own code … remain
+checked" overstated this. Project code is instrumented, but reports that
+involve these frames are not delivered.
 
 ## Qualification boundaries
 

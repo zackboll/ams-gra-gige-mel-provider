@@ -72,10 +72,13 @@ struct Observer {
     Finalized streams, buffers, devices;
     std::atomic<int> streams_created{0}, buffers_allocated{0}, devices_opened{0};
     std::atomic<int> native_waits{0};
+    std::atomic<int> writes{0}; // configuration feature writes attempted by apply()
     std::mutex mutex;
     std::vector<std::string> commands;
     std::function<void(std::string_view, ArvDevice*)> on_command; // arrangement, set per test
     std::function<void()> on_wait;                                // observation, set per test
+    // TEST-ONLY command-result boundary (see TestHooks::command_result).
+    std::function<std::optional<backend::Error>(std::string_view, ArvDevice*)> on_result;
     aravis::TestHooks hooks() {
         aravis::TestHooks h;
         h.after_native_open = [this](ArvDevice* d) { devices_opened.fetch_add(1); devices.watch(d); };
@@ -84,6 +87,11 @@ struct Observer {
         h.before_command = [this](std::string_view c, ArvDevice* d) {
             { std::lock_guard lock(mutex); commands.emplace_back(c); }
             if (on_command) on_command(c, d);
+        };
+        h.before_write = [this](std::string_view, ArvDevice*) { writes.fetch_add(1); };
+        h.command_result = [this](std::string_view c, ArvDevice* d) -> std::optional<backend::Error> {
+            if (on_result) return on_result(c, d);
+            return std::nullopt;
         };
         h.before_native_wait = [this] {
             native_waits.fetch_add(1);
@@ -312,41 +320,71 @@ void pool_and_release() {
     CHECK(device->close());
 }
 
+// Shared failure cleanup for a test thread blocked in receive() (R1 8A):
+// request cancellation FIRST, then join, then retire the stream. Install it
+// before start(), and declare observers and held leases before it so that
+// they outlive the cleanup. (A join-only cleanup would wait for the long
+// public receive timeout, because nothing else wakes the receiver.)
+struct ReceiverCleanup {
+    backend::IFrameStream& stream;
+    std::thread& receiver;
+    ~ReceiverCleanup() {
+        stream.request_stop(); // releases the blocked receive within one slice
+        if (receiver.joinable()) receiver.join();
+        stream.stop();
+    }
+};
+
 // D. Prompt cancellation of a GENUINELY blocked receive. Blocking is
 // established by observing that receive entered a native timed pop while
 // every pool buffer is leased (nothing can arrive), not by sleeping.
-enum class Canceller { request_stop, stop, close };
+// Canceller::thrown exercises the shared failure cleanup itself: the test
+// throws before its normal cancellation statement while receive is blocked.
+enum class Canceller { request_stop, stop, close, thrown };
+void run_canceller(Canceller how, backend::IFrameStream& stream, backend::ICameraDevice& device) {
+    switch (how) {
+    case Canceller::request_stop: stream.request_stop(); break;
+    case Canceller::stop: stream.stop(); break;
+    case Canceller::close: CHECK(device.close()); break;
+    case Canceller::thrown: break;
+    }
+}
 void cancel_blocked(Canceller how) {
     Observer seen;
     auto camera = aravis_fake::make_backend(seen.hooks());
     auto device = open_oracle(*camera);
     auto stream = std::move(device->create_stream()).value();
-    CHECK(stream->start(5));
-    std::vector<backend::FrameLease> held;
-    for (std::size_t i = 0; i < profile::pool_buffers; ++i) held.push_back(receive_ok(*stream));
+    std::vector<backend::FrameLease> held; // outlives the cleanup below
     std::atomic<bool> finished{false};
     std::optional<backend::Error> outcome;
     Clock::time_point returned{};
-    const int waits_before = seen.native_waits.load();
-    std::thread receiver([&] {
-        auto result = stream->receive(60s); // long public timeout
-        returned = Clock::now();
-        if (!result) outcome = result.error();
-        finished = true;
-    });
-    struct Join { std::thread& t; ~Join() { if (t.joinable()) t.join(); } } join{receiver};
-    // Several native waits observed: receive is inside its polling wait.
-    wait_until([&] { return seen.native_waits.load() >= waits_before + 3; }, 5s, "receive to enter native waits");
-    CHECK(!finished);
-    const auto cancelled_at = Clock::now();
-    switch (how) {
-    case Canceller::request_stop: stream->request_stop(); break;
-    case Canceller::stop: stream->stop(); break;
-    case Canceller::close: CHECK(device->close()); break;
+    Clock::time_point cancelled_at{};
+    std::thread receiver;
+    try {
+        ReceiverCleanup cleanup{*stream, receiver}; // before any acquisition activity
+        CHECK(stream->start(5));
+        for (std::size_t i = 0; i < profile::pool_buffers; ++i) held.push_back(receive_ok(*stream));
+        const int waits_before = seen.native_waits.load();
+        receiver = std::thread([&] {
+            auto result = stream->receive(60s); // long public timeout
+            returned = Clock::now();
+            if (!result) outcome = result.error();
+            finished = true;
+        });
+        // Several native waits observed: receive is inside its polling wait.
+        wait_until([&] { return seen.native_waits.load() >= waits_before + 3; }, 5s, "receive to enter native waits");
+        CHECK(!finished);
+        cancelled_at = Clock::now();
+        if (how == Canceller::thrown) throw std::logic_error("deliberate failure before cancellation");
+        run_canceller(how, *stream, *device);
+        // Generous bound, far below the 60 s timeout; expiry fails the test.
+        wait_until([&] { return finished.load(); }, 2s, "cancelled receive to return");
+    } catch (const std::logic_error& error) {
+        CHECK(how == Canceller::thrown && contains(error.what(), "deliberate failure"));
     }
-    // Generous bound, far below the 60 s timeout; expiry fails the test.
-    wait_until([&] { return finished.load(); }, 2s, "cancelled receive to return");
-    receiver.join();
+    // The cleanup (or the normal path) has joined the receiver.
+    CHECK(!receiver.joinable() && finished);
+    CHECK(Clock::now() - cancelled_at < 2s); // no reliance on the 60 s timeout
     CHECK(returned - cancelled_at < 1s);
     CHECK(outcome && outcome->code == (how == Canceller::close ? backend::ErrorCode::disconnected
                                                                 : backend::ErrorCode::stopped));
@@ -362,6 +400,7 @@ void cancellation() {
         cancel_blocked(Canceller::request_stop);
         cancel_blocked(Canceller::stop);
         cancel_blocked(Canceller::close);
+        cancel_blocked(Canceller::thrown);
     }
 }
 
@@ -519,28 +558,62 @@ void failure_cleanup() {
     CHECK(seen.streams_created == 1 && seen.live_streams() == 0);
     CHECK(seen.buffers_allocated == 4 && seen.live_buffers() == 0);
     CHECK(acquisition_register(*device) == 0);
-    CHECK((seen.command_log() == std::vector<std::string>{"AcquisitionStart"})); // no stop for a failed start
+    // R1 (finding A): the SDK executor WAS called, so its error does not prove
+    // the command was unapplied; production compensates with one stop. (The
+    // old blanket "no stop for a failed start" assertion is not a contract.)
+    CHECK((seen.command_log() == std::vector<std::string>{"AcquisitionStart", "AcquisitionStop"}));
+    CHECK(contains(failed.error().message, "a compensating AcquisitionStop succeeded"));
     CHECK(stream->receive(20ms).error().code == backend::ErrorCode::stopped);
     CHECK(device->configuration().value() == oracle); // configuration unchanged and usable
-    CHECK(device->apply(oracle).value() == oracle);   // no acquisition owner remains
+    CHECK(device->apply(oracle).value() == oracle);   // the compensating stop resolved the outcome
     // Explicit recovery: the SDK accepts the command again.
     set_access(start_access, "RW");
     CHECK(stream->start(32));
     CHECK(acquisition_register(*device) == 1);
     auto frame = receive_ok(*stream);
     CHECK(pixels_match(frame));
-    // Stop-command failure: local resources are retired anyway, the failure
-    // is preserved and reported by close(); the camera is NOT claimed stopped.
+    // B1. Stop-command failure: local resources are retired anyway, the
+    // failure is preserved, and the camera is NOT claimed stopped.
     fail_stop = true;
     stream->stop();
     CHECK(seen.live_streams() == 0);
     CHECK(acquisition_register(*device) == 1); // the SDK rejected AcquisitionStop: still acquiring
     CHECK(pixels_match(frame));                // held lease still valid
+    // No active receiver is not proof that reuse is safe (R1 finding B):
+    // configuration is refused before writes...
+    const int writes_before = seen.writes.load();
+    const auto blocked = device->apply(oracle);
+    CHECK(!blocked && blocked.error().code == backend::ErrorCode::invalid_state);
+    CHECK(contains(blocked.error().message, "is uncertain") && contains(blocked.error().message, "nothing was written"));
+    CHECK(seen.writes.load() == writes_before);
+    // ...and, with the held lease released so that the lease rule cannot be
+    // the reason, restart is refused before any native stream or command.
     { auto drop = std::move(frame); }
     CHECK(seen.live_buffers() == 0);
+    const int streams_before = seen.streams_created.load();
+    const auto commands_before = seen.command_log().size();
+    const auto refused = stream->start(33);
+    CHECK(!refused && refused.error().code == backend::ErrorCode::invalid_state);
+    CHECK(contains(refused.error().message, "AcquisitionStop") && contains(refused.error().message, "read only"));
+    CHECK(seen.streams_created.load() == streams_before && seen.command_log().size() == commands_before);
+    CHECK(acquisition_register(*device) == 1);
+    // Explicit recovery through the owning wrapper's stop(), with no native
+    // stream left: one bounded AcquisitionStop, which the SDK now accepts.
+    set_access(stop_access, "RW");
+    stream->stop();
+    CHECK(seen.command_log().size() == commands_before + 1 && seen.command_log().back() == "AcquisitionStop");
+    CHECK(acquisition_register(*device) == 0);
+    stream->stop(); // resolved: no further command
+    CHECK(seen.command_log().size() == commands_before + 1);
+    CHECK(device->apply(oracle).value() == oracle);
+    CHECK(stream->start(34) && acquisition_register(*device) == 1);
+    stream->stop();
+    CHECK(acquisition_register(*device) == 0);
+    // The historical failure is reported once by close(), as recovered.
     const auto closed = device->close();
     CHECK(!closed && contains(closed.error().message, "AcquisitionStop") &&
-          contains(closed.error().message, "the camera may still be acquiring"));
+          contains(closed.error().message, "recovered: an explicit stop() retry succeeded"));
+    CHECK(!contains(closed.error().message, "remains uncertain"));
     CHECK(device->close()); // reported once; close stays idempotent
 }
 
@@ -673,15 +746,7 @@ void exception_unwind() {
     bool thrown = false;
     const auto unwind_started = std::make_shared<Clock::time_point>();
     try {
-        struct Cleanup {
-            backend::IFrameStream& stream;
-            std::thread& receiver;
-            ~Cleanup() {
-                stream.request_stop(); // releases the blocked receive
-                if (receiver.joinable()) receiver.join();
-                stream.stop();
-            }
-        } cleanup{*stream, receiver};
+        ReceiverCleanup cleanup{*stream, receiver}; // shared with scenario D
         CHECK(stream->start(51));
         for (std::size_t i = 0; i < profile::pool_buffers; ++i) held.push_back(receive_ok(*stream));
         { std::lock_guard lock(gate.m); gate.blocked = false; }
@@ -754,6 +819,404 @@ void direct_capture() {
     std::remove(path.c_str());
 }
 
+struct Unref { void operator()(gpointer object) const noexcept { if (object) g_object_unref(object); } };
+
+// ===========================================================================
+// GIGE-MEL-009-R1 regressions (findings A, B).
+//
+// Arrangement labels: "SDK-arranged" = the real SDK rejects a command because
+// of an imposed GenICam access mode. "Injected command-result fault" = the
+// SDK executed the command SUCCESSFULLY (the Fake acquisition register really
+// changed), then the test-only TestHooks::command_result boundary returned an
+// error in its place; production makes every recovery decision. That models
+// an uncertain native command result after a genuine effect. It is not
+// physical packet-loss or lost-acknowledgment qualification.
+
+// Counts of every native acquisition side effect.
+struct SideEffects {
+    int streams, buffers, commands, writes;
+    static SideEffects of(Observer& seen) {
+        return {seen.streams_created.load(), seen.buffers_allocated.load(), static_cast<int>(seen.command_log().size()),
+                seen.writes.load()};
+    }
+    bool operator==(const SideEffects&) const = default;
+};
+
+// K. Start outcomes: A1 known pre-execution failure, A2 applied start + error
+// with a successful compensating stop, A3 applied start + error with a failed
+// compensating stop, then explicit stop() recovery without a native stream.
+void start_outcomes() {
+    Observer seen;
+    std::atomic<bool> inject_start{false}, start_register_seen{false};
+    std::atomic<int> start_executions{0};
+    seen.on_result = [&](std::string_view c, ArvDevice* d) -> std::optional<backend::Error> {
+        if (c == "AcquisitionStart") start_executions.fetch_add(1);
+        if (c != "AcquisitionStart" || !inject_start.exchange(false)) return std::nullopt;
+        // The SDK command genuinely took effect before the fault is injected.
+        start_register_seen = arv_fake_camera_get_acquisition_status(arv_fake_device_get_fake_camera(ARV_FAKE_DEVICE(d))) == 1;
+        return backend::Error{backend::ErrorCode::timeout, "injected AcquisitionStart result: no acknowledgment"};
+    };
+    std::atomic<bool> throw_before_start{false};
+    seen.on_command = [&](std::string_view c, ArvDevice*) {
+        if (c == "AcquisitionStart" && throw_before_start.exchange(false))
+            throw std::runtime_error("arranged failure before the start executor");
+    };
+    auto camera = aravis_fake::make_backend(seen.hooks());
+    auto device = open_oracle(*camera);
+    auto stream = std::move(device->create_stream()).value();
+    ArvDomNode* stop_access = nullptr;
+    native(*device, [&](ArvDevice* d) { stop_access = impose_access(d, "AcquisitionStop", "RW"); });
+
+    // A1. Known pre-execution failure after partial local setup: the hook
+    // before the executor throws, so the SDK command is never called.
+    throw_before_start = true;
+    bool threw = false;
+    try { (void)stream->start(60); } catch (const std::runtime_error&) { threw = true; }
+    CHECK(threw && start_executions == 0);
+    CHECK((seen.command_log() == std::vector<std::string>{"AcquisitionStart"})); // reached the hook only
+    CHECK(seen.streams_created == 1 && seen.live_streams() == 0);               // partial stream retired
+    CHECK(seen.buffers_allocated == 4 && seen.live_buffers() == 0);             // partial pool retired
+    CHECK(acquisition_register(*device) == 0);                                 // nothing to compensate
+    CHECK(device->apply(oracle).value() == oracle);                            // no uncertainty invented
+    CHECK(stream->start(61) && acquisition_register(*device) == 1);            // explicit retry works
+    stream->stop();
+    CHECK(acquisition_register(*device) == 0 && seen.live_streams() == 0);
+
+    // A2. Applied start, then an injected error; the compensating stop works.
+    auto before = SideEffects::of(seen);
+    inject_start = true;
+    const auto a2 = stream->start(62);
+    CHECK(start_register_seen.exchange(false)); // the Fake acquisition really became active
+    CHECK(!a2 && a2.error().code == backend::ErrorCode::timeout); // the ORIGINAL start failure, not Success
+    CHECK(contains(a2.error().message, "injected AcquisitionStart result"));
+    CHECK(contains(a2.error().message, "a compensating AcquisitionStop succeeded"));
+    auto log = seen.command_log();
+    CHECK(log.size() == static_cast<std::size_t>(before.commands) + 2 && log[log.size() - 2] == "AcquisitionStart" &&
+          log.back() == "AcquisitionStop");
+    CHECK(acquisition_register(*device) == 0);           // stopped by the compensating command
+    CHECK(seen.live_streams() == 0 && seen.live_buffers() == 0); // stream and pool retired
+    CHECK(stream->receive(10ms).error().code == backend::ErrorCode::stopped);
+    CHECK(device->apply(oracle).value() == oracle);      // explicit reuse
+    CHECK(stream->start(63) && acquisition_register(*device) == 1);
+    stream->stop();
+
+    // A3. Applied start, injected error, and the compensating stop is ALSO
+    // rejected by the SDK (imposed read-only access).
+    seen.on_command = [&](std::string_view c, ArvDevice*) {
+        if (c == "AcquisitionStop") set_access(stop_access, "RO");
+    };
+    inject_start = true;
+    const auto a3 = stream->start(64);
+    CHECK(start_register_seen.exchange(false));
+    CHECK(!a3 && a3.error().code == backend::ErrorCode::timeout); // primary start failure preserved
+    CHECK(contains(a3.error().message, "injected AcquisitionStart result"));
+    CHECK(contains(a3.error().message, "the compensating AcquisitionStop also failed") &&
+          contains(a3.error().message, "read only") && contains(a3.error().message, "may still be acquiring"));
+    CHECK(acquisition_register(*device) == 1);                   // the camera is still acquiring
+    CHECK(seen.live_streams() == 0 && seen.live_buffers() == 0); // local retirement anyway
+    seen.on_command = nullptr;
+    // apply(): refused with zero configuration writes.
+    before = SideEffects::of(seen);
+    const auto blocked = device->apply({32, 32, 0, 0, 100, 10ms});
+    CHECK(!blocked && blocked.error().code == backend::ErrorCode::invalid_state);
+    CHECK(contains(blocked.error().message, "AcquisitionStart") && contains(blocked.error().message, "nothing was written"));
+    // start(): refused with no stream, pool or command, from any wrapper.
+    CHECK(stream->start(65).error().code == backend::ErrorCode::invalid_state);
+    auto other = std::move(device->create_stream()).value();
+    CHECK(other->start(65).error().code == backend::ErrorCode::invalid_state);
+    // Another wrapper cannot take over this wrapper's unresolved recovery.
+    other->stop();
+    other->request_stop();
+    CHECK(SideEffects::of(seen) == before && acquisition_register(*device) == 1);
+    // Read-only diagnostics stay available.
+    CHECK(device->configuration().value() == oracle);
+    CHECK(device->capabilities().sensor_width == 2048);
+    // request_stop() on the owner is prompt signalling only: no command.
+    stream->request_stop();
+    CHECK(SideEffects::of(seen) == before);
+    // Restore stop capability; the OWNING wrapper's stop() recovers with no
+    // native stream left (exactly one bounded command).
+    set_access(stop_access, "RW");
+    stream->stop();
+    CHECK(seen.command_log().size() == static_cast<std::size_t>(before.commands) + 1);
+    CHECK(seen.command_log().back() == "AcquisitionStop" && acquisition_register(*device) == 0);
+    CHECK(seen.streams_created == before.streams); // recovery created no stream
+    // Later explicit reuse.
+    CHECK(device->apply(oracle).value() == oracle);
+    CHECK(other->start(66) && acquisition_register(*device) == 1);
+    auto frame = receive_ok(*other);
+    CHECK(pixels_match(frame));
+    other->stop();
+    { auto drop = std::move(frame); }
+    // close() reports the historical A3 failure once, as recovered, keeping
+    // the primary start error (not only the cleanup error).
+    const auto closed = device->close();
+    CHECK(!closed && contains(closed.error().message, "injected AcquisitionStart result") &&
+          contains(closed.error().message, "compensating AcquisitionStop also failed") &&
+          contains(closed.error().message, "recovered: an explicit stop() retry succeeded"));
+    CHECK(!contains(closed.error().message, "remains uncertain"));
+    CHECK(device->close());
+}
+
+// Puts `device` into the uncertain state through a real SDK-rejected stop
+// (B1 arrangement) while `stream` stays alive as the owner. A lease is held
+// throughout to prove byte validity across retirement and close.
+struct UncertainStop {
+    Observer& seen;
+    std::shared_ptr<backend::ICameraDevice> device;
+    std::unique_ptr<backend::IFrameStream> stream;
+    ArvDomNode* stop_access{nullptr};
+    std::optional<backend::FrameLease> held;
+    std::vector<std::byte> held_bytes;
+    UncertainStop(Observer& observer, backend::ICameraBackend& camera) : seen(observer), device(open_oracle(camera)) {
+        native(*device, [&](ArvDevice* d) { stop_access = impose_access(d, "AcquisitionStop", "RW"); });
+        stream = std::move(device->create_stream()).value();
+        CHECK(stream->start(70));
+        held = receive_ok(*stream);
+        held_bytes = copy_bytes(*held);
+        seen.on_command = [this](std::string_view c, ArvDevice*) {
+            if (c == "AcquisitionStop") set_access(stop_access, "RO");
+        };
+        stream->stop();
+        seen.on_command = nullptr;
+        CHECK(acquisition_register(*device) == 1 && seen.live_streams() == 0);
+        CHECK(device->apply(oracle).error().code == backend::ErrorCode::invalid_state);
+    }
+};
+
+// L. Uncertain outcome followed by close() with no active native stream:
+// close still attempts the stop, closes the device regardless, reports
+// truthfully, and stays idempotent without device I/O. The owner wrapper is
+// kept alive during the assertions so its destructor cannot resolve anything.
+void uncertain_close() {
+    for (const bool stop_works : {true, false}) {
+        Observer seen;
+        auto camera = aravis_fake::make_backend(seen.hooks());
+        UncertainStop u(seen, *camera);
+        // Writable at the adapter's validation in both cases, so close()
+        // reaches the SDK executor; when the final cleanup must fail, the SDK
+        // itself rejects the execution (same arrangement as B1).
+        set_access(u.stop_access, "RW");
+        if (!stop_works)
+            seen.on_command = [&](std::string_view c, ArvDevice*) {
+                if (c == "AcquisitionStop") set_access(u.stop_access, "RO");
+            };
+        // Fake register read while the device is still open: the arranged
+        // camera outcome at close time is "still acquiring".
+        std::unique_ptr<ArvDevice, Unref> fake_device;
+        native(*u.device, [&](ArvDevice* d) { fake_device.reset(ARV_DEVICE(g_object_ref(d))); });
+        const auto commands = seen.command_log().size();
+        const int writes = seen.writes.load();
+        const auto closed = u.device->close();
+        CHECK(seen.command_log().size() == commands + 1 && seen.command_log().back() == "AcquisitionStop");
+        CHECK(seen.writes.load() == writes);
+        const auto status = arv_fake_camera_get_acquisition_status(
+            arv_fake_device_get_fake_camera(ARV_FAKE_DEVICE(fake_device.get())));
+        CHECK(status == (stop_works ? 0u : 1u)); // the attempted stop's real effect
+        CHECK(!closed && contains(closed.error().message, "AcquisitionStop") && contains(closed.error().message, "read only"));
+        if (stop_works) {
+            CHECK(contains(closed.error().message, "recovered: AcquisitionStop during close() succeeded"));
+            CHECK(!contains(closed.error().message, "remains uncertain"));
+        } else {
+            CHECK(contains(closed.error().message, "close(): ") &&
+                  contains(closed.error().message, "the camera acquisition outcome remains uncertain"));
+        }
+        fake_device.reset();
+        // Closed-device behavior, both cases; the reservation was released.
+        CHECK(seen.devices_opened - seen.devices.count == 0);
+        CHECK(u.device->apply(oracle).error().code == backend::ErrorCode::disconnected);
+        CHECK(u.stream->start(71).error().code == backend::ErrorCode::disconnected);
+        CHECK(!aravis::with_native_device_for_testing(*u.device, [](ArvDevice*) {}));
+        // Repeated close and owner stop/destruction: no device I/O.
+        CHECK(u.device->close());
+        u.stream->stop();
+        u.stream.reset();
+        CHECK(seen.command_log().size() == commands + 1);
+        // Held bytes stayed valid throughout retirement and close.
+        CHECK(copy_bytes(*u.held) == u.held_bytes && pixels_match(*u.held));
+        u.held.reset();
+        CHECK(seen.live_buffers() == 0);
+        // A new session may open; close/reopen is NOT claimed to prove the
+        // earlier camera stop (the Fake state is not shared across opens).
+        auto reopened = open_fake(*camera);
+        CHECK(reopened->close());
+    }
+}
+
+// M. Recovery ownership across wrappers and generations, plus the lease rule.
+void recovery_ownership() {
+    Observer seen;
+    auto camera = aravis_fake::make_backend(seen.hooks());
+    auto device = open_oracle(*camera);
+    ArvDomNode* stop_access = nullptr;
+    native(*device, [&](ArvDevice* d) { stop_access = impose_access(d, "AcquisitionStop", "RW"); });
+    std::atomic<bool> reject_stop{false};
+    seen.on_command = [&](std::string_view c, ArvDevice*) {
+        if (c == "AcquisitionStop" && reject_stop.load()) set_access(stop_access, "RO");
+    };
+    // Generation 1 by `old`, completed; then generation 2 by `owner`.
+    auto old = std::move(device->create_stream()).value();
+    CHECK(old->start(80));
+    old->stop();
+    auto owner = std::move(device->create_stream()).value();
+    CHECK(owner->start(81));
+    auto lease = receive_ok(*owner);
+    const auto lease_bytes = copy_bytes(lease);
+    // An obsolete wrapper (stop and destruction) cannot stop the newer run.
+    auto commands = seen.command_log().size();
+    old->stop();
+    old.reset();
+    CHECK(seen.command_log().size() == commands && acquisition_register(*device) == 1 && seen.live_streams() == 1);
+    // The owner's stop is rejected by the SDK: the outcome is uncertain.
+    reject_stop = true;
+    owner->stop();
+    reject_stop = false;
+    CHECK(acquisition_register(*device) == 1 && seen.live_streams() == 0);
+    // Never-started wrappers cannot recover another wrapper's fault (stop,
+    // request_stop, destruction), even once the SDK would accept the command.
+    set_access(stop_access, "RW");
+    commands = seen.command_log().size();
+    {
+        auto bystander = std::move(device->create_stream()).value();
+        bystander->request_stop();
+        bystander->stop();
+        CHECK(bystander->start(82).error().code == backend::ErrorCode::invalid_state);
+    }
+    CHECK(seen.command_log().size() == commands && acquisition_register(*device) == 1);
+    CHECK(copy_bytes(lease) == lease_bytes && pixels_match(lease)); // held bytes valid
+    // The owner recovers. Recovery does NOT bypass the held-lease rule.
+    owner->stop();
+    CHECK(seen.command_log().size() == commands + 1 && acquisition_register(*device) == 0);
+    const int streams = seen.streams_created.load();
+    const auto held = owner->start(83);
+    CHECK(!held && held.error().code == backend::ErrorCode::resource_exhausted);
+    CHECK(contains(held.error().message, "release them before restarting"));
+    CHECK(seen.streams_created.load() == streams);
+    CHECK(device->apply(oracle).value() == oracle); // configuration is permitted again
+    CHECK(copy_bytes(lease) == lease_bytes && pixels_match(lease));
+    { auto drop = std::move(lease); }
+    // The unreported historical failure does not block reuse: a different
+    // wrapper starts once the current uncertainty is cleared.
+    auto next = std::move(device->create_stream()).value();
+    CHECK(next->start(84) && acquisition_register(*device) == 1);
+    next->stop();
+    // Owner destruction cannot silently clear unresolved state: its single
+    // destructor attempt is rejected, the outcome stays uncertain, no other
+    // wrapper inherits it, and only close() resolves it.
+    CHECK(owner->start(85));
+    reject_stop = true;
+    owner.reset(); // ~AravisStream: retire + one rejected AcquisitionStop
+    reject_stop = false;
+    CHECK(acquisition_register(*device) == 1 && seen.live_streams() == 0);
+    set_access(stop_access, "RW");
+    commands = seen.command_log().size();
+    next->stop(); // next owns nothing now
+    CHECK(seen.command_log().size() == commands);
+    CHECK(next->start(86).error().code == backend::ErrorCode::invalid_state);
+    CHECK(device->apply(oracle).error().code == backend::ErrorCode::invalid_state);
+    const auto closed = device->close(); // logical close has authority
+    CHECK(seen.command_log().size() == commands + 1);
+    CHECK(!closed && contains(closed.error().message, "recovered: AcquisitionStop during close() succeeded"));
+    CHECK(device->close());
+}
+
+// Increment child of a feature (explicit <Inc> property node), for arranging
+// a fresh grid/increment through the SDK's own property setters.
+ArvGcPropertyNode* increment_node(ArvDevice* d, const char* feature) {
+    auto* node = ARV_DOM_NODE(arv_device_get_feature(d, feature));
+    for (ArvDomNode* child = arv_dom_node_get_first_child(node); child; child = arv_dom_node_get_next_sibling(child))
+        if (ARV_IS_GC_PROPERTY_NODE(child) &&
+            arv_gc_property_node_get_node_type(ARV_GC_PROPERTY_NODE(child)) == ARV_GC_PROPERTY_NODE_TYPE_INCREMENT)
+            return ARV_GC_PROPERTY_NODE(child);
+    return nullptr;
+}
+
+// N. Fresh acquisition preflight through REAL SDK arrangements (finding C).
+// Native facts are arranged and independently read back through the SDK
+// BEFORE start(); each rejection has zero stream, buffer, command and write
+// deltas (native READS are expected). One case follows a completed run.
+void fresh_preflight() {
+    Observer seen;
+    auto camera = aravis_fake::make_backend(seen.hooks());
+    auto device = open_oracle(*camera);
+    auto stream = std::move(device->create_stream()).value();
+    const auto expect_refused = [&](std::string_view part) {
+        const auto before = SideEffects::of(seen);
+        const auto refused = stream->start(90);
+        CHECK(!refused && refused.error().code == backend::ErrorCode::unsupported);
+        if (!contains(refused.error().message, part))
+            throw std::runtime_error("expected '" + std::string(part) + "' in: " + refused.error().message);
+        CHECK(contains(refused.error().message, "no native stream was created"));
+        CHECK(SideEffects::of(seen) == before && acquisition_register(*device) == 0);
+    };
+    // A completed run, stop and lease release first: preflight is repeated on
+    // every later start, not only on the first.
+    CHECK(stream->start(89));
+    { auto frame = receive_ok(*stream); CHECK(pixels_match(frame)); }
+    stream->stop();
+
+    // 1. Current ROI outside the sensor (sensor height 2048, Height 512,
+    //    OffsetY 1600), written through the SDK and read back first.
+    native(*device, [](ArvDevice* d) {
+        GError* error = nullptr;
+        arv_device_set_integer_feature_value(d, "Height", 512, &error);
+        CHECK(!error);
+        arv_device_set_integer_feature_value(d, "OffsetY", 1600, &error);
+        CHECK(!error);
+    });
+    CHECK(native_integer(*device, "SensorHeight") == 2048 && native_integer(*device, "Height") == 512 &&
+          native_integer(*device, "OffsetY") == 1600);
+    expect_refused("OffsetY reads back 1600 with Height 512, outside the sensor extent 2048");
+    native(*device, [](ArvDevice* d) { arv_device_set_integer_feature_value(d, "OffsetY", 4, nullptr); });
+    native(*device, [](ArvDevice* d) { arv_device_set_integer_feature_value(d, "Height", 48, nullptr); });
+    CHECK(device->configuration().value() == oracle);
+
+    // 2. A malformed fresh limit after a valid open: an explicitly supplied
+    //    invalid floating increment. The SDK returns exactly 0 with no GError.
+    ArvGcPropertyNode* exposure_inc = nullptr;
+    native(*device, [&](ArvDevice* d) {
+        auto* real = ARV_GC_FLOAT(arv_device_get_feature(d, "ExposureTimeAbs"));
+        auto* document = ARV_DOM_DOCUMENT(arv_device_get_genicam(d));
+        auto* inc = ARV_DOM_NODE(arv_dom_document_create_element(document, "Inc"));
+        CHECK(inc && arv_dom_node_append_child(ARV_DOM_NODE(real), inc));
+        arv_dom_node_append_child(inc, ARV_DOM_NODE(arv_dom_document_create_text_node(document, "0")));
+        GError* error = nullptr;
+        CHECK(arv_gc_float_get_inc(real, &error) == 0.0);
+        CHECK(!error);
+        exposure_inc = increment_node(d, "ExposureTimeAbs");
+        CHECK(exposure_inc);
+    });
+    expect_refused("ExposureTimeAbs advertises invalid increment 0 us");
+    // Restore the fact through the SDK (a valid explicit increment) and prove it.
+    native(*device, [&](ArvDevice* d) {
+        GError* error = nullptr;
+        arv_gc_property_node_set_double(exposure_inc, 1.0, &error);
+        CHECK(!error);
+        CHECK(arv_gc_float_get_inc(ARV_GC_FLOAT(arv_device_get_feature(d, "ExposureTimeAbs")), &error) == 1.0);
+        CHECK(!error);
+    });
+    CHECK(stream->start(91) && acquisition_register(*device) == 1);
+    stream->stop();
+
+    // 3. A structurally valid profile change: Width increment 1 -> 2 with a
+    //    current width (64) divisible by both. Envelope enforcement, not a
+    //    malformed limit: the existing close/reopen diagnostic.
+    native(*device, [](ArvDevice* d) {
+        GError* error = nullptr;
+        arv_gc_property_node_set_int64(increment_node(d, "Width"), 2, &error);
+        CHECK(!error);
+        arv_gc_integer_impose_min(ARV_GC_INTEGER(arv_device_get_feature(d, "Width")), 2, &error);
+        CHECK(!error);
+        CHECK(arv_gc_integer_get_inc(ARV_GC_INTEGER(arv_device_get_feature(d, "Width")), &error) == 2);
+        CHECK(!error);
+    });
+    CHECK(native_integer(*device, "Width") == 64 && 64 % 2 == 0);
+    CHECK(device->capabilities().width_increment == 1); // open-time envelope, immutable
+    expect_refused("Width increment changed from 1 at open to 2");
+    expect_refused("close and reopen the device");
+    CHECK(device->close());
+}
+
 // Any GLib warning or critical (e.g. a g_return_if_fail precondition reached
 // by the adapter) aborts the test: they are failures, not noise.
 void fatal_glib_log(const gchar* domain, GLogLevelFlags level, const gchar* message, gpointer) {
@@ -779,7 +1242,7 @@ int main(int argc, char** argv) {
         {"A start, commands and single acquisition owner", start_and_commands},
         {"B real SDK pixels and descriptors", real_pixels_and_descriptors},
         {"C bounded pool, held pixels and release", pool_and_release},
-        {"D prompt cancellation of a blocked receive (x3)", cancellation},
+        {"D prompt cancellation of a blocked receive, and its failure cleanup (x3)", cancellation},
         {"E lease lifetime, retirement order and reopen", lifetime_and_reopen},
         {"F restart policy", restart_policy},
         {"G native command failure cleanup and recovery", failure_cleanup},
@@ -787,6 +1250,10 @@ int main(int argc, char** argv) {
         {"H decoded-facts seam through the production validator", seam_cases},
         {"I exception unwind while receive is blocked", exception_unwind},
         {"J direct capture helper and independent PGM check", direct_capture},
+        {"K start outcomes: pre-execution, compensated, uncertain and recovered", start_outcomes},
+        {"L uncertain outcome then close without a native stream", uncertain_close},
+        {"M recovery ownership across wrappers and the lease rule", recovery_ownership},
+        {"N fresh acquisition preflight before side effects", fresh_preflight},
     };
     std::size_t passed = 0;
     for (const auto& [name, run] : tests) {

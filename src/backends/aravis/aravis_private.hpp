@@ -10,6 +10,7 @@
 #include <arv.h>
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -48,6 +49,14 @@ struct TestHooks {
     // change native state through the real SDK (e.g. an imposed access mode)
     // so that the SDK itself then rejects the command.
     std::function<void(std::string_view command, ArvDevice*)> before_command;
+    // GIGE-MEL-009-R1. TEST-ONLY COMMAND-RESULT BOUNDARY: called only after
+    // the SDK executed AcquisitionStart/AcquisitionStop SUCCESSFULLY (its
+    // camera effect genuinely happened), device lock held. A returned Error
+    // replaces that success, modelling an uncertain native command result
+    // after a genuine effect; the ORDINARY production failure path then makes
+    // every recovery decision. It is not packet-loss or lost-acknowledgment
+    // qualification and implements no recovery itself.
+    std::function<std::optional<Error>(std::string_view command, ArvDevice*)> command_result;
     // After the SDK constructed a run's native stream (its receiver thread is
     // already running), device lock held. E.g. attach a GObject weak reference.
     std::function<void(ArvStream*)> after_stream_created;

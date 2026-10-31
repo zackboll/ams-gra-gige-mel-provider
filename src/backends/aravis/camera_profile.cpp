@@ -391,6 +391,17 @@ Status unchanged_profile(const NativeSnapshot& n, const NativeSnapshot& envelope
 
 } // namespace
 
+Result<CameraConfiguration> acquisition_preflight(const NativeSnapshot& n, const NativeSnapshot& envelope) {
+    // Same order as plan_writes(): nothing below reads an unchecked fact.
+    if (auto ok = check_preconditions(n); !ok) return ok.error();
+    if (auto ok = check_limits(n); !ok) return ok.error();
+    if (auto ok = check_current(n); !ok) return ok.error();
+    if (auto ok = unchanged_profile(n, envelope); !ok) return ok.error();
+    auto frozen = configuration_from(n);
+    if (!frozen) return fail(frozen.error().code, "current configuration is not representable: " + frozen.error().message);
+    return frozen;
+}
+
 Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& c, const NativeSnapshot& n,
                                              const NativeSnapshot& envelope) {
     // Structural safety of the fresh snapshot first: nothing below performs
