@@ -13,3 +13,8 @@ This distribution also uses nlohmann/json 3.12.0, Copyright (c) 2013-2025
 Niels Lohmann, under the MIT license retained in
 third_party/nlohmann-json/LICENSE.MIT. Its private parser source identity and
 integrity hashes are recorded in third_party/json-manifest.json.
+
+The optional, uninstalled GIGE_MEL_BUILD_ARAVIS targets dynamically link the
+Aravis 0.8.36 library (LGPL-2.1-or-later, https://github.com/AravisProject/aravis)
+when a developer explicitly provisions it. No Aravis source or binary is
+included in this repository or in the installed package.

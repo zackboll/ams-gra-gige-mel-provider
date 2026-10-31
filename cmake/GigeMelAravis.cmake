@@ -1,0 +1,57 @@
+# Included only when GIGE_MEL_BUILD_ARAVIS=ON. Never downloads anything: the
+# qualified SDK is provisioned explicitly (scripts/provision_aravis.sh) and
+# located through pkg-config (PKG_CONFIG_PATH).
+set(GIGE_MEL_QUALIFIED_ARAVIS_VERSION 0.8.36)
+
+find_package(PkgConfig QUIET)
+if(NOT PKG_CONFIG_FOUND)
+  message(FATAL_ERROR "GIGE_MEL_BUILD_ARAVIS=ON requires pkg-config to locate aravis-0.8 ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION}. "
+    "Install pkg-config, provision the SDK with scripts/provision_aravis.sh PREFIX and set PKG_CONFIG_PATH, "
+    "or configure with -DGIGE_MEL_BUILD_ARAVIS=OFF.")
+endif()
+pkg_check_modules(GIGE_MEL_ARAVIS QUIET IMPORTED_TARGET aravis-0.8=${GIGE_MEL_QUALIFIED_ARAVIS_VERSION})
+if(NOT GIGE_MEL_ARAVIS_FOUND)
+  pkg_check_modules(GIGE_MEL_ARAVIS_ANY QUIET aravis-0.8)
+  if(GIGE_MEL_ARAVIS_ANY_FOUND)
+    set(_found "found aravis-0.8 ${GIGE_MEL_ARAVIS_ANY_VERSION}, which is not qualified")
+  else()
+    set(_found "aravis-0.8 (or one of its GLib/libxml2 dependencies) was not found by pkg-config")
+  endif()
+  message(FATAL_ERROR "GIGE_MEL_BUILD_ARAVIS=ON requires exactly Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION}; ${_found}. "
+    "Provision it explicitly with scripts/provision_aravis.sh PREFIX, then set "
+    "PKG_CONFIG_PATH=PREFIX/lib/pkgconfig. See docs/aravis-integration.md.")
+endif()
+message(STATUS "Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION} (internal camera-control adapter): ${GIGE_MEL_ARAVIS_LINK_LIBRARIES}")
+
+# Internal adapter. Not installed or exported; consumers of the installed
+# package never see Aravis, GLib or this target.
+add_library(gige_mel_aravis STATIC
+  src/backends/aravis/aravis_backend.cpp
+  src/backends/aravis/camera_profile.cpp)
+target_include_directories(gige_mel_aravis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/aravis)
+target_link_libraries(gige_mel_aravis PUBLIC gige_mel_backend PkgConfig::GIGE_MEL_ARAVIS
+  PRIVATE gige_mel_build_options)
+
+# Uninstalled diagnostic tool. GigE interface only; no Fake fallback.
+add_executable(gige_mel_aravis_diagnostic tools/aravis_diagnostic.cpp)
+target_link_libraries(gige_mel_aravis_diagnostic PRIVATE gige_mel_aravis gige_mel_build_options)
+
+if(BUILD_TESTING)
+  # Private test support: selects Aravis's in-process Fake interface.
+  add_library(gige_mel_aravis_test_support STATIC tests/support/aravis_fake_support.cpp)
+  target_include_directories(gige_mel_aravis_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
+  target_link_libraries(gige_mel_aravis_test_support PUBLIC gige_mel_aravis ${CMAKE_DL_LIBS} PRIVATE gige_mel_build_options)
+
+  add_executable(aravis_adapter_tests tests/aravis_adapter_tests.cpp)
+  target_link_libraries(aravis_adapter_tests PRIVATE gige_mel_aravis_test_support gige_mel_build_options Threads::Threads)
+  add_test(NAME aravis_adapter COMMAND aravis_adapter_tests)
+
+  add_executable(aravis_embedding_probe tests/aravis_embedding_probe.cpp)
+  target_link_libraries(aravis_embedding_probe PRIVATE gige_mel_provider gige_mel_aravis_test_support
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME aravis_mel_embedding COMMAND aravis_embedding_probe)
+
+  # --help must succeed without device I/O (no network discovery is started).
+  add_test(NAME aravis_diagnostic_help COMMAND gige_mel_aravis_diagnostic --help)
+  set_tests_properties(aravis_adapter aravis_mel_embedding aravis_diagnostic_help PROPERTIES TIMEOUT 60)
+endif()

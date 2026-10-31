@@ -14,6 +14,7 @@ find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 option(GIGE_MEL_BUILD_EXAMPLES "Build the native dynamically loaded capture example" ON)
 option(GIGE_MEL_WARNINGS_AS_ERRORS "Treat warnings in project code as errors" ON)
+option(GIGE_MEL_BUILD_ARAVIS "Build the optional, internal Aravis 0.8.36 camera-control adapter, its SDK tests and diagnostic tool" OFF)
 set(GIGE_MEL_SANITIZERS "" CACHE STRING "Compiler sanitizers, e.g. address,undefined or thread")
 
 add_library(gige_mel_build_options INTERFACE)
@@ -113,8 +114,19 @@ if(BUILD_TESTING)
   add_test(NAME native_loader COMMAND loader_tests $<TARGET_FILE:gige_mel_provider>)
   add_test(NAME upstream_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify)
   add_test(NAME json_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py)
+  # Fixture-based regressions for the package-isolation verifier (no SDK needed).
+  add_test(NAME package_isolation_verifier
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_package_isolation_tests.py)
+  set_tests_properties(package_isolation_verifier PROPERTIES TIMEOUT 120)
   set_tests_properties(backend_contract provider_contract provider_backend_portability configuration_public_api
     native_loader PROPERTIES TIMEOUT 30)
+endif()
+
+# Optional Aravis camera-control foundation (GIGE-MEL-008). OFF by default:
+# when OFF nothing below searches for Aravis, pkg-config or GLib. Everything
+# here is internal: never installed, exported or selectable by getAPI_Manager().
+if(GIGE_MEL_BUILD_ARAVIS)
+  include(cmake/GigeMelAravis.cmake)
 endif()
 
 configure_package_config_file(cmake/GigeMelProviderConfig.cmake.in

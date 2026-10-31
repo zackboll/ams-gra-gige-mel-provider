@@ -4,6 +4,8 @@
 
 This repository bootstraps a **native C++ provider of the AMS-GRA IR MEL API**. Its first image source is a deterministic synthetic camera. A real GigE Vision transport implementation is a subsequent adapter, selected after its SDK, license, platforms, and camera have been qualified.
 
+**Real SDK status (GIGE-MEL-008).** An optional, internal Aravis 0.8.36 camera-control foundation is implemented and tested against the real SDK and its in-process Fake device. It covers discovery, exact selection, ownership, capabilities, configuration and truthful readback. It is OFF by default, uninstalled, and not selectable through `getAPI_Manager()`. Aravis image acquisition, the first physical-camera qualification, and a second real SDK implementation are still pending. See [Aravis integration](aravis-integration.md).
+
 The initial profile is deliberately narrow: one staring camera, one image stream, one band, Mono8 pixels, tightly packed rows, and consumer-provided host memory. The provider exposes selected operations through the pinned MEL 4.0 C++ interfaces. **This is an experimental image-stream bootstrap, not a claim of full MEL 4.0 conformance.** Several members marked required by upstream still report unsupported, and additional channel families remain unavailable. The [surface roadmap](mel-surface-roadmap.md) separates those gaps from optional enhancements.
 
 The interface snapshots, exact commits, source licenses, and integrity procedure are recorded in [upstream provenance](upstream-provenance.md). Interface version 4.0 describes the upstream contract; it must not be interpreted as this implementation's completeness or product version.
@@ -19,7 +21,7 @@ flowchart TD
     MEL --> Runtime["Shared camera runtime"]
     Runtime --> Contract["Internal C++ backend contract"]
     Contract --> Synthetic["Synthetic camera"]
-    Contract -.-> SDK["Future SDK adapter"]
+    Contract -.-> SDK["SDK adapter (optional internal Aravis control layer; acquisition pending)"]
     SDK -.-> Camera["GigE Vision camera"]
 ```
 
@@ -84,7 +86,7 @@ The bootstrap uses configuration changes while acquisition is disabled. A future
 
 An SDK adapter answers “how do I perform this operation with this library?” A camera profile answers “which features, units, constraints, and ordering does this camera model require?” Those concerns should remain separate as real cameras are added.
 
-The initial internal interface is a typed `CameraConfiguration`; it does not yet expose a general GenApi node tree or a profile plugin. This keeps the bootstrap small. The first real adapter can factor a profile helper underneath `ICameraDevice::apply` without changing MEL clients. Introduce a generic typed feature interface only when the first two implementations establish what is actually shared.
+The initial internal interface is a typed `CameraConfiguration`; it does not yet expose a general GenApi node tree or a profile plugin. This keeps the bootstrap small. The first real adapter can factor a profile helper underneath `ICameraDevice::apply` without changing MEL clients. The Aravis foundation does this: `src/backends/aravis/aravis_backend.cpp` holds the SDK mechanics, and `camera_profile.cpp` holds the narrow, SDK-free profile translation (units, checked conversion, prevalidation, write ordering). Introduce a generic typed feature interface only when the first two implementations establish what is actually shared.
 
 Examples of profile concerns include exposure units, `OffsetX`/`OffsetY` handling, ROI increments, when offsets must be cleared before resizing, whether acquisition must stop, and whether frame-rate controls interact with trigger mode. A generic string-to-string feature bag loses type, availability, range, and unit information; avoid making it the core contract.
 
