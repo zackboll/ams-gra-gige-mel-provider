@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -42,10 +42,36 @@ jobs:
           cmake -S tests/install_consumer -B build/install-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
           cmake --build build/install-consumer
           build/install-consumer/installed_consumer
+      # ---- Optional Aravis integration: explicit provisioning, separate build ----
+      # The SDK-free checks above are unchanged and complete before this point.
+      - name: Install Aravis build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config libglib2.0-dev libxml2-dev zlib1g-dev
+      - name: Provision pinned Aravis 0.8.36 (explicit, checksum-verified)
+        run: scripts/provision_aravis.sh "$RUNNER_TEMP/aravis-0.8.36"
+      - name: Configure with the optional Aravis adapter
+        run: |
+          export PKG_CONFIG_PATH="$RUNNER_TEMP/aravis-0.8.36/lib/pkgconfig"
+          cmake --preset "${{ matrix.preset }}" -B "build/aravis-${{ matrix.preset }}" -DGIGE_MEL_BUILD_ARAVIS=ON
+      - name: Build with the optional Aravis adapter
+        run: cmake --build "build/aravis-${{ matrix.preset }}" --parallel 2
+      - name: Test with the real Aravis SDK and its in-process Fake device
+        run: ctest --test-dir "build/aravis-${{ matrix.preset }}" --output-on-failure
+      - name: Verify loaded SDK and that the package stays Aravis-free
+        run: |
+          ldd "build/aravis-${{ matrix.preset }}/aravis_adapter_tests" | grep "$RUNNER_TEMP/aravis-0.8.36/lib/libaravis-0.8.so.0"
+          ! ldd "build/aravis-${{ matrix.preset }}/libgige_mel_provider.so" | grep -E 'aravis|glib|gobject'
+          cmake --install "build/aravis-${{ matrix.preset }}" --prefix "$RUNNER_TEMP/gige-mel-aravis-install"
+          ! grep -rIl -i aravis "$RUNNER_TEMP/gige-mel-aravis-install/lib" "$RUNNER_TEMP/gige-mel-aravis-install/include"
+          ! find "$RUNNER_TEMP/gige-mel-aravis-install" -iname '*aravis*' -not -path '*/doc/*' | grep .
+          env -u PKG_CONFIG_PATH cmake -S tests/install_consumer -B build/install-consumer-aravis -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-aravis-install"
+          cmake --build build/install-consumer-aravis
+          build/install-consumer-aravis/installed_consumer
 
   sanitizers:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -62,3 +88,19 @@ jobs:
       - run: cmake --preset "${{ matrix.preset }}"
       - run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
       - run: ctest --preset "${{ matrix.preset }}"
+      # ---- Optional Aravis integration (sanitizers instrument the project's
+      # adapter, tests and provider; the provisioned SDK is NOT instrumented) ----
+      - name: Install Aravis build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config libglib2.0-dev libxml2-dev zlib1g-dev
+      - name: Provision pinned Aravis 0.8.36 (explicit, checksum-verified)
+        run: scripts/provision_aravis.sh "$RUNNER_TEMP/aravis-0.8.36"
+      - name: Configure with the optional Aravis adapter
+        run: |
+          export PKG_CONFIG_PATH="$RUNNER_TEMP/aravis-0.8.36/lib/pkgconfig"
+          cmake --preset "${{ matrix.preset }}" -B "build/aravis-${{ matrix.preset }}" -DGIGE_MEL_BUILD_ARAVIS=ON
+      - name: Build with the optional Aravis adapter
+        run: cmake --build "build/aravis-${{ matrix.preset }}" --parallel 2
+      - name: Test with the real Aravis SDK and its in-process Fake device
+        run: ctest --test-dir "build/aravis-${{ matrix.preset }}" --output-on-failure

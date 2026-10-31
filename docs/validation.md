@@ -1,5 +1,113 @@
 # Bootstrap validation record
 
+## GIGE-MEL-008 optional Aravis camera-control foundation (2026-10-30)
+
+Branch `feature/gige-mel-008-aravis-control` was created from freshly fetched
+`origin/main`, which had not advanced since task preparation:
+
+- Commit `039de755644ad2b15dd5827878ae71c028218e8f`
+- Tree `01476757e59fec54f66de1f3fa0820f0429b7375`
+
+**Environment.** Linux 6.12.113+deb13-amd64, GCC 14.2.0, Clang 19.1.7, CMake
+3.31.6, Ninja 1.12.1, Python 3.13.5. Local provisioning used meson 1.5.2 in a
+virtualenv and Debian 13 GLib 2.84 / libxml2 development packages unpacked into
+a user-space sysroot (no root access). No camera or network discovery was used.
+
+**SDK identity.** Aravis **0.8.36**:
+
+- Archive `aravis-0.8.36.tar.xz` from the GitHub release. SHA-256
+  `246deaa0042a387ff1bc00332d0fb80537ce14abde2c28d1a54c91f17adc51bf` was
+  verified, and tag `0.8.36` resolves to commit
+  `97ff5e330919d7a44b871df4eda669feeafdf342`.
+- Built by `scripts/provision_aravis.sh` into the temporary prefix
+  `/tmp/gm8/aravis-prefix`: release build, viewer, GStreamer, USB3, packet
+  socket, introspection, docs and tests disabled, library target only. The
+  SDK was **not** sanitizer-instrumented.
+- Every test binary prints the library actually loaded:
+  `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`, runtime 0.8.36 and compiled
+  0.8.36. `ldd` confirms the same path. The tests fail if the runtime version is
+  not 0.8.36.
+
+| Configuration | CTest | Provider | Backend | Portability | Aravis adapter | MEL probe | Diagnostic `--help` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GCC dev, SDK-free (`build/dev`) | **7/7** | 74/74 | 8/8 | 12 + 2 | — | — | — |
+| GCC Release, SDK-free (`build/release`) | **7/7** | pass | pass | pass | — | — | — |
+| GCC dev + Aravis (`build/aravis-dev`) | **10/10** | 74/74 | 8/8 | 12 + 2 | 10/10 | pass | pass |
+| GCC Release + Aravis | **10/10** | pass | pass | pass | 10/10 | pass | pass |
+| Clang 19 Debug + Aravis (`CXX=clang++-19`) | **10/10** | pass | pass | pass | 10/10 | pass | pass |
+| ASan/UBSan + Aravis (`detect_leaks=1:halt_on_error=1`) | **10/10** | pass | pass | pass | 10/10 | pass | pass |
+| TSan + Aravis (`halt_on_error=1`) | **10/10** | pass | pass | pass | 10/10 | pass | pass |
+
+The SDK-enabled build adds exactly three CTest entries: `aravis_adapter`,
+`aravis_mel_embedding` and `aravis_diagnostic_help`. The seven default entries
+and their counts are unchanged. `ldd` showed `libasan.so.8` plus
+`libubsan.so.1`, and `libtsan.so.2`, in the respective adapter test binaries.
+The sanitizers instrumented the project's adapter, tests and provider only, not
+Aravis, GLib or libxml2. No sanitizer startup or environment limitation
+occurred.
+
+Other checks:
+
+- **Offline verifiers.** Both pass (97 MEL files; 2 JSON files). Neither
+  manifest was changed.
+- **SDK-free build.** The default build has no Aravis, pkg-config or GLib
+  entries in `CMakeCache.txt`/`build.ninja`, and `ldd` of the provider and tests
+  shows no Aravis or GLib. Synthetic capture works (64×48 PGM).
+- **Install and consumer.** The default install and the separate installed
+  consumer pass. Installing from the SDK-enabled build produces the identical
+  non-documentation file set. No Aravis target, header, library or symbol is
+  installed; only documentation mentions Aravis. A consumer configured with
+  `PKG_CONFIG_PATH` unset builds and runs against that installed tree.
+- **Whitespace.** `git diff --check` passes over the PR range.
+
+### Controls
+
+1. **SDK absence.** With `PATH=/usr/bin:/bin` and `PKG_CONFIG_PATH` empty, the
+   default configuration succeeds. Its cache contains only the OFF option and
+   no pkg-config/Aravis lookups. `-DGIGE_MEL_BUILD_ARAVIS=ON` fails at configure
+   time with: "requires exactly Aravis 0.8.36; aravis-0.8 (or one of its
+   GLib/libxml2 dependencies) was not found by pkg-config. Provision it
+   explicitly …". A `.pc` file declaring 0.8.33 fails with "found aravis-0.8
+   0.8.33, which is not qualified".
+2. **Readback honesty.** Two mutations were made in a disposable copy
+   (`/tmp/gm8/ctl`) against the same provisioned SDK:
+   - **A.** `frame_rate_from_native` was made to round fractions, removing the
+     4-ULP check. `aravis_adapter` failed in "SDK quantization and truthful
+     readback" at `!thirty && … unsupported`, because 30.000300003 Hz became
+     30 Hz. `aravis_mel_embedding` also failed, because the unrepresentable
+     30 Hz command was accepted.
+   - **B.** `apply()` returned the cached request instead of the readback. The
+     same scenario failed at `quantized.value().exposure == 1'250'000ns`, since
+     1 250 500 ns was falsely reported.
+
+   With the implementation restored, `src/` in the copy is identical to the
+   branch and the scenario passes.
+
+No starting-main feature failure is claimed, because main has no optional
+Aravis target. No broad mutation or repetition campaign was run.
+
+### Recorded pinned-SDK behavior (Fake_1)
+
+- Rates of 25, 40, 50, 1 and 1000 Hz read back exactly.
+- 30 Hz gives period 33333 µs and reads back as `30.000300003000032` Hz. A
+  period of 142857 µs reads back as `7.0000070000069998` Hz.
+- `ExposureTimeAbs` 1250.5 µs reads back as 1250 µs.
+- Range checking rejects `Width` 5000 with "greater than allowed maximum
+  '2048'".
+- Aravis's own `open_device` returns NULL with no GError for an unknown ID.
+- The discovery strings change pointer on each refresh.
+
+### Limitations
+
+This is a camera-control foundation exercised against the real SDK and its
+in-process Fake device. It is not an image backend: `create_stream()` is
+unsupported. It is not a supported Aravis MEL profile, and it is not
+qualification of GigE Vision, GenICam compatibility or any physical camera,
+firmware, network or timing. The late-write failure is an SDK constraint
+change arranged through `arv_gc_float_impose_max` from a private hook, not a
+camera fault. Hosted CI results for the final head are recorded on the PR. The
+two deferred PR #3 notes remain separate and untouched.
+
 ## GIGE-MEL-007 backend portability (2026-10-30)
 
 Branch `test/gige-mel-007-backend-portability` was created from freshly fetched
@@ -44,9 +152,9 @@ Other checks:
   an in-place `std::equal`); warnings were not relaxed.
 - **Offline verifiers.** Both pass (97 MEL files and 2 JSON files).
 - **Capture, install and consumer.** The synthetic capture works. The dev
-  install and the separate installed consumer pass. The installed tree
-  contains no fixture source, header or symbol. Only the documentation
-  directory (`docs/backend-portability.md`) mentions it.
+  install and the separate installed consumer pass. Fixture references are
+  limited to installed documentation; no fixture source, header, or symbol is
+  installed.
 - **Whitespace.** `git diff --check origin/main` passes over the whole change.
 - **Bounded repetition.** Five dev runs each of the drain, fixture-direct and
   Health/BIT scenarios passed (15/15). Five TSan runs each of the drain and

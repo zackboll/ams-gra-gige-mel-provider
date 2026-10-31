@@ -123,15 +123,19 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `src/factories.cpp` | Exact MEL export symbols and backend selection |
 | `src/provider.cpp` | MEL objects, shared runtime, channels, registered buffers, and image publication |
 | `src/backends/synthetic.cpp` | Working reference backend with bounded ownership |
+| `src/backends/aravis/` | Optional internal Aravis 0.8.36 camera-control foundation (`GIGE_MEL_BUILD_ARAVIS`); no acquisition, never installed |
+| `tools/aravis_diagnostic.cpp` | Optional, uninstalled Aravis GigE list/inspect/apply diagnostic |
 | `examples/capture.cpp` | Standalone MEL consumer that dynamically loads the provider |
 | `tests/backend_tests.cpp` | Synthetic-specific backend lifetime, cancellation, validation, and pool contracts |
 | `tests/provider_backend_contract_tests.cpp` | Shared MEL-provider portability scenarios run against the synthetic backend and an independent test-only backend |
-| `tests/support/` | Test-only contract-fixture camera backend; never installed or selectable by the exported factories |
+| `tests/support/` | Test-only contract-fixture camera backend and Aravis Fake-interface selection; never installed or selectable by the exported factories |
+| `tests/aravis_*.cpp` | Optional real-SDK adapter tests and private MEL configuration embedding probe |
 | `tests/provider_tests.cpp` | MEL semantics, host memory, metadata, reentry, and shutdown regressions |
 | `tests/loader_tests.cpp` | Native ABI/export and image-delivery test with no provider link dependency |
 | `tests/install_consumer/` | Separate `find_package` client for install/export validation |
 | `third_party/` | Exact, minimal upstream header closure, notices, and checksum manifest |
 | `scripts/vendor_upstream.py` | Offline integrity check; explicit restoration of locked files |
+| `scripts/provision_aravis.sh` | Explicit, checksum-verified Aravis 0.8.36 provisioning (never run by CMake) |
 | `docs/` | Implementation profile, architecture, exhaustive MEL roadmap, backend guide, and decisions |
 | `.github/workflows/ci.yml` | GCC/Clang, debug/release, native loading, package consumer, and sanitizer jobs |
 
@@ -163,6 +167,7 @@ Main CMake options:
 | `GIGE_MEL_BUILD_EXAMPLES` | `ON` | Native dynamically loaded capture client |
 | `GIGE_MEL_WARNINGS_AS_ERRORS` | `ON` | Strict warnings for project code; upstream headers are system includes |
 | `GIGE_MEL_SANITIZERS` | Empty | GCC/Clang sanitizer list, such as `address,undefined` or `thread` |
+| `GIGE_MEL_BUILD_ARAVIS` | `OFF` | Optional internal Aravis 0.8.36 control adapter, its SDK tests and diagnostic; requires an explicitly provisioned SDK ([Aravis integration](docs/aravis-integration.md)) |
 
 ## Installing and using the package
 
@@ -196,9 +201,12 @@ backend. `gige_mel::make_api_manager(settings, backend)` lets an embedding clien
 or a future factory configuration inject another implementation while reusing
 all MEL channel code.
 
-1. Choose the first SDK and a specific camera/firmware combination. Aravis,
-   eBUS, a vendor SDK, and a GenTL consumer are candidates; none is selected or
-   included in this bootstrap.
+1. Choose the first SDK and a specific camera/firmware combination. Aravis
+   0.8.36 now has an optional, internal camera-control foundation
+   ([Aravis integration](docs/aravis-integration.md)). Its acquisition and any
+   physical-camera qualification are pending, and it is not selectable through
+   the exported factories. eBUS, vendor SDKs and GenTL consumers remain
+   candidates for the second implementation.
 2. Implement `ICameraBackend`, `ICameraDevice`, and `IFrameStream` in an optional
    target. Keep SDK types private. Reuse the normal registered-host copy path.
 3. Map a characterized camera profile to the typed configuration. Validate
@@ -218,7 +226,7 @@ The detailed guide is [backend authoring](docs/backend-authoring.md).
 | --- | --- | --- |
 | P0 | Maintain and extend this bootstrap's foundation | Native factory loading, deterministic frames, explicit release, stop/restart, and failure-path tests remain green |
 | P1 | Agree and implement the operational MEL profile | Resolve required C2, Image, Health, navigation/LOS, and stack/task obligations; no fabricated metadata |
-| P2 | First real GigE backend | One pinned SDK/camera profile delivers correct frames and controls through the common provider |
+| P2 | First real GigE backend (Aravis control foundation done; acquisition and hardware qualification pending) | One pinned SDK/camera profile delivers correct frames and controls through the common provider |
 | P3 | Second real backend | The same MEL client and applicable contract tests run with a different implementation |
 | P4 | Richer camera and transport capabilities | Add formats, trigger/PTP/chunks/calibration/diagnostics and optional direct buffers only with defined mappings and qualified lifetime contracts |
 | P5 | Mission-specific channels | Implement actual tasking/tracking/stack products with real data sources and state transitions |
