@@ -84,6 +84,30 @@ The common provider, the exported factories and the installed package are
 unchanged. `getAPI_Manager()` has no Aravis selection, and `src/provider.cpp`
 has no backend-name branch.
 
+**Package-isolation enforcement.** The SDK-enabled CI build jobs run
+`scripts/verify_package_isolation.py`. The script checks that:
+
+- the adapter tests resolve `libaravis-0.8.so.0` to the provisioned library;
+- the common provider loads no Aravis, GLib, GObject, GIO or libxml2 library;
+- installed non-documentation text (headers, CMake package metadata) does not
+  reference Aravis, `arv.h` or its GLib/pkg-config stack;
+- installed binaries contain no Aravis symbols;
+- no installed path below the prefix mentions Aravis, except
+  `share/doc/…/docs/aravis-integration.md`. The prefix's own name is not
+  examined.
+
+It then configures, builds and runs a separate consumer with
+`PKG_CONFIG_PATH` unset, and checks that the consumer's cache records no SDK
+discovery entries. A detected violation **and** a failure to run a check
+(`ldd`/`nm` failure, unreadable file, traversal error) are both fatal. All
+checks run, and the process exits nonzero if any failed, so a later successful
+consumer build cannot mask an earlier failure.
+
+The original GIGE-MEL-008 step used negated pipelines (`! ldd … | grep …`).
+Bash exempts those from `errexit`, so a detected violation did not fail the
+step. Its green results are **not** evidence of effective isolation; see the
+R1 record in `docs/validation.md`.
+
 ## Interface selection: GigE versus test-only Fake
 
 `make_backend()` uses Aravis's GigE Vision interface
@@ -125,7 +149,18 @@ configuration I/O. The interface singleton is requested lazily on the first
 - **Synchronization.** Discovery and open are serialized per Aravis interface,
   process-wide across adapter instances. Each device serializes its own feature
   I/O, and independent devices do not share a lock. The adapter **cannot** make
-  unrelated application calls into Aravis thread-safe.
+  unrelated application calls into Aravis thread-safe. The concurrent-open test
+  establishes two things, both observed rather than timed:
+  - *Overlap:* the first opener is gated inside `open()`, after its
+    reservation and with the interface lock held.
+  - *Contention:* a private hook at the locking boundary observes that the
+    competitor's real `try_lock` of that interface lock **failed** while the
+    first was still mid-open.
+
+  Only then is the first opener released. The test then requires exactly one
+  owner, `busy` for the competitor, and a single native open. In production,
+  `open()` acquires that lock as before (`try_lock`, then a blocking lock); the
+  hook is a private test seam.
 - **Logical close** is idempotent. Under the device lock it drops the native
   reference, then releases the reservation. Later `configuration()`, `apply()`
   and `create_stream()` return `disconnected`. `capabilities()` keeps returning
@@ -182,10 +217,13 @@ Aravis exposes floating-point Hz and µs.
 - **Requests.** A rate of 0, or an exposure ≤ 0 or above 2^53 ns, is
   `invalid_argument`. Otherwise the value converts exactly to a double.
 - **Readback.** A non-finite or negative native value is `io_error`. A finite
-  value converts only if it is within **4 ULP** (relative to its magnitude, at
-  least 1) of an integer in the target unit, and that integer is in range
-  (1..2^32−1 Hz; 1..2^63−1 ns). The tolerance covers floating-point
-  representation error only. Any other value is `unsupported`, and the error
+  value `v` converts to the integer `n` in the target unit only if
+  `|v − n| ≤ 4 · DBL_EPSILON · max(1, |n|)` and `n` is in range
+  (1..2^32−1 Hz; 1..2^63−1 ns). This is a relative epsilon tolerance. It is
+  not exactly four adjacent representable doubles ("4 ULP") at every
+  magnitude; R1 corrected that earlier wording without changing the formula.
+  The tolerance covers floating-point representation error only. Any other
+  value is `unsupported`, and the error
   names the feature, the shortest round-trip native value, and the unit. Values
   are never rounded into a successful configuration. Range checks precede
   every integer cast.
@@ -207,17 +245,60 @@ valid readback.
 
 ## Transactions, partial application and errors
 
-`apply()` takes the device lock, reads a fresh native snapshot, and requires
-the supported profile. It then validates the **complete** request before
-writing anything: increment grids and minima, sensor extent, coupled
-offset + size ≤ sensor, and the advertised rate and exposure bounds and float
-increments from the open-time envelope. Writes go directly to the GenICam
-nodes in a safe order. On each axis, the offset is written first if it fits
-the current size; otherwise the size is written first. The rate is written
-first when the period lengthens, and the exposure first otherwise. Unchanged
-integers are not rewritten. Dynamic or coupled native maxima are revalidated by
-the SDK's range check on each write. After the writes, the complete actual
-configuration is read back.
+`apply()` takes the device lock, reads a **fresh** native snapshot, and
+requires the supported profile. It validates the **complete** request against
+that fresh snapshot before writing anything. All limits come from the fresh
+readback, not from the open-time envelope (R1):
+
+1. **Structural safety** (`check_limits`, `check_current`). Every native fact
+   used in arithmetic is checked first, on every snapshot; no caller is trusted
+   to have validated it. The checks are:
+   - sensor extent in 1..2^32−1;
+   - per ROI feature: increment in 1..2^32−1, minimum ≤ maximum, and a grid
+     origin (the minimum) that is a multiple of the increment and lies in
+     [0, sensor] (sizes) or [0, sensor−1] (offsets);
+   - rate and exposure bounds finite, nonnegative and ordered, with any
+     advertised float increment finite and positive;
+   - current ROI geometry inside the sensor: size in [1, sensor], offset in
+     [0, sensor − size].
+
+   A violation is `unsupported` (an invalid current float is `io_error`),
+   naming the feature and value. Nothing is clamped, wrapped or fabricated.
+   The ROI comparisons are written so that no subtraction or sum can overflow
+   `int64_t`. Current values are **not** required to be on the grid, inside the
+   reported bounds, or representable by the project contract. A fractional
+   current rate, or a current exposure above a newly lowered maximum, is still
+   reported truthfully and remains recoverable by an explicit `apply()`.
+2. **Profile-change detection.** The published `CameraCapabilities` is the
+   immutable open-time snapshot. If the fresh sensor extent, any ROI increment,
+   or the selected exposure feature (`ExposureTime` versus `ExposureTimeAbs`)
+   differs from it, the request is rejected as `unsupported` ("… changed from
+   … at open to …; close and reopen the device; nothing was written"). Obsolete
+   facts are never used silently. A reopen publishes the fresh facts.
+3. **Request validity on fresh limits.** The following are treated as final
+   before any write:
+   - the ROI minimum and increment grid, a positive size (zero is rejected
+     even if a native minimum would allow it), and offset + size ≤ sensor;
+   - the frame-rate minimum and maximum;
+   - the exposure minimum and advertised float increments;
+   - the exposure maximum, except in one case: when the plan lengthens the
+     period first. Then the exposure maximum may legitimately rise with that
+     rate write, so it is left to the SDK.
+
+   **Supported coupling that is not prevalidated:** a current ROI maximum that
+   depends on the other feature of its axis (for example `Width.max` =
+   sensor − `OffsetX`). Treating those as final would break the small/far ↔
+   large/near transitions. This profile does not model a rate maximum raised by
+   an earlier write of the same request; such a request is rejected before any
+   write and can be applied in two steps.
+
+Writes go directly to the GenICam nodes in a safe order. On each axis, the
+offset is written first if it fits the current size; otherwise the size is
+written first. The rate is written first when the period lengthens, and the
+exposure first otherwise. Unchanged integers are not rewritten. Aravis range
+and access checking stay enabled for constraints that change **after**
+prevalidation, and for the coupled maxima above. After the writes, the complete
+actual configuration is read back.
 
 If a later write fails, the original SDK error is kept (operation, feature,
 GError domain and code). The adapter appends the earlier successful writes,
@@ -230,10 +311,32 @@ claimed. GError translation: GenICam out-of-range or unknown enum entry →
 controller → `busy`; anything else → `io_error`.
 
 The partial-write test lowers the Fake's `ExposureTimeAbs` maximum through the
-real SDK (`arv_gc_float_impose_max`). It does this from a private hook
-immediately before that write, which models a dynamic native constraint. The
-SDK itself then rejects the write. This is an arranged SDK constraint change,
-not a physical camera fault. Prevalidation is not weakened to force it.
+real SDK (`arv_gc_float_impose_max`). It does this from a private hook only
+**after** prevalidation, immediately before that write, which models a native
+constraint changing mid-transaction. The SDK itself then rejects the write.
+This is an arranged SDK constraint change, not a physical camera fault.
+Prevalidation is not weakened to force it. Once the reduced maximum is visible
+in a fresh snapshot, a retry that violates it fails in prevalidation with zero
+further write attempts.
+
+## Optional features: absence versus query failure
+
+`TriggerSelector`, `TriggerMode`, `ExposureAuto`, `AcquisitionFrameRateEnable`
+and `ExposureTime` are optional. So are the identity strings shown by
+`inspect`. The adapter distinguishes three outcomes of
+`arv_gc_feature_node_is_implemented()` (R1):
+
+| Outcome | Treatment |
+| --- | --- |
+| No node, or the SDK **successfully** reports "not implemented" | Supported optional absence |
+| Implemented | Read through the SDK; a node of an unsuitable type is an explicit `unsupported` diagnostic (for example "'ExposureAuto' is not an enumeration or string") |
+| The query returns a `GError` | Error: "Aravis query implementation of optional feature 'X': <SDK message> [domain code]" |
+
+A failed query never becomes an empty optional. It never lets a profile check
+(for example `TriggerMode`) be skipped, and never falls back from
+`ExposureTime` to `ExposureTimeAbs`. A failed open still retires the native
+object and releases the ownership reservation. `inspect` reports a failed
+identity query as a problem instead of omitting the feature.
 
 ## Private MEL embedding evidence
 

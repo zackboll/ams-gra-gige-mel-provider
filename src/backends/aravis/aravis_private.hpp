@@ -23,9 +23,13 @@ struct InterfaceSource {
 };
 
 // Narrow observation/arrangement points at the native-call boundary. They do
-// not replace any SDK feature read or write. Each runs with the adapter's
-// relevant lock held and must not call back into the adapter.
+// not replace any SDK feature read or write. Unless stated otherwise, each runs
+// with the adapter's relevant lock held and must not call back into the adapter.
 struct TestHooks {
+    // Exact-ID open only: called when a real try_lock of the per-interface lock
+    // failed because another thread holds it, immediately before this thread
+    // blocks on that lock. Runs with NO adapter lock held. Observation only.
+    std::function<void(std::string_view device_id)> interface_lock_contended;
     // After the ownership reservation, before the native open. May throw to
     // exercise exception-safe reservation release.
     std::function<void(std::string_view device_id)> after_reservation;

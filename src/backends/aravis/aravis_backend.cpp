@@ -154,14 +154,23 @@ Result<ArvGcFeatureNode*> feature_node(ArvDevice* device, std::string_view name,
     return feature_node;
 }
 
-// Optional features: absent or unimplemented is std::nullopt, not an error.
-bool present(ArvDevice* device, std::string_view name) {
+// Optional features. Three distinct outcomes:
+//   - Result value false: confirmed absent (no node) or the SDK successfully
+//     reported "not implemented". Supported optional absence.
+//   - Result value true: present and implemented.
+//   - Result error: the implementation query itself failed (translated GError
+//     with feature and operation context), or a node exists under the name
+//     but is not a GenICam feature node. Never converted into absence.
+Result<bool> present(ArvDevice* device, std::string_view name) {
     const std::string feature(name);
     ArvGcNode* node = arv_device_get_feature(device, feature.c_str());
-    if (!node || !ARV_IS_GC_FEATURE_NODE(node)) return false;
+    if (!node) return false;
+    if (!ARV_IS_GC_FEATURE_NODE(node))
+        return fail(ErrorCode::unsupported, "optional feature '" + feature + "' exists but is not a GenICam feature node");
     ErrorSlot error;
     const bool implemented = arv_gc_feature_node_is_implemented(ARV_GC_FEATURE_NODE(node), error.out());
-    return implemented && !error.failed();
+    if (error.failed()) return translate("query implementation of optional feature", feature, *error.take());
+    return implemented;
 }
 
 Result<std::int64_t> read_integer(ArvDevice* device, std::string_view name, bool writable) {
@@ -227,15 +236,36 @@ Result<std::string> read_string(ArvDevice* device, std::string_view name) {
 }
 
 Result<std::optional<std::string>> read_optional_string(ArvDevice* device, std::string_view name) {
-    if (!present(device, name)) return std::optional<std::string>{};
-    auto value = read_string(device, name);
+    const auto exists = present(device, name);
+    if (!exists) return exists.error(); // a failed query is not absence
+    if (!exists.value()) return std::optional<std::string>{};
+    auto value = read_string(device, name); // wrong node type: explicit diagnostic
     if (!value) return value.error();
     return std::optional<std::string>{std::move(value).value()};
 }
 
+Result<std::optional<bool>> read_optional_boolean(ArvDevice* device, std::string_view name) {
+    const auto exists = present(device, name);
+    if (!exists) return exists.error();
+    if (!exists.value()) return std::optional<bool>{};
+    const auto node = feature_node(device, name, false);
+    if (!node) return node.error();
+    if (!ARV_IS_GC_BOOLEAN(node.value()))
+        return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not a Boolean feature");
+    ErrorSlot error;
+    const bool value = arv_gc_boolean_get_value(ARV_GC_BOOLEAN(node.value()), error.out());
+    if (error.failed()) return translate("read", name, *error.take());
+    return std::optional<bool>{value};
+}
+
+// The first IMPLEMENTED name wins. A failed implementation query stops the
+// selection with that error: it never falls through to the next name.
 Result<std::string> exposure_feature_name(ArvDevice* device) {
-    for (const auto name : profile::exposure_features)
-        if (present(device, name)) return std::string(name);
+    for (const auto name : profile::exposure_features) {
+        const auto exists = present(device, name);
+        if (!exists) return exists.error();
+        if (exists.value()) return std::string(name);
+    }
     return fail(ErrorCode::unsupported, "neither ExposureTime nor ExposureTimeAbs is implemented");
 }
 
@@ -281,12 +311,9 @@ Result<profile::NativeSnapshot> read_snapshot(ArvDevice* device) {
         if (!value) return value.error();
         *target = std::move(value).value();
     }
-    if (present(device, "AcquisitionFrameRateEnable")) {
-        ErrorSlot error;
-        const bool enabled = arv_device_get_boolean_feature_value(device, "AcquisitionFrameRateEnable", error.out());
-        if (error.failed()) return translate("read", "AcquisitionFrameRateEnable", *error.take());
-        n.frame_rate_enable = enabled;
-    }
+    auto enable = read_optional_boolean(device, "AcquisitionFrameRateEnable");
+    if (!enable) return enable.error();
+    n.frame_rate_enable = enable.value();
     return n;
 }
 
@@ -474,7 +501,13 @@ public:
     Result<NativeOpen> open_native(std::string_view device_id) {
         if (device_id.empty()) return fail(ErrorCode::invalid_argument, "an explicit, nonempty Aravis device ID is required");
         const std::string id(device_id);
-        std::lock_guard lock(interface_mutex(source_.name));
+        // Same blocking acquisition as a lock_guard; the try_lock only lets a
+        // private test observe genuine contention at this boundary.
+        std::unique_lock lock(interface_mutex(source_.name), std::try_to_lock);
+        if (!lock.owns_lock()) {
+            if (hooks_->interface_lock_contended) hooks_->interface_lock_contended(id);
+            lock.lock();
+        }
         auto iface = interface_locked();
         if (!iface) return iface.error();
         // Exact selection: the ID must equal a discovered device ID. Aravis's
@@ -570,9 +603,14 @@ Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id) 
     ArvDevice* device = native.value().device.get();
     // Identity strings (read-only features; absence is reported, not fatal).
     for (const char* name : {"DeviceVendorName", "DeviceModelName", "DeviceSerialNumber", "DeviceID", "DeviceVersion"}) {
-        if (!present(device, name)) continue;
-        auto value = read_string(device, name);
-        result.native.emplace_back(name, value ? value.value() : "<error: " + value.error().message + ">");
+        auto value = read_optional_string(device, name);
+        if (!value) {
+            // A failed query is reported, not shown as absence.
+            result.native.emplace_back(name, "<error: " + value.error().message + ">");
+            result.problems.push_back(value.error().message);
+        } else if (value.value()) {
+            result.native.emplace_back(name, *value.value());
+        }
     }
     auto snapshot = read_snapshot(device);
     if (!snapshot) {

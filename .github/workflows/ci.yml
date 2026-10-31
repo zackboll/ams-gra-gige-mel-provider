@@ -58,16 +58,21 @@ jobs:
         run: cmake --build "build/aravis-${{ matrix.preset }}" --parallel 2
       - name: Test with the real Aravis SDK and its in-process Fake device
         run: ctest --test-dir "build/aravis-${{ matrix.preset }}" --output-on-failure
+      # Checked verifier (GIGE-MEL-008-R1): every violation AND every failure to
+      # run a check (ldd/nm/read/traversal) is fatal, and the consumer build
+      # cannot mask an earlier failure. The previous negated pipelines did not
+      # fail the step; see docs/aravis-integration.md.
       - name: Verify loaded SDK and that the package stays Aravis-free
         run: |
-          ldd "build/aravis-${{ matrix.preset }}/aravis_adapter_tests" | grep "$RUNNER_TEMP/aravis-0.8.36/lib/libaravis-0.8.so.0"
-          ! ldd "build/aravis-${{ matrix.preset }}/libgige_mel_provider.so" | grep -E 'aravis|glib|gobject'
+          set -euo pipefail
           cmake --install "build/aravis-${{ matrix.preset }}" --prefix "$RUNNER_TEMP/gige-mel-aravis-install"
-          ! grep -rIl -i aravis "$RUNNER_TEMP/gige-mel-aravis-install/lib" "$RUNNER_TEMP/gige-mel-aravis-install/include"
-          ! find "$RUNNER_TEMP/gige-mel-aravis-install" -iname '*aravis*' -not -path '*/doc/*' | grep .
-          env -u PKG_CONFIG_PATH cmake -S tests/install_consumer -B build/install-consumer-aravis -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-aravis-install"
-          cmake --build build/install-consumer-aravis
-          build/install-consumer-aravis/installed_consumer
+          python3 scripts/verify_package_isolation.py \
+            --adapter-test "build/aravis-${{ matrix.preset }}/aravis_adapter_tests" \
+            --expected-sdk-library "$RUNNER_TEMP/aravis-0.8.36/lib/libaravis-0.8.so.0" \
+            --provider "build/aravis-${{ matrix.preset }}/libgige_mel_provider.so" \
+            --prefix "$RUNNER_TEMP/gige-mel-aravis-install" \
+            --consumer-source tests/install_consumer \
+            --consumer-build build/install-consumer-aravis
 
   sanitizers:
     runs-on: ubuntu-24.04

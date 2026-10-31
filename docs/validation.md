@@ -1,5 +1,230 @@
 # Bootstrap validation record
 
+## GIGE-MEL-008-R1 review corrections (2026-10-31)
+
+This is an ordinary corrective commit on
+`feature/gige-mel-008-aravis-control` (PR #8). The starting revision was the
+reviewed head, which had not advanced: commit
+`315a0ed559b6b245e1ddc2b7697f65a2a0439d22`, tree
+`5687099e0524e1abfe8714f4a8ff2f69f9cb43fc`. Main was unchanged at
+`039de755644ad2b15dd5827878ae71c028218e8f` (tree
+`01476757e59fec54f66de1f3fa0820f0429b7375`). The environment and the
+provisioned Aravis 0.8.36 prefix are the same as in the GIGE-MEL-008 record
+below. The SDK, GLib and libxml2 remain **uninstrumented**; the sanitizers
+cover only the project's adapter, tests and provider.
+
+### Corrections
+
+- **A. Native facts are validated before arithmetic.** `check_limits` and
+  `check_current` run on every snapshot inside `capabilities_from` and
+  `plan_writes`; no caller is trusted. They cover:
+  - sensor extent;
+  - ROI increments, minimum ≤ maximum, and supported grid origins;
+  - scalar bounds and increments;
+  - current ROI geometry.
+
+  ROI comparisons are written so that they cannot overflow
+  (`offset ≤ sensor − size` instead of `offset + size ≤ sensor`). A zero
+  requested size is rejected even if a native minimum would permit it.
+  Structural safety is kept separate from truthful readback: `configuration_from`
+  is **not** required before `apply()`, and current values need not lie inside
+  newly reported bounds.
+- **B. Fresh constraints in prevalidation.** `plan_writes` takes every limit
+  from the fresh snapshot. The open-time envelope, which backs the immutable
+  published capabilities, is used only to detect a changed sensor extent, ROI
+  increment or selected exposure feature. Such a change is rejected as
+  `unsupported` ("reopen") before any write. The following are final before
+  writes:
+  - the fresh rate bounds;
+  - the exposure minimum and float increments;
+  - the exposure maximum, except when the period lengthens first.
+
+  Coupled ROI maxima stay with the SDK range check, which remains enabled.
+  See `docs/aravis-integration.md` for the full policy.
+- **C. Optional-feature query errors.** `present()` returns `Result<bool>`:
+  - absent or successfully unimplemented → `false`;
+  - implemented → `true`;
+  - `GError` → a translated error with feature and operation context.
+
+  All callers were audited:
+  - optional strings;
+  - the optional Boolean `AcquisitionFrameRateEnable`, now read through its
+    feature node;
+  - exposure selection, which no longer falls back after a failed query;
+  - `inspect` identity strings, which report a failure as a problem.
+
+  A node of the wrong type is an explicit diagnostic.
+- **D. Package isolation is enforced.** The reviewed step used negated
+  pipelines, which bash exempts from `errexit`. **The earlier green isolation
+  steps, including the GIGE-MEL-008 hosted runs, therefore did not enforce the
+  negative checks and are not isolation evidence.** The step now runs
+  `scripts/verify_package_isolation.py`. Violations and check-execution
+  failures are both fatal, and the consumer build cannot mask them. The
+  filename scan examines only descendants of the prefix.
+- **E1. Concurrent open.** The reviewed test released the first opener right
+  after submitting the competitor, so it never demonstrated contention. The
+  test now waits, with a bound, for a private hook to report that the
+  competitor's real `try_lock` of the interface lock **failed** while the
+  first opener was still gated inside `open()`. Only then does it release the
+  first opener. `open()` now calls `try_lock` and then `lock()` on the same
+  mutex; the hook is unset in production.
+- **E2. Tolerance wording.** Comments and docs now state the formula
+  `|v − n| ≤ 4·DBL_EPSILON·max(1, |n|)` and call it a relative epsilon
+  tolerance. The numerical policy is unchanged. The "4-ULP" wording in the
+  historical record below is left as written.
+
+### Before/after controls (A, B, C)
+
+All controls used the same provisioned SDK,
+`/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`, confirmed both by `ldd` and
+by the path the test binary prints. The setup was:
+
+- The **reviewed production code** was extracted with `git archive 315a0ed`
+  into `/tmp/gm8/r1/ctl-abc`.
+- Every production file (`src/backends/aravis/*`, `cmake/GigeMelAravis.cmake`,
+  `CMakeLists.txt`) was compared byte for byte with 315a0ed and was identical.
+- The build used `GIGE_MEL_SANITIZERS=address,undefined`. The adapter is
+  linked from that build's own static `libgige_mel_aravis.a`.
+- Only `tests/aravis_adapter_tests.cpp` was replaced, by the corrected tests.
+  Its concurrency scenario was compiled out, because the reviewed `TestHooks`
+  has no lock hook; E1 has its own control below.
+
+Run with `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` and
+`UBSAN_OPTIONS=halt_on_error=1`:
+
+| Finding | Scenario | Reviewed production | Corrected |
+| --- | --- | --- | --- |
+| A | INT64_MIN `Width` minimum (snapshot) | UBSan halt: `camera_profile.cpp:70:42: signed integer overflow: 640 - -9223372036854775808` | `unsupported`: "Width advertises minimum -9223372036854775808 …" |
+| A | INT64_MAX current `Width`, offset 16 (separate process) | UBSan halt: `camera_profile.cpp:245:26: signed integer overflow: 16 + 9223372036854775807` | `unsupported`: "Width reads back 9223372036854775807 …" |
+| A | INT64_MIN `Width` minimum imposed through the SDK | attempted OffsetX, Width, OffsetY, Height, ExposureTimeAbs, AcquisitionFrameRate | rejected, zero attempts, configuration unchanged |
+| B | Fresh exposure max 500 µs, current 400 µs, rate 25 Hz, request 1 ms + new ROI | attempted OffsetX, Width, OffsetY, Height, ExposureTimeAbs before the SDK rejected the exposure | `invalid_argument` "ExposureTimeAbs 1000 us is outside the native bounds [10, 500]", zero attempts |
+| B | Fresh `Width` grid 8 + k·8 (current 512), opened as 1 + k·1, request 641 | accepted on the old grid; attempted Width, ExposureTimeAbs, AcquisitionFrameRate | `unsupported` "Width increment changed from 1 at open to 8 … reopen", zero attempts |
+| B | Late-failure retry after the reduced maximum is visible | attempted ExposureTimeAbs again | zero attempts (collector cleared before the retry) |
+| C | TriggerMode = On with a failing implementation query (SDK GError "Port not found") | open **succeeded**: the error became absence and the trigger check was skipped | open fails: "query implementation of optional feature 'TriggerMode': [TriggerMode] [GigeMelTestBrokenImplementedForTriggerMode] Port not found for node …"; no writes; native object retired; a later clean open succeeds |
+| C | Failing `AcquisitionFrameRateEnable` query on an open device | `configuration()` succeeded | explicit error |
+| C | Failing `ExposureTime` query | silently selected `ExposureTimeAbs` | explicit error, no fallback |
+
+The two UBSan cases ran in a separate harness,
+`/tmp/gm8/r1/ubsan_controls.cpp`, with one process per case. It was linked
+against `camera_profile.cpp` compiled from either revision:
+
+- reviewed: SHA-256 prefix `bb2d9312c4dc7443`, equal to the 315a0ed blob;
+- corrected: prefix `e2d19fb020e380c5`.
+
+The expected-failing controls are kept out of the passing suite.
+
+### Before/after controls (E1, D)
+
+**E1.** The reviewed production code was built with **one** additive
+private-header line: a `TestHooks::interface_lock_contended` declaration that
+the reviewed `open_native` never calls. `aravis_backend.cpp` was
+byte-identical to 315a0ed. Against that build, the corrected concurrency test
+failed at its bounded 5 s wait for observed contention ("FAIL concurrent open
+across adapters: … wait_for(…, 5s, …)"), so it cannot pass without evidence at
+the locking boundary. With the correction it passed 10/10 bounded repeats in
+the development build, plus the sanitizer runs.
+
+**D.** These controls exercised the committed verifier and the exact workflow
+step bodies extracted from the reviewed (315a0ed) and corrected `ci.yml`. They
+ran under `bash --noprofile --norc -eo pipefail`, as GitHub Actions does.
+Violations were arranged with PATH stubs (`ldd`, a `cmake --install` wrapper)
+or in temporary copies of the real install. They are **controls**, not
+findings about the real package. The only change to the step text was mapping
+the SDK-location string to the local prefix.
+
+| Case | Reviewed step | Corrected step / verifier |
+| --- | --- | --- |
+| Clean install (prefix `…/gige-mel-aravis-install`) | exit 0 | exit 0 |
+| Forbidden provider dependency (`libglib-2.0.so.0` added to the provider's `ldd`) | violation printed, **exit 0** | exit 1: `provider-deps … depends on forbidden SDK libraries` |
+| Installed text reference (`#include <arv.h> // aravis` in `backend.hpp`) | violation printed, **exit 0** | exit 1: `installed-text include/gige_mel/backend.hpp:226 references 'arv.h'` |
+| Installed child filename (`include/gige_mel/aravis_backend.hpp`) | violation printed, **exit 0** | exit 1: `installed-names … mentions Aravis` |
+| Package metadata `find_dependency(Aravis)` (verifier) | — | exit 1: `installed-text … GigeMelProviderConfig.cmake:32` |
+| Child filename under a prefix inside an `aravis-root/` directory | — | exit 1, for the child only |
+| `ldd` fails (stub exits 1) | — | exit 1: both `ldd` checks report the command failure |
+| Unreadable installed header (`chmod 000`) | — | exit 1: `cannot read include/gige_mel/provider.hpp` |
+| Untraversable installed directory | — | exit 1: `cannot traverse …/include/mel` |
+
+In every corrected failing case the consumer step still ran, and it still
+succeeded wherever the package allowed it; the overall exit status stayed
+nonzero.
+
+### Local results after correction
+
+These results come from the final corrective tree, run in the existing preset
+build trees with the same provisioned SDK:
+
+| Configuration | CTest | Provider | Backend | Portability | Aravis adapter | MEL probe | Diagnostic `--help` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GCC dev, SDK-free | **7/7** | 74/74 | 8/8 | 12 + 2 | — | — | — |
+| GCC Release, SDK-free | **7/7** | pass | pass | pass | — | — | — |
+| ASan/UBSan, SDK-free | **7/7** | pass | pass | pass | — | — | — |
+| TSan, SDK-free | **7/7** | pass | pass | pass | — | — | — |
+| Clang 19 dev, SDK-free (`clang++-19`) | **7/7** | pass | pass | pass | — | — | — |
+| GCC dev + Aravis | **10/10** | 74/74 | 8/8 | 12 + 2 | **18/18** | pass | pass |
+| GCC Release + Aravis | **10/10** | pass | pass | pass | 18/18 | pass | pass |
+| ASan/UBSan + Aravis (`detect_leaks=1:halt_on_error=1`) | **10/10** | pass | pass | pass | 18/18 | pass | pass |
+| TSan + Aravis (`halt_on_error=1`) | **10/10** | pass | pass | pass | 18/18 | pass | pass |
+| Clang 19 dev + Aravis (`clang++-19`) | **10/10** | pass | pass | pass | 18/18 | pass | pass |
+
+The adapter suite grows from 10 to **18** scenarios. All 10 earlier scenarios
+are retained; the changed ones are the profile fixtures, the concurrency test
+and the late-failure retry. The 8 new scenarios are:
+
+- native fact validation;
+- fresh profile constraints;
+- the fresh SDK exposure limit;
+- the fresh SDK `Width` grid;
+- unsafe SDK ROI facts;
+- optional string, optional Boolean, and exposure-selection query errors.
+
+`ldd` shows `libasan.so.8` + `libubsan.so.1`, and `libtsan.so.2`, in the
+respective adapter binaries, plus the provisioned `libaravis-0.8.so.0`. No
+sanitizer report occurred. The changed concurrency scenario passed 10 bounded
+repeats in the development build and 5 each under ASan and TSan.
+
+Other checks:
+
+- **Offline verifiers:** both pass (97 MEL files; 2 JSON files).
+- **Synthetic capture:** a 64×48 PGM was captured.
+- **Diagnostic:** `gige_mel_aravis_diagnostic --help` exits 0.
+- **Whitespace:** `git diff --check` passes on the corrective range and on
+  the full PR range from main.
+- **Real package isolation:** `scripts/verify_package_isolation.py` passes on
+  the real installs from the dev, Release and Clang SDK-enabled builds, each
+  under a prefix named `gige-mel-aravis-install`. This covers all checks:
+  adapter SDK provenance, provider dependencies, 157 installed paths,
+  97 non-documentation text files, 2 installed binaries, and a consumer
+  configured without `PKG_CONFIG_PATH`. These are the configurations CI
+  checks.
+- **Sanitizer-build installs:** the five package checks also pass, but the
+  verifier correctly fails the consumer step. An uninstrumented consumer
+  cannot load an ASan/TSan-instrumented provider ("ASan runtime does not come
+  first" / TSan deadly signal). This is expected, and is why CI runs the step
+  only in the non-sanitizer jobs.
+- **Install file sets:** the default install and the separately configured
+  consumer pass. The SDK-free and SDK-enabled installs have identical
+  non-documentation file sets.
+- **SDK absence:** with `PATH=/usr/bin:/bin` and an empty `PKG_CONFIG_PATH`,
+  the default configuration succeeds with no SDK lookups in its cache.
+  `-DGIGE_MEL_BUILD_ARAVIS=ON` fails with "requires exactly Aravis 0.8.36",
+  and a `.pc` file declaring 0.8.33 fails with "found aravis-0.8 0.8.33, which
+  is not qualified". The build logic was not changed.
+
+### Remaining limitations
+
+Everything here is software evidence against the real Aravis 0.8.36 library
+and its in-process Fake device:
+
+- The malformed native values in A are either native-snapshot/profile
+  regressions or values imposed through the SDK's own property nodes. No
+  physical camera produced them.
+- The query failures in C are genuine SDK `GError`s from GenICam nodes added
+  through Aravis's public DOM API.
+- The SDK is not sanitizer-instrumented.
+
+Image acquisition, clock mapping, physical-camera qualification and a second
+real SDK remain future work. The two deferred PR #3 notes remain separate.
+
 ## GIGE-MEL-008 optional Aravis camera-control foundation (2026-10-30)
 
 Branch `feature/gige-mel-008-aravis-control` was created from freshly fetched

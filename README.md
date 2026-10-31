@@ -136,6 +136,7 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `third_party/` | Exact, minimal upstream header closure, notices, and checksum manifest |
 | `scripts/vendor_upstream.py` | Offline integrity check; explicit restoration of locked files |
 | `scripts/provision_aravis.sh` | Explicit, checksum-verified Aravis 0.8.36 provisioning (never run by CMake) |
+| `scripts/verify_package_isolation.py` | Checked CI verifier that the optional Aravis build leaves the provider and installed package Aravis-free |
 | `docs/` | Implementation profile, architecture, exhaustive MEL roadmap, backend guide, and decisions |
 | `.github/workflows/ci.yml` | GCC/Clang, debug/release, native loading, package consumer, and sanitizer jobs |
 

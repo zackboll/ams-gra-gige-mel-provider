@@ -61,10 +61,12 @@ struct NativeSnapshot {
     std::optional<bool> frame_rate_enable;
 };
 
-// Checked numeric conversion. Policy: a native value converts only when it is
-// finite, in range, and within 4 ULP (relative) of an integer in the target
-// unit. That tolerance covers the representation error of a correctly rounded
-// double only: a real fractional rate (e.g. 30.000300003 Hz) or sub-nanosecond
+// Checked numeric conversion. Policy: a native value v converts to the integer
+// n in the target unit only when it is finite, in range, and
+//     |v - n| <= 4 * DBL_EPSILON * max(1, |n|)
+// (a relative epsilon tolerance; not a count of adjacent representable
+// doubles). That covers the representation error of a correctly rounded double
+// only: a real fractional rate (e.g. 30.000300003 Hz) or sub-nanosecond
 // exposure fails with ErrorCode::unsupported naming the feature and value.
 // Non-finite or negative native values are ErrorCode::io_error (native fault).
 Result<std::uint32_t> frame_rate_from_native(double hz, std::string_view feature = frame_rate_feature);
@@ -76,6 +78,24 @@ Result<double> exposure_to_native(std::chrono::nanoseconds exposure);
 
 // Required stopped/manual preconditions. Never normalized by the adapter.
 Status check_preconditions(const NativeSnapshot& native);
+// Structural invariants of the native LIMITS that this profile consumes in
+// arithmetic, checked on every snapshot before use (no caller is trusted to
+// have validated it): sensor extent 1..UINT32_MAX; for each ROI feature an
+// increment 1..UINT32_MAX, minimum <= maximum, a grid origin (minimum) that is
+// a multiple of the increment and lies in [0, sensor] (sizes) or
+// [0, sensor - 1] (offsets); finite, nonnegative, ordered rate and exposure
+// bounds; and any advertised scalar increment finite and positive. Violations
+// are ErrorCode::unsupported naming the feature and value; nothing is clamped
+// or fabricated. Current values are deliberately NOT required to lie inside
+// the reported bounds (truthful readback and explicit recovery need that).
+Status check_limits(const NativeSnapshot& native);
+// Current-value facts needed to plan safe intermediate writes: current ROI
+// size in [1, sensor] and offset in [0, sensor - size] per axis
+// (ErrorCode::unsupported), and finite, nonnegative current rate/exposure
+// (ErrorCode::io_error). Current values need not be on the native grid or
+// inside the reported bounds, and need not be representable by the
+// project contract (a fractional current rate still permits recovery).
+Status check_current(const NativeSnapshot& native);
 // Validated capability envelope; fails rather than fabricating values.
 Result<CameraCapabilities> capabilities_from(const NativeSnapshot& native);
 // Truthful current configuration, or an explicit representation error.
@@ -89,12 +109,28 @@ struct NativeWrite {
 };
 
 // Validates the complete request before any write and returns an ordered plan.
-// Prevalidation uses the open-time `envelope` (sensor geometry, minimum and
-// increment grids, advertised scalar rate/exposure bounds) and the coupled
-// limit offset + size <= sensor. Dynamic or coupled native maxima (which may
-// depend on other features) are revalidated by the SDK at each write: the
-// adapter enables Aravis range checking on its own device. `current` supplies
-// present values (ordering, unchanged values) and the preconditions.
+//
+// `current` is the FRESH native snapshot read by this apply(); every limit
+// used for prevalidation comes from it, after check_preconditions,
+// check_limits and check_current. `envelope` is the open-time snapshot behind
+// the published, immutable CameraCapabilities; it is used only to detect an
+// incompatible profile change. If the sensor extent, any ROI increment or the
+// selected exposure feature differs from it, the request is rejected
+// (ErrorCode::unsupported, "reopen") before any write instead of silently
+// using obsolete facts or publishing stale capabilities.
+//
+// Fresh limits treated as final before writes: the ROI minimum/increment grid,
+// a positive requested size, the sensor extent and offset + size <= sensor;
+// the frame-rate minimum and maximum; the exposure minimum and increment;
+// advertised scalar increments; and the exposure maximum whenever the exposure
+// is written before the rate. Supported coupling that is NOT prevalidated: a
+// current ROI maximum may depend on the other ROI feature of its axis, and the
+// exposure maximum may depend on the frame period when the plan lengthens the
+// period first. Those are enforced by the SDK at each write (the adapter
+// enables Aravis range checking on its own device). This profile does not
+// model a rate maximum raised by an earlier write in the same request; such a
+// request is rejected before writes and can be applied in two steps.
+//
 // ROI order per axis: offset first when it fits the current size, otherwise
 // size first, so every intermediate ROI stays inside the sensor. Timing order:
 // rate first when the period lengthens, exposure first otherwise. Unchanged
