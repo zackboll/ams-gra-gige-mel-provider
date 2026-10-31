@@ -1,5 +1,146 @@
 # Bootstrap validation record
 
+## GIGE-MEL-009 Aravis Mono8 source acquisition (2026-11-01)
+
+**Starting point.** Branch `feature/gige-mel-009-aravis-stream` was created
+from freshly fetched `origin/main`. Main had not advanced since task
+preparation:
+
+- commit `ae8de93c6749378e7b4254935bd3ce7cf08cbe06`, tree
+  `9d6fd135bd96037f5e6cd7404c3ee5b39549ac58`;
+- the merge of PR #8, whose second parent is the reviewed R4 head
+  `e725461b…`.
+
+The local worktree was clean.
+
+**Scope.** The change covers the adapter (`src/backends/aravis/`, including the
+new `aravis_capture.cpp`), the diagnostic, the Aravis CMake fragment, the
+Aravis tests (new `tests/aravis_stream_contract.cpp` and
+`tests/support/tsan_uninstrumented_sdk.cpp`), and documentation. The
+following are unchanged:
+
+- `include/gige_mel/*`, `src/provider.cpp` and its timestamp admission;
+- factories and `getAPI_Manager()`;
+- the MEL/JSON pins and manifests;
+- provisioning, the default-OFF option, the workflow and its five lanes,
+  presets and sanitizer options;
+- the verifier and its 29 tests.
+
+The design and the evidence are described in
+[Source acquisition (GIGE-MEL-009)](aravis-integration.md#source-acquisition-gige-mel-009).
+
+**Environment and SDK.** The environment is the same as in the GIGE-MEL-008
+record below: Linux 6.12, GCC 14.2.0, Clang 19.1.7, CMake 3.31.6 and Ninja.
+The SDK is Aravis **0.8.36**, built from release commit
+`97ff5e330919d7a44b871df4eda669feeafdf342` (archive SHA-256 `246deaa0…51bf`,
+re-verified) into `/tmp/gm8/aravis-prefix`, without sanitizer
+instrumentation. Every test binary printed, and `ldd` confirmed, the loaded
+library `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`, runtime and compiled
+version 0.8.36. No camera or network discovery was used.
+
+| Configuration | CTest | Provider | Backend | Portability | `aravis_adapter` | `aravis_stream_contract` | MEL probe |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GCC dev, SDK-free | **8/8** | 74/74 | 8/8 | 12 + 2 | — | — | — |
+| GCC Release, SDK-free | **8/8** | pass | pass | pass | — | — | — |
+| ASan/UBSan, SDK-free | **8/8** | pass | pass | pass | — | — | — |
+| TSan, SDK-free | **8/8** | pass | pass | pass | — | — | — |
+| Clang 19, SDK-free | **8/8** | pass | pass | pass | — | — | — |
+| GCC dev + Aravis | **12/12** | 74/74 | 8/8 | 12 + 2 | 21/21 | 11/11 | pass |
+| GCC Release + Aravis | **12/12** | pass | pass | pass | 21/21 | 11/11 | pass |
+| Clang 19 + Aravis | **12/12** | pass | pass | pass | 21/21 | 11/11 | pass |
+| ASan/UBSan + Aravis (`detect_leaks=1:halt_on_error=1`) | **12/12** | pass | pass | pass | 21/21 | 11/11 | pass |
+| TSan + Aravis (`halt_on_error=1`) | **12/12** | pass | pass | pass | 21/21 | 11/11 | pass |
+
+The SDK-enabled build adds exactly one new CTest entry,
+`aravis_stream_contract`, making 12 instead of 11. The SDK-free count stays at
+8. `ldd` showed `libasan.so.8` and `libubsan.so.1`, and `libtsan.so.2`, in the
+respective test binaries.
+
+**Repetitions.** The new concurrency scenarios were repeated a small bounded
+number of times:
+
+- In development, scenario D, cancellation via request_stop/stop/close, runs
+  three times per execution.
+- Under TSan, the whole contract ran 3 times and the embedding probe 3 times.
+- Under ASan/UBSan, the contract ran 3 times.
+
+All runs passed.
+
+**TSan and the uninstrumented SDK.** The first TSan runs reported only races
+inside GLib/Aravis queue internals: `g_queue_pop_tail` (546 matches) and
+`arv_buffer_set_n_parts` (77 matches). The system GLib's `g_mutex_lock`
+disassembles to an inline `lock cmpxchg` futex, which TSan cannot observe. The
+two SDK-driving test executables therefore embed
+`__tsan_default_suppressions()` for exactly those two functions. `TSAN_OPTIONS`,
+presets and lanes were not changed, and project code stays fully checked. A
+broader `called_from_lib` variant was tried and rejected, because it caused a
+spurious GObject lock-order report in the provider probe. Project sanitizer
+coverage is **not** instrumented SDK coverage.
+
+### Starting-main negative control
+
+One minimal probe, `/tmp/gm9/control/negative_control_probe.cpp`, was used for
+both revisions and never committed. It uses the private Fake backend, applies
+and reads back `64x48@(8,4) 100 Hz 10 ms`, then requires a validated real SDK
+frame.
+
+Each revision was built in its own tree with its **own** private headers and
+static archives. The unchanged starting main used a detached disposable
+worktree `/tmp/gm9/wt-base` at `ae8de93`, with 0 changes. The feature used the
+working tree. Neither probe loads any `gige_mel` shared object. `ldd` resolves
+only the SDK DSO.
+
+| | Starting main `ae8de93` | Feature |
+| --- | --- | --- |
+| `libgige_mel_aravis.a` members | `aravis_backend.cpp.o camera_profile.cpp.o` | `+ aravis_capture.cpp.o` |
+| archive SHA-256 (prefix) | `a860ae18b60dcbd8` | `36a85bbe0ed3595a` |
+| `aravis_private.hpp` SHA-256 (prefix) | `8924734fbf358b0b` | `35e7a17b329966aa` |
+| `AravisStream::receive` symbol in probe | 0 | 1 |
+| loaded SDK (`ldd`) | `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0` | same |
+| result | **exit 1** after a successful configuration: `create_stream: code 4 (unsupported): Aravis image acquisition is not implemented …` | **exit 0**: `PASS validated real SDK frame 64x48 id 65401` |
+
+The feature expectation therefore fails on starting main for exactly the
+reason under test: streaming is unsupported.
+
+### Other local checks
+
+- **Offline verifiers.** Both pass (97 MEL files, 2 JSON files).
+- **Verifier tests.** 29/29.
+- **Installation.**
+  - `scripts/verify_package_isolation.py` reports "package isolation verified"
+    on real installs from `aravis-dev`, `aravis-release` and `aravis-clang`.
+  - The SDK-free and SDK-enabled installs have identical non-documentation
+    file sets.
+  - The separately configured installed consumer, with `PKG_CONFIG_PATH`
+    unset, passes.
+  - The only installed non-documentation files containing the string "aravis"
+    are two binaries whose debug info records the build directory name
+    `build/aravis-dev`. This matches the GIGE-MEL-008 install, and the verifier
+    checks symbols, not paths.
+- **SDK absence.** With `PATH=/usr/bin:/bin` and an empty `PKG_CONFIG_PATH`,
+  the default configure, build and CTest pass (8/8), with no Aravis or
+  pkg-config cache entries. `-DGIGE_MEL_BUILD_ARAVIS=ON` fails with "requires
+  exactly Aravis 0.8.36 …".
+- **Synthetic capture.** `P5 64 48`.
+- **Diagnostic.** `--help` exits 0. Malformed `capture` arguments exit 2
+  before device I/O.
+- **Direct capture.** The shared routine passed against Fake in scenario J,
+  with the PGM header, 512×512 payload length and every pixel checked
+  independently. The real `capture` command was not run against a GigE camera,
+  because none is available. A disposable copy of the diagnostic, with only the
+  backend swapped to Fake, printed the example output recorded in the Aravis
+  document.
+- **Whitespace.** `git diff --check` is clean over the full feature range.
+
+**Not established.** This change provides no physical camera, GVSP transport,
+camera timing, PTP/UTC, disconnection recovery or performance evidence, no
+successful Aravis MEL Image publication, and no MEL conformance.
+
+> **Superseded current-status statements.** The GIGE-MEL-008 records below
+> say that `create_stream()` returns `unsupported`, that the SDK-enabled CTest
+> total is 10 or 11, and that the SDK-free total is 7 or 8. They are historical
+> results for those revisions and are kept unchanged.
+
 ## GIGE-MEL-008-R4 Python 3.9 compatibility of the verifier tests (2026-11-01)
 
 This is an ordinary corrective commit on the reviewed R3 head, commit

@@ -9,8 +9,9 @@ remains explicitly unsupported; see [the complete inventory](mel-surface-roadmap
 
 The standard factory instance is exactly `synthetic`; unknown names return null. The optional, internal
 Aravis camera-control foundation ([Aravis integration](aravis-integration.md))
-is not a factory selection and does not change this profile: it implements no
-acquisition, and no Aravis MEL profile is supported.
+is not a factory selection and does not change this profile. Its GIGE-MEL-009
+source acquisition returns frames with an invalid `FrameTimestamp{}`, which the
+provider rejects under the rules below; no Aravis MEL profile is supported.
 `getAPI_Manager(instance)` creates an independent manager. `getControl` reuses
 the live Control for that manager; a mismatched instance, foreign manager, or
 null manager is rejected. `getBuffer` creates an uninitialized buffer associated

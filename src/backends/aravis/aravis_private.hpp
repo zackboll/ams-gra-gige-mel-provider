@@ -5,6 +5,7 @@
 // selection lives in tests/support/aravis_fake_support.cpp, not here.
 
 #include "aravis_backend.hpp"
+#include "camera_profile.hpp"
 
 #include <arv.h>
 
@@ -40,6 +41,28 @@ struct TestHooks {
     // dynamic native constraint mid-transaction through the real SDK; the SDK
     // itself then accepts or rejects the write.
     std::function<void(std::string_view feature, ArvDevice*)> before_write;
+
+    // ---- Acquisition (GIGE-MEL-009). Observation/arrangement only.
+    // Immediately before executing AcquisitionStart or AcquisitionStop, after
+    // the adapter's own command validation, with the device lock held. May
+    // change native state through the real SDK (e.g. an imposed access mode)
+    // so that the SDK itself then rejects the command.
+    std::function<void(std::string_view command, ArvDevice*)> before_command;
+    // After the SDK constructed a run's native stream (its receiver thread is
+    // already running), device lock held. E.g. attach a GObject weak reference.
+    std::function<void(ArvStream*)> after_stream_created;
+    // After each pool buffer is allocated, before it is queued; device lock held.
+    std::function<void(ArvBuffer*)> after_buffer_allocated;
+    // On the receiving thread with NO adapter lock held, immediately before
+    // each native timed pop (one polling slice). Observation only.
+    std::function<void()> before_native_wait;
+    // DECODED-FACTS SEAM, on the receiving thread with no adapter lock held:
+    // may edit the facts decoded from a REAL popped SDK buffer before the
+    // production validator sees them (incomplete status, chunks, multipart,
+    // padding, short sizes the pinned Fake cannot produce). It never touches
+    // the SDK buffer, so pixels and ownership stay genuine. Tests that use it
+    // must say so.
+    std::function<void(aravis_profile::NativeFrameFacts&)> decoded_facts;
 };
 
 std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource source, TestHooks hooks = {});

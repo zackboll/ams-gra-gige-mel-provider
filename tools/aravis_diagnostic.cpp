@@ -1,6 +1,7 @@
-// Optional, uninstalled Aravis diagnostic (GIGE-MEL-008). Uses Aravis's GigE
-// Vision interface only. `inspect` never writes a camera feature or starts
-// acquisition; `apply` is a separate explicit command.
+// Optional, uninstalled Aravis diagnostic (GIGE-MEL-008/009). Uses Aravis's
+// GigE Vision interface only (no Fake fallback). `inspect` never writes a
+// camera feature or starts acquisition; `apply` and `capture` are separate
+// explicit commands.
 #include "aravis_backend.hpp"
 
 #include <charconv>
@@ -26,9 +27,13 @@ constexpr const char* usage =
     "  gige_mel_aravis_diagnostic apply DEVICE_ID WIDTH HEIGHT OFFSET_X OFFSET_Y RATE_HZ EXPOSURE_NS\n"
     "      Explicitly apply one complete configuration and print the actual readback.\n"
     "      Requires the documented manual/free-running Mono8 profile; changes nothing else.\n"
+    "  gige_mel_aravis_diagnostic capture DEVICE_ID OUTPUT.pgm\n"
+    "      Open exactly DEVICE_ID, use its current supported configuration (no feature write),\n"
+    "      acquire ONE validated Mono8 frame within 5 s, write a tightly packed binary PGM,\n"
+    "      then stop and close. The frame timestamp is unqualified (not a camera or MEL time).\n"
     "\n"
-    "Internal tool for the experimental Aravis camera-control foundation; acquisition is\n"
-    "not implemented. Exit status: 0 success, 1 failure/unsupported/readback differs, 2 usage.\n";
+    "Internal tool for the experimental Aravis adapter; not a supported MEL image profile.\n"
+    "Exit status: 0 success, 1 failure/unsupported/readback differs/cleanup failure, 2 usage.\n";
 
 const char* code_name(backend::ErrorCode code) {
     using C = backend::ErrorCode;
@@ -116,6 +121,30 @@ int apply(backend::ICameraBackend& camera, const std::vector<std::string_view>& 
     return status;
 }
 
+int capture(backend::ICameraBackend& camera, std::string_view id, const std::string& output) {
+    versions();
+    const auto outcome = aravis::capture_one(camera, id, output, aravis::default_capture_deadline);
+    int status = 0;
+    if (outcome.report) {
+        const auto& r = *outcome.report;
+        std::cout << "Captured device " << r.device_id << ": " << r.width << 'x' << r.height << " Mono8, source row stride "
+                  << r.source_row_stride << " bytes, native frame ID " << r.native_frame_id << ", stream generation "
+                  << r.stream_generation << "\n  timestamp: unqualified (FrameTimestamp invalid; no camera, UTC/PTP or "
+                  << "integration-start claim)\n  configuration:\n";
+        print(r.configuration);
+        std::cout << "  statistics: delivered " << r.statistics.delivered_frames << ", incomplete "
+                  << r.statistics.incomplete_frames << ", timeouts " << r.statistics.timeout_count << ", pool starvation "
+                  << r.statistics.pool_starvation_events << "\n  wrote " << output << " (" << r.pgm_bytes
+                  << " bytes, tightly packed P5)\n";
+    }
+    if (outcome.error) status = report(*outcome.error);
+    if (outcome.cleanup_error) {
+        std::cerr << "cleanup ";
+        status = report(*outcome.cleanup_error);
+    }
+    return outcome.ok() ? 0 : (status ? status : 1);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -135,6 +164,13 @@ int main(int argc, char** argv) {
     }
     if (args[0] == "inspect" && args.size() == 2) return inspect(*camera, args[1]);
     if (args[0] == "apply" && args.size() == 8) return apply(*camera, args);
+    if (args[0] == "capture" && args.size() == 3) {
+        if (args[1].empty() || args[2].empty()) {
+            std::cerr << "capture: DEVICE_ID and OUTPUT.pgm must be non-empty\n" << usage;
+            return 2;
+        }
+        return capture(*camera, args[1], std::string(args[2]));
+    }
     std::cerr << usage;
     return 2;
 }

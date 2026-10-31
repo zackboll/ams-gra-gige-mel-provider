@@ -11,10 +11,17 @@
 
 #include <arv.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <set>
 #include <functional>
 #include <utility>
@@ -343,6 +350,159 @@ std::string describe(const profile::NativeWrite& write) {
 }
 
 // ---------------------------------------------------------------------------
+// Acquisition helpers (GIGE-MEL-009). Callers hold the device lock.
+
+// A command must be a GenICam Command node that is implemented, available
+// and not read-only. Nothing is executed here.
+Result<ArvGcCommand*> command_node(ArvDevice* device, std::string_view name) {
+    const std::string feature(name);
+    ArvGcNode* node = arv_device_get_feature(device, feature.c_str());
+    if (!node || !ARV_IS_GC_COMMAND(node))
+        return fail(ErrorCode::unsupported, "required command '" + feature + "' is not present as a GenICam command");
+    auto* feature_node = ARV_GC_FEATURE_NODE(node);
+    ErrorSlot error;
+    const bool implemented = arv_gc_feature_node_is_implemented(feature_node, error.out());
+    if (error.failed()) return translate("query implementation of", feature, *error.take());
+    const bool available = implemented && arv_gc_feature_node_is_available(feature_node, error.out());
+    if (error.failed()) return translate("query availability of", feature, *error.take());
+    if (!implemented || !available)
+        return fail(ErrorCode::unsupported, "required command '" + feature + "' is not implemented/available");
+    const auto mode = arv_gc_feature_node_get_actual_access_mode(feature_node);
+    if (mode != ARV_GC_ACCESS_MODE_WO && mode != ARV_GC_ACCESS_MODE_RW)
+        return fail(ErrorCode::unsupported, "command '" + feature + "' has access mode " +
+                                                std::to_string(static_cast<int>(mode)) + "; write access is required");
+    return ARV_GC_COMMAND(node);
+}
+
+Status execute_command(ArvDevice* device, std::string_view name, const TestHooks* hooks) {
+    auto node = command_node(device, name);
+    if (!node) return node.error();
+    if (hooks && hooks->before_command) hooks->before_command(name, device);
+    ErrorSlot error;
+    arv_gc_command_execute(node.value(), error.out());
+    if (error.failed()) return translate("execute", name, *error.take());
+    return {};
+}
+
+// Public-accessor decoding of one popped buffer. Image accessors are called
+// only when their documented precondition (successful 2-D image part) holds,
+// so no GLib critical is provoked by an unexpected payload.
+profile::NativeFrameFacts decode(ArvBuffer* buffer, std::size_t capacity) {
+    profile::NativeFrameFacts f;
+    f.capacity_bytes = capacity;
+    f.frame_id = arv_buffer_get_frame_id(buffer);
+    const ArvBufferStatus status = arv_buffer_get_status(buffer);
+    f.raw_status = static_cast<int>(status);
+    switch (status) {
+    case ARV_BUFFER_STATUS_SUCCESS: f.status = profile::NativeStatus::success; break;
+    case ARV_BUFFER_STATUS_TIMEOUT:
+    case ARV_BUFFER_STATUS_MISSING_PACKETS:
+    case ARV_BUFFER_STATUS_WRONG_PACKET_ID:
+    case ARV_BUFFER_STATUS_ABORTED: f.status = profile::NativeStatus::incomplete; break;
+    default: f.status = profile::NativeStatus::other; break; // size mismatch, unsupported, cleared, ...
+    }
+    if (f.status != profile::NativeStatus::success) return f;
+    const ArvBufferPayloadType payload = arv_buffer_get_payload_type(buffer);
+    f.raw_payload = static_cast<int>(payload);
+    f.payload = payload == ARV_BUFFER_PAYLOAD_TYPE_IMAGE ? profile::NativePayload::image
+              : payload == ARV_BUFFER_PAYLOAD_TYPE_MULTIPART ? profile::NativePayload::multipart
+              : (payload == ARV_BUFFER_PAYLOAD_TYPE_CHUNK_DATA || payload == ARV_BUFFER_PAYLOAD_TYPE_EXTENDED_CHUNK_DATA)
+                  ? profile::NativePayload::chunk_or_extended
+                  : profile::NativePayload::other;
+    f.has_chunks = arv_buffer_has_chunks(buffer);
+    f.parts = arv_buffer_get_n_parts(buffer);
+    if (f.payload != profile::NativePayload::image || f.parts < 1) return f;
+    f.part_is_2d_image = arv_buffer_get_part_data_type(buffer, 0) == ARV_BUFFER_PART_DATA_TYPE_2D_IMAGE;
+    if (!f.part_is_2d_image) return f;
+    f.pixel_format = static_cast<std::uint32_t>(arv_buffer_get_image_pixel_format(buffer));
+    gint x = 0, y = 0, w = 0, h = 0, px = 0, py = 0;
+    arv_buffer_get_image_region(buffer, &x, &y, &w, &h);
+    arv_buffer_get_image_padding(buffer, &px, &py);
+    f.offset_x = x; f.offset_y = y; f.width = w; f.height = h; f.padding_x = px; f.padding_y = py;
+    std::size_t received = 0, image = 0;
+    const auto* base = static_cast<const unsigned char*>(arv_buffer_get_data(buffer, &received));
+    const auto* data = static_cast<const unsigned char*>(arv_buffer_get_image_data(buffer, &image));
+    f.received_bytes = received;
+    f.image_bytes = image;
+    if (base && data && data >= base) {
+        f.data_present = true;
+        f.part_offset = static_cast<std::size_t>(data - base);
+    }
+    return f;
+}
+
+// ---------------------------------------------------------------------------
+// Acquisition ownership (GIGE-MEL-009); docs/aravis-integration.md,
+// "Acquisition ownership and retirement", is the normative description.
+//
+// Strong references (no cycles):
+//   AravisDevice ──┐
+//   AravisStream ──┴─> DeviceCore ─> Run (active / most recent) ─> ArvStream ─> ArvDevice
+//   AravisStream ────> Run (its own most recent)                  (until retirement)
+//   lease owner (LeasedBuffer) ─> Run, and owns exactly one popped ArvBuffer
+// A Run references no DeviceCore, wrapper or lease. Retirement drops
+// Run::stream, so outstanding leases keep only their own SDK buffer storage
+// and the small Run record, never the native stream, receiver or device.
+//
+// Locks: DeviceCore::mutex (D) serializes native feature I/O and every
+// acquisition transition (start, stop/retirement, close). Run::mutex (R)
+// guards the run's stream pointer, retirement, in-flight native waits and
+// lease accounting. AravisStream::mutex_ (W) guards only the wrapper's run
+// pointer and is held briefly, never while acquiring D or R. Order: D -> R.
+// receive() and lease release take only R and never wait for D, so stop() and
+// close(), which hold D while waiting (at most one polling slice) for in-flight
+// native waits and while the SDK finalizer joins its receiver, cannot deadlock
+// with them. No native wait happens while R is held.
+
+using Clock = std::chrono::steady_clock;
+// Longest single native timed pop; bounds cancellation latency.
+constexpr std::chrono::milliseconds receive_polling_slice{5};
+// Process-wide, so generations are distinct across wrappers and devices.
+std::atomic<std::uint64_t> stream_generations{0};
+
+struct Run {
+    Run(std::uint64_t stream_gen, std::uint64_t config_gen, const CameraConfiguration& frozen, std::size_t buffers,
+        std::size_t bytes)
+        : stream_generation(stream_gen), configuration_generation(config_gen), configuration(frozen),
+          buffer_count(buffers), buffer_bytes(bytes) {}
+    const std::uint64_t stream_generation;
+    const std::uint64_t configuration_generation;
+    const CameraConfiguration configuration; // frozen from start()'s fresh readback
+    const std::size_t buffer_count;
+    const std::size_t buffer_bytes;
+
+    std::atomic<bool> cancel{false}; // request_stop/stop/close: receive returns promptly
+    std::mutex mutex;                // R
+    std::condition_variable idle;    // waiters dropped to zero
+    GObjectPtr<ArvStream> stream;    // null after retirement
+    bool retired{false};
+    std::atomic<bool> closed{false}; // retired by logical device close
+    unsigned waiters{0};             // receive slices inside a native pop
+    std::size_t outstanding{0};      // pool buffers held by leases
+    bool starved{false};             // current pool-starvation episode already counted
+};
+
+// The FrameLease owner: the Run record plus exactly one popped SDK buffer
+// (transfer full from arv_stream_*pop_buffer). No wrapper, device or stream
+// pointer is captured. Release is nonthrowing and runs on any thread:
+//   run still active -> arv_stream_push_buffer() requeues it exactly once;
+//   run retired      -> g_object_unref() frees it exactly once.
+// A retired run has no stream, so the buffer can never enter a later run.
+struct LeasedBuffer {
+    LeasedBuffer(std::shared_ptr<Run> owner, ArvBuffer* leased) noexcept : run(std::move(owner)), buffer(leased) {}
+    ~LeasedBuffer() {
+        std::lock_guard lock(run->mutex);
+        if (!run->retired && run->stream) arv_stream_push_buffer(run->stream.get(), buffer);
+        else g_object_unref(buffer);
+        --run->outstanding;
+        run->starved = false;
+    }
+    LeasedBuffer(const LeasedBuffer&) = delete;
+    LeasedBuffer& operator=(const LeasedBuffer&) = delete;
+    std::shared_ptr<Run> run;
+    ArvBuffer* buffer;
+};
+
 // One natively open device: ownership reservation plus native reference.
 struct NativeOpen {
     std::unique_ptr<Reservation> reservation;
@@ -350,105 +510,446 @@ struct NativeOpen {
     std::string device_id;
 };
 
+struct DeviceCore {
+    DeviceCore(NativeOpen native, CameraCapabilities c, profile::NativeSnapshot e, std::shared_ptr<const TestHooks> h)
+        : reservation(std::move(native.reservation)), device(std::move(native.device)), caps(c),
+          envelope(std::move(e)), hooks(std::move(h)) {}
+    std::mutex mutex; // D
+    std::unique_ptr<Reservation> reservation;
+    GObjectPtr<ArvDevice> device; // null after logical close
+    const CameraCapabilities caps;
+    const profile::NativeSnapshot envelope;
+    const std::shared_ptr<const TestHooks> hooks;
+    std::shared_ptr<Run> active; // the run owning native acquisition, if any
+    std::shared_ptr<Run> latest; // most recent successful run (restart lease rule)
+    std::optional<Error> stop_failure; // first failed AcquisitionStop not yet reported by close()
+};
+
+std::string text(const CameraConfiguration& c) {
+    return std::to_string(c.width) + "x" + std::to_string(c.height) + "@(" + std::to_string(c.offset_x) + "," +
+           std::to_string(c.offset_y) + ") " + std::to_string(c.frame_rate_hz) + " Hz " +
+           std::to_string(c.exposure.count()) + " ns";
+}
+
+// Fresh, truthful configuration (device lock held).
+Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
+    auto native = read_snapshot(core.device.get());
+    if (!native) return native.error();
+    if (auto ok = profile::check_preconditions(native.value()); !ok) return ok.error();
+    return profile::configuration_from(native.value());
+}
+
+// Retires core.active (device lock held, device reference still present when
+// `closing` is false or close() has not yet dropped it). Order:
+//   1. cancel: receive returns within one polling slice;
+//   2. AcquisitionStop through the SDK (failure recorded, never hidden);
+//   3. mark retired, take the stream out, and wait (at most one slice) until
+//      no receive is inside a native pop; lease releases now free storage;
+//   4. drop the last native-stream reference: the SDK finalizer joins its own
+//      receiver (Fake) or stops the receiver and writes the stream-channel
+//      register (GigE) while this device's lock and reservation are held;
+//      queued buffers are freed by that finalizer, leased ones by their lease.
+// No second explicit thread stop is issued; arv_shutdown() is never called.
+void retire_locked(DeviceCore& core, bool closing) noexcept {
+    const std::shared_ptr<Run> run = std::move(core.active);
+    if (!run) return;
+    if (closing) run->closed.store(true); // before cancel: receive reports disconnected
+    run->cancel.store(true);
+    if (core.device) {
+        try {
+            if (auto stopped = execute_command(core.device.get(), "AcquisitionStop", core.hooks.get()); !stopped) {
+                if (!core.stop_failure)
+                    core.stop_failure = Error{stopped.error().code,
+                                              stopped.error().message + " (stream generation " +
+                                                  std::to_string(run->stream_generation) +
+                                                  "); local stream resources were retired anyway; the camera may "
+                                                  "still be acquiring"};
+            }
+        } catch (...) {
+            // Allocation failure while describing the error: keep retiring.
+        }
+    }
+    GObjectPtr<ArvStream> stream;
+    {
+        std::unique_lock lock(run->mutex);
+        run->retired = true;
+        run->idle.wait(lock, [&] { return run->waiters == 0; });
+        stream = std::move(run->stream);
+    }
+    stream.reset(); // synchronous SDK finalization (sole strong reference)
+}
+
+// Lightweight wrapper. create_stream() performs no native work; start()
+// creates a FRESH native stream and pool for every run. Several wrappers may
+// exist for one device, but DeviceCore::active admits one acquisition at a
+// time and the restart lease rule is per device, so no wrapper bypasses them.
+// Statistics are per wrapper and accumulate across that wrapper's runs.
+class AravisStream final : public IFrameStream {
+public:
+    explicit AravisStream(std::shared_ptr<DeviceCore> core) : core_(std::move(core)) {}
+    ~AravisStream() override { stop(); } // caller has joined its receiving thread
+    AravisStream(const AravisStream&) = delete;
+    AravisStream& operator=(const AravisStream&) = delete;
+
+    Status start(std::uint64_t configuration_generation) override;
+    Result<FrameLease> receive(std::chrono::milliseconds timeout) override;
+
+    void request_stop() noexcept override {
+        if (const auto run = current()) run->cancel.store(true);
+    }
+
+    void stop() noexcept override {
+        std::lock_guard lock(core_->mutex);
+        const auto run = current();
+        if (!run) return;
+        run->cancel.store(true);
+        if (core_->active == run) retire_locked(*core_, false);
+    }
+
+    StreamStatistics statistics() const override {
+        StreamStatistics s;
+        s.delivered_frames = delivered_.load();
+        s.incomplete_frames = incomplete_.load();
+        s.timeout_count = timeouts_.load();
+        s.pool_starvation_events = starvation_.load();
+        return s;
+    }
+
+private:
+    std::shared_ptr<Run> current() const noexcept {
+        std::lock_guard lock(mutex_);
+        return run_;
+    }
+    static Error ended(const Run& run) {
+        return run.closed ? fail(ErrorCode::disconnected, "Aravis device was logically closed during acquisition")
+                          : fail(ErrorCode::stopped, "Aravis stream generation " + std::to_string(run.stream_generation) +
+                                                         " is stopped");
+    }
+    // Returns a popped buffer to its run (requeue while active, else free).
+    static void recycle(Run& run, ArvBuffer* buffer) noexcept {
+        std::lock_guard lock(run.mutex);
+        if (!run.retired && run.stream) arv_stream_push_buffer(run.stream.get(), buffer);
+        else g_object_unref(buffer);
+    }
+
+    const std::shared_ptr<DeviceCore> core_;
+    mutable std::mutex mutex_; // W: guards run_ only
+    std::shared_ptr<Run> run_;
+    std::atomic<std::uint64_t> delivered_{0}, incomplete_{0}, timeouts_{0}, starvation_{0};
+};
+
+// Start order (device lock held throughout, so apply()/close()/other starts
+// are serialized and see either no run or a fully published one):
+//   reject closed / active acquisition / outstanding leases of the previous
+//   run -> fresh snapshot + profile preconditions + representable readback ->
+//   AcquisitionMode Continuous, commands present and writable, PayloadSize ->
+//   checked pool plan -> native stream (receiver starts) -> allocate & queue
+//   the fixed pool -> AcquisitionStart -> publish. AcquisitionStart is the
+//   last native step, so any failure after the native stream exists retires
+//   it WITHOUT AcquisitionStop and frees every queued buffer before
+//   returning; nothing is published.
+Status AravisStream::start(std::uint64_t configuration_generation) {
+    std::lock_guard device_lock(core_->mutex);
+    DeviceCore& core = *core_;
+    if (!core.device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+    if (core.active)
+        return fail(ErrorCode::busy, "an acquisition is already active on this Aravis device (stream generation " +
+                                         std::to_string(core.active->stream_generation) +
+                                         "); stop it before starting another; no native stream was created");
+    if (core.latest) {
+        std::lock_guard run_lock(core.latest->mutex);
+        if (core.latest->outstanding != 0)
+            return fail(ErrorCode::resource_exhausted,
+                        std::to_string(core.latest->outstanding) + " source lease(s) from stream generation " +
+                            std::to_string(core.latest->stream_generation) +
+                            " are still held; release them before restarting; no native stream was created");
+    }
+    ArvDevice* device = core.device.get();
+    auto snapshot = read_snapshot(device);
+    if (!snapshot) return snapshot.error();
+    if (auto ok = profile::check_preconditions(snapshot.value()); !ok) return ok.error();
+    auto frozen = profile::configuration_from(snapshot.value());
+    if (!frozen) return fail(frozen.error().code, "current configuration is not representable: " + frozen.error().message);
+    auto mode = read_string(device, "AcquisitionMode");
+    if (!mode) return mode.error();
+    if (mode.value() != profile::acquisition_mode)
+        return fail(ErrorCode::unsupported, "AcquisitionMode is '" + mode.value() +
+                                                "'; the profile requires Continuous, which the adapter does not set");
+    for (const char* command : {"AcquisitionStart", "AcquisitionStop"})
+        if (auto node = command_node(device, command); !node) return node.error();
+    auto payload = read_integer(device, "PayloadSize", false);
+    if (!payload) return payload.error();
+    auto pool = profile::plan_pool(payload.value(), frozen.value());
+    if (!pool) return pool.error();
+
+    auto run = std::make_shared<Run>(stream_generations.fetch_add(1) + 1, configuration_generation, frozen.value(),
+                                     pool.value().buffers, pool.value().buffer_bytes);
+    {
+        ErrorSlot error;
+        run->stream.reset(arv_device_create_stream(device, nullptr, nullptr, error.out()));
+        if (error.failed()) return translate("create stream on", "", *error.take());
+        if (!run->stream) return fail(ErrorCode::io_error, "Aravis returned no stream object; nothing was started");
+    }
+    if (core.hooks->after_stream_created) core.hooks->after_stream_created(run->stream.get());
+    // Partial-setup cleanup. AcquisitionStart is the last native step, so a
+    // failure never needs AcquisitionStop. Cancel, retire, and drop the sole
+    // native-stream reference: the SDK finalizer stops its receiver and frees
+    // every queued pool buffer. Nothing was published; configuration was not
+    // written; start() can be retried explicitly.
+    const auto abandon = [&](Error error) -> Status {
+        run->cancel.store(true);
+        GObjectPtr<ArvStream> stream;
+        {
+            std::lock_guard lock(run->mutex);
+            run->retired = true;
+            stream = std::move(run->stream);
+        }
+        stream.reset();
+        return error;
+    };
+    try {
+        for (std::size_t i = 0; i < run->buffer_count; ++i) {
+            GObjectPtr<ArvBuffer> buffer(arv_buffer_new_allocate(run->buffer_bytes));
+            if (!buffer) return abandon(fail(ErrorCode::resource_exhausted, "Aravis buffer allocation failed"));
+            if (core.hooks->after_buffer_allocated) core.hooks->after_buffer_allocated(buffer.get());
+            arv_stream_push_buffer(run->stream.get(), buffer.release()); // transfer full
+        }
+        if (auto ok = execute_command(device, "AcquisitionStart", core.hooks.get()); !ok)
+            return abandon(fail(ok.error().code, ok.error().message + "; the native stream and " +
+                                                     std::to_string(run->buffer_count) +
+                                                     " queued buffers were released; configuration is unchanged; "
+                                                     "retry start() explicitly"));
+        {
+            std::lock_guard lock(mutex_);
+            run_ = run;
+        }
+        core.active = run;
+        core.latest = run;
+        return {};
+    } catch (...) {
+        (void)abandon(fail(ErrorCode::io_error, "start failed"));
+        throw;
+    }
+}
+
+// One overall steady-clock deadline. Negative timeouts are invalid_argument;
+// zero performs one non-blocking poll (no native wait). Each native wait is a
+// timed pop of at most receive_polling_slice (the SDK unit is microseconds),
+// so cancellation and close are observed within one slice. A null pop is a
+// transient wait result, never evidence of disconnection. Incomplete and
+// malformed buffers are recycled and the loop continues within the SAME
+// deadline. timeout_count counts expired public calls, not slices.
+Result<FrameLease> AravisStream::receive(std::chrono::milliseconds timeout) {
+    if (timeout < std::chrono::milliseconds::zero())
+        return fail(ErrorCode::invalid_argument, "receive timeout must not be negative");
+    const auto run = current();
+    if (!run) return fail(ErrorCode::stopped, "Aravis stream has not been started");
+    const auto entry = Clock::now();
+    // Saturating deadline: a huge timeout cannot overflow the time point.
+    const auto room = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::time_point::max() - entry);
+    const auto deadline = timeout >= room ? Clock::time_point::max() : entry + timeout;
+    const auto& hooks = core_->hooks;
+    std::optional<Error> malformed; // last rejected complete buffer, reported on expiry
+    for (;;) {
+        if (run->cancel.load()) return ended(*run);
+        // Borrowed: retirement waits for waiters == 0 before it drops the
+        // run's reference, so the stream outlives this slice. No reference is
+        // taken here, so this thread can never run the SDK finalizer.
+        ArvStream* stream = nullptr;
+        std::size_t outstanding = 0;
+        {
+            std::lock_guard lock(run->mutex);
+            if (run->retired || !run->stream) return ended(*run);
+            stream = run->stream.get();
+            ++run->waiters;
+            outstanding = run->outstanding;
+        }
+        const auto now = Clock::now();
+        const auto remaining = now >= deadline ? Clock::duration::zero() : deadline - now;
+        const auto slice = std::min<Clock::duration>(remaining, receive_polling_slice);
+        ArvBuffer* popped = nullptr;
+        if (slice <= Clock::duration::zero()) {
+            popped = arv_stream_try_pop_buffer(stream);
+        } else {
+            try {
+                if (hooks->before_native_wait) hooks->before_native_wait();
+            } catch (...) {
+                { std::lock_guard lock(run->mutex); --run->waiters; }
+                run->idle.notify_all();
+                throw;
+            }
+            const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(slice).count();
+            popped = arv_stream_timeout_pop_buffer(stream, static_cast<guint64>(std::max<std::int64_t>(micros, 1)));
+        }
+        bool starved_now = false;
+        {
+            std::lock_guard lock(run->mutex);
+            --run->waiters;
+            // Pool starvation: nothing arrived while every pool buffer was held
+            // by a lease for the whole slice. Counted once per episode; a
+            // release clears the episode.
+            if (!popped && outstanding == run->buffer_count && run->outstanding == run->buffer_count &&
+                !run->starved) {
+                run->starved = true;
+                starved_now = true;
+            }
+        }
+        run->idle.notify_all();
+        if (starved_now) starvation_.fetch_add(1);
+        if (popped) {
+            GObjectPtr<ArvBuffer> buffer(popped); // transfer full from the pop
+            auto facts = decode(buffer.get(), run->buffer_bytes);
+            if (hooks->decoded_facts) {
+                try {
+                    hooks->decoded_facts(facts);
+                } catch (...) {
+                    recycle(*run, buffer.release());
+                    throw;
+                }
+            }
+            const auto decision = profile::validate_frame(facts, run->configuration);
+            if (decision.verdict == profile::FrameVerdict::accept) {
+                const auto* data = static_cast<const std::byte*>(arv_buffer_get_image_data(buffer.get(), nullptr));
+                FrameDescriptor d;
+                d.width = run->configuration.width;
+                d.height = run->configuration.height;
+                d.row_stride_bytes = decision.row_stride;
+                d.storage_bits_per_pixel = 8;
+                d.significant_bits_per_pixel = 8;
+                d.bands = 1;
+                d.pixel_format = PixelFormat::mono8;
+                d.byte_order = ByteOrder::not_applicable; // single-byte samples
+                d.status = FrameStatus::complete;
+                d.native_frame_id = facts.frame_id; // SDK value, unmodified
+                d.stream_generation = run->stream_generation;
+                d.configuration_generation = run->configuration_generation;
+                d.configuration = run->configuration;
+                d.timestamp = FrameTimestamp{}; // deliberately unqualified (GIGE-MEL-009)
+                {
+                    std::lock_guard lock(run->mutex);
+                    // Retired after the pop: the guard frees the buffer.
+                    if (run->retired) return ended(*run);
+                    ++run->outstanding;
+                }
+                std::shared_ptr<const LeasedBuffer> owner;
+                try {
+                    owner = std::make_shared<const LeasedBuffer>(run, buffer.get());
+                } catch (...) {
+                    { std::lock_guard lock(run->mutex); --run->outstanding; }
+                    throw; // the guard requeues nothing; it frees the buffer
+                }
+                (void)buffer.release(); // owned by the lease from here on
+                delivered_.fetch_add(1);
+                return FrameLease{d, std::span<const std::byte>(data, decision.span_bytes), std::move(owner)};
+            }
+            if (decision.verdict == profile::FrameVerdict::incomplete) incomplete_.fetch_add(1);
+            else malformed = Error{decision.code, decision.reason};
+            recycle(*run, buffer.release());
+        }
+        if (Clock::now() >= deadline) break;
+    }
+    timeouts_.fetch_add(1);
+    if (malformed)
+        return fail(ErrorCode::timeout, "no valid frame before the receive deadline; last rejected buffer: " +
+                                            malformed->message);
+    return fail(ErrorCode::timeout, "no valid frame before the receive deadline (stream generation " +
+                                        std::to_string(run->stream_generation) + ")");
+}
+
 class AravisDevice final : public ICameraDevice {
 public:
     AravisDevice(NativeOpen native, CameraCapabilities caps, profile::NativeSnapshot envelope,
                  std::shared_ptr<const TestHooks> hooks)
-        : reservation_(std::move(native.reservation)), device_(std::move(native.device)), caps_(caps),
-          envelope_(std::move(envelope)), hooks_(std::move(hooks)) {}
+        : core_(std::make_shared<DeviceCore>(std::move(native), caps, std::move(envelope), std::move(hooks))) {}
     ~AravisDevice() override { (void)close(); }
     AravisDevice(const AravisDevice&) = delete;
     AravisDevice& operator=(const AravisDevice&) = delete;
 
     // Validated during open; immutable snapshot. No device I/O, also after close.
-    CameraCapabilities capabilities() const override { return caps_; }
+    CameraCapabilities capabilities() const override { return core_->caps; }
 
     Result<CameraConfiguration> configuration() const override {
-        std::lock_guard lock(mutex_);
-        if (!device_) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
-        return read_configuration_locked();
+        std::lock_guard lock(core_->mutex);
+        if (!core_->device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+        return read_configuration_locked(*core_);
     }
 
     Result<CameraConfiguration> apply(const CameraConfiguration& request) override {
-        std::lock_guard lock(mutex_);
-        if (!device_) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
-        auto current = read_snapshot(device_.get());
+        std::lock_guard lock(core_->mutex);
+        DeviceCore& core = *core_;
+        if (!core.device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+        // Start, active acquisition and stop/retirement all hold this lock, so
+        // a set `active` is the only acquisition state visible here.
+        if (core.active)
+            return fail(ErrorCode::invalid_state, "an acquisition is active on this Aravis device (stream generation " +
+                                                      std::to_string(core.active->stream_generation) +
+                                                      "); stop it before applying configuration; nothing was written");
+        auto current = read_snapshot(core.device.get());
         if (!current) return current.error();
         // Requires the stopped/manual profile; nothing is normalized.
-        auto plan = profile::plan_writes(request, current.value(), envelope_);
+        auto plan = profile::plan_writes(request, current.value(), core.envelope);
         if (!plan) return plan.error();
         std::string written;
         for (const auto& write : plan.value()) {
-            if (hooks_ && hooks_->before_write) hooks_->before_write(write.feature, device_.get());
-            if (auto ok = write_feature(device_.get(), write); !ok) {
+            if (core.hooks && core.hooks->before_write) core.hooks->before_write(write.feature, core.device.get());
+            if (auto ok = write_feature(core.device.get(), write); !ok) {
                 // Preserve the original failure; report earlier writes and the
                 // actual native state. No rollback is attempted or claimed.
                 auto message = ok.error().message + "; earlier successful writes: " +
                                (written.empty() ? std::string("none") : written) + "; no rollback was attempted";
-                const auto actual = read_configuration_locked();
+                const auto actual = read_configuration_locked(core);
                 message += actual ? "; actual native configuration: " + text(actual.value())
                                   : "; actual native configuration unreadable or unrepresentable: " + actual.error().message;
                 return fail(ok.error().code, std::move(message));
             }
             written += (written.empty() ? "" : ", ") + describe(write);
         }
-        auto actual = read_configuration_locked();
+        auto actual = read_configuration_locked(core);
         if (!actual)
             return fail(actual.error().code, actual.error().message + " (after writes: " + written + ")");
         return actual; // may differ from the request through native quantization
     }
 
+    // Lightweight: no native stream, receiver, allocation or feature write.
     Result<std::unique_ptr<IFrameStream>> create_stream() override {
-        std::lock_guard lock(mutex_);
-        if (!device_) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
-        // No native stream is created, no worker started, no frame fabricated.
-        return fail(ErrorCode::unsupported,
-                    "Aravis image acquisition is not implemented (camera-control foundation only, GIGE-MEL-008); "
-                    "no stream was created");
+        std::lock_guard lock(core_->mutex);
+        if (!core_->device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+        return std::unique_ptr<IFrameStream>(std::make_unique<AravisStream>(core_));
     }
 
-    // Idempotent. Order: mark closed and drop the native reference, then
-    // release the ownership reservation, so a new open cannot overlap the old
-    // native device. Never calls arv_shutdown().
+    // Idempotent logical close. Order: retire the active run (cancel, SDK
+    // AcquisitionStop, wait for in-flight native waits, synchronous native
+    // stream finalization) while the device reference and reservation are
+    // held; then drop the native device; then release the reservation, so a
+    // reopen cannot overlap old native I/O. Outstanding leases stay valid.
+    // Reports (once) an AcquisitionStop failure recorded by stop() or here.
+    // Never calls arv_shutdown().
     Status close() override {
         GObjectPtr<ArvDevice> retired;
         std::unique_ptr<Reservation> released;
+        std::optional<Error> stop_failure;
         {
-            std::lock_guard lock(mutex_);
-            retired = std::move(device_);
-            released = std::move(reservation_);
+            std::lock_guard lock(core_->mutex);
+            retire_locked(*core_, true);
+            retired = std::move(core_->device);
+            released = std::move(core_->reservation);
+            stop_failure = std::exchange(core_->stop_failure, std::nullopt);
         }
         retired.reset();
         released.reset();
+        if (stop_failure) return *stop_failure;
         return {};
     }
 
     bool with_native(const std::function<void(ArvDevice*)>& fn) {
-        std::lock_guard lock(mutex_);
-        if (!device_) return false;
-        fn(device_.get());
+        std::lock_guard lock(core_->mutex);
+        if (!core_->device) return false;
+        fn(core_->device.get());
         return true;
     }
 
 private:
-    static std::string text(const CameraConfiguration& c) {
-        return std::to_string(c.width) + "x" + std::to_string(c.height) + "@(" + std::to_string(c.offset_x) + "," +
-               std::to_string(c.offset_y) + ") " + std::to_string(c.frame_rate_hz) + " Hz " +
-               std::to_string(c.exposure.count()) + " ns";
-    }
-    Result<CameraConfiguration> read_configuration_locked() const {
-        auto native = read_snapshot(device_.get());
-        if (!native) return native.error();
-        if (auto ok = profile::check_preconditions(native.value()); !ok) return ok.error();
-        return profile::configuration_from(native.value());
-    }
-
-    mutable std::mutex mutex_; // serializes this device's native feature I/O
-    std::unique_ptr<Reservation> reservation_;
-    GObjectPtr<ArvDevice> device_;
-    const CameraCapabilities caps_;
-    const profile::NativeSnapshot envelope_;
-    std::shared_ptr<const TestHooks> hooks_;
+    const std::shared_ptr<DeviceCore> core_;
 };
 
 class AravisBackend final : public ICameraBackend {

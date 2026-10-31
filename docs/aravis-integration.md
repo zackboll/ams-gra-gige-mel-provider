@@ -1,12 +1,23 @@
-# Optional Aravis camera-control foundation (GIGE-MEL-008)
+# Optional Aravis adapter: camera control (GIGE-MEL-008) and source acquisition (GIGE-MEL-009)
 
 This is the project's first integration with a real camera SDK. It is an
-**internal, optional, uninstalled** camera-control layer built on the existing
-`ICameraBackend`/`ICameraDevice` contracts. It implements discovery, exact
-selection, native ownership, capabilities, configuration and truthful readback.
-It does **not** acquire images: `create_stream()` returns
-`ErrorCode::unsupported`. It is not an installed or selectable image backend,
-and it does not qualify any physical camera.
+**internal, optional, uninstalled** adapter built on the existing
+`ICameraBackend`/`ICameraDevice`/`IFrameStream` contracts. GIGE-MEL-008
+implemented discovery, exact selection, native ownership, capabilities,
+configuration and truthful readback. GIGE-MEL-009 adds bounded Mono8 **source**
+acquisition: `create_stream()`, `IFrameStream`, SDK-buffer-backed `FrameLease`
+objects, cancellation, and a direct-capture diagnostic. See
+[Source acquisition (GIGE-MEL-009)](#source-acquisition-gige-mel-009).
+
+Every frame carries the default, **invalid** `FrameTimestamp{}`, so the common
+MEL provider rejects it: there is no successful Aravis MEL Image publication.
+The adapter is not an installed or selectable image backend, and it does not
+qualify any physical camera.
+
+> **Superseded status (GIGE-MEL-008 text below).** Passages written for
+> GIGE-MEL-008 that say `create_stream()` returns `unsupported`, that Image
+> `enable()` fails, or that acquisition is pending describe that milestone.
+> They are kept as history and are marked where they appear.
 
 ## Qualified SDK baseline
 
@@ -57,15 +68,17 @@ ctest --test-dir build/aravis-dev --output-on-failure
 ```
 
 With the option ON, a missing or different SDK is a clear configuration error.
-The SDK-enabled build adds three CTest entries to the seven default ones. All of
-these targets are internal and are not installed or exported:
+The SDK-enabled build adds four CTest entries (three before GIGE-MEL-009) to
+the eight default ones. All of these targets are internal and are not
+installed or exported:
 
 | Target | Purpose |
 | --- | --- |
-| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics (`aravis_backend.cpp`) and SDK-free profile translation (`camera_profile.cpp`) |
+| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics (`aravis_backend.cpp`), SDK-free profile translation and frame validation (`camera_profile.cpp`), and the shared capture routine (`aravis_capture.cpp`) |
 | `gige_mel_aravis_test_support` | `tests/support/aravis_fake_support.*`: test-only Fake interface selection |
 | `aravis_adapter_tests` → CTest `aravis_adapter` | Direct adapter scenarios against the real SDK |
-| `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration probe |
+| `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration and negative timestamp-admission probe |
+| `aravis_stream_contract_tests` → CTest `aravis_stream_contract` | GIGE-MEL-009 acquisition contract against the real SDK Fake stream |
 | `gige_mel_aravis_diagnostic` → CTest `aravis_diagnostic_help` | Diagnostic tool (`--help` performs no device I/O) |
 
 ```sh
@@ -73,6 +86,7 @@ build/aravis-dev/gige_mel_aravis_diagnostic --help
 build/aravis-dev/gige_mel_aravis_diagnostic list              # GigE discovery (network)
 build/aravis-dev/gige_mel_aravis_diagnostic inspect DEVICE_ID  # read-only
 build/aravis-dev/gige_mel_aravis_diagnostic apply DEVICE_ID W H X Y RATE_HZ EXPOSURE_NS
+build/aravis-dev/gige_mel_aravis_diagnostic capture DEVICE_ID OUTPUT.pgm   # one frame (GIGE-MEL-009)
 ```
 
 `inspect` prints the loaded SDK version, identity strings, native values and
@@ -211,7 +225,8 @@ configuration I/O. The interface singleton is requested lazily on the first
   owner, `busy` for the competitor, and a single native open. In production,
   `open()` acquires that lock as before (`try_lock`, then a blocking lock); the
   hook is a private test seam.
-- **Logical close** is idempotent. Under the device lock it drops the native
+- **Logical close** is idempotent. Under the device lock it first retires any
+  active acquisition (GIGE-MEL-009, see below), then drops the native
   reference, then releases the reservation. Later `configuration()`, `apply()`
   and `create_stream()` return `disconnected`. `capabilities()` keeps returning
   the snapshot validated at open, without device I/O. Destructors close and do
@@ -435,19 +450,23 @@ probe covers:
 - quantized exposure → readback mismatch (Rejected);
 - 30 Hz → `Unsupported` error with the native value, `configuration_valid`
   false in Health, and explicit recovery;
-- Image `enable()` → `Fail` with the adapter's unsupported diagnostic in
-  `provider_statistics().last_error`, no image callback, and acquisition state
-  idle.
+- *(GIGE-MEL-008, superseded)* Image `enable()` → `Fail` with the adapter's
+  unsupported diagnostic. Since GIGE-MEL-009 this endpoint is replaced by the
+  negative timestamp-admission scenario described in
+  [Negative MEL admission evidence](#negative-mel-admission-evidence).
 
 Successful `Control::init()` still advertises the Image channel, because the
 common provider has no control-only advertisement. That is why this probe is
 private evidence of the configuration paths only. It is **not** a supported
 Aravis MEL profile, and the common provider was not changed for it.
 
-## Acquisition is pending
+## Acquisition is pending (GIGE-MEL-008 record, superseded)
 
-`create_stream()` returns `unsupported` without creating an `ArvStream`,
-worker or frame. Before streaming can be implemented, the following are still
+*Superseded by GIGE-MEL-009 for buffer ownership, payload/stride validation,
+incomplete-buffer handling and stop wakeup. Disconnection handling and a
+characterized time mapping are still pending.* At GIGE-MEL-008,
+`create_stream()` returned `unsupported` without creating an `ArvStream`,
+worker or frame. Before streaming could be implemented, the following were
 needed:
 
 - buffer announce/queue/revoke ownership mapped to `FrameLease` lifetime;
@@ -460,6 +479,315 @@ needed:
 
 The common provider's frame and timestamp checks stay as they are.
 
+## Source acquisition (GIGE-MEL-009)
+
+### Acquisition ownership and retirement
+
+Strong references (there are no cycles):
+
+```text
+AravisDevice ──┐
+AravisStream ──┴─> DeviceCore ──> Run (active / most recent) ──> ArvStream ──> ArvDevice
+AravisStream ────> Run (its own most recent)                     (until retirement)
+FrameLease owner (LeasedBuffer) ──> Run, and exactly one popped ArvBuffer
+```
+
+- A `Run` references no `DeviceCore`, wrapper or lease. A lease deleter
+  captures no raw stream, wrapper or device pointer.
+- **Retirement** drops `Run::stream`. Outstanding leases then hold only their
+  own SDK buffer storage and the small `Run` record. They do not keep the
+  native stream, the receiver thread or the device alive.
+
+**Locks.** The order is D before R. W is held only briefly and never while
+D or R is acquired.
+
+| Lock | Guards |
+| --- | --- |
+| `DeviceCore::mutex` (D) | Native feature I/O and every acquisition transition: start, stop/retirement and close. `apply()` takes it. |
+| `Run::mutex` (R) | The run's stream pointer, the retired flag, the count of in-flight native waits, and lease accounting. |
+| `AravisStream::mutex_` (W) | Only the wrapper's run pointer. |
+
+`receive()` and lease release take only R and never wait for D. `stop()` and
+`close()` hold D while they wait for in-flight native waits (at most one
+polling slice) and while the SDK finalizer joins its receiver. Neither of
+those waits can need D, so they cannot deadlock. No native wait happens while R
+is held.
+
+**Native retirement order.** `stop()` and `close()` both run this under D:
+
+1. Set the run's cancel flag. `receive()` returns within one polling slice.
+2. Execute `AcquisitionStop` through the SDK. A failure is recorded, never
+   hidden (see below).
+3. Mark the run retired and take the stream out. Wait until no `receive()` is
+   inside a native pop. From now on, a lease release frees its buffer instead
+   of requeuing it.
+4. Drop the last native-stream reference. That reference is the adapter's own;
+   the receive path only borrows the stream, protected by the in-flight count.
+   The SDK finalizer then runs synchronously:
+   - **Fake:** it joins its own receiver thread
+     (`arv_fake_stream_finalize` → `stop_thread`).
+   - **GigE:** it stops the receiver and writes the stream-channel register
+     (`arv_gv_stream_finalize`) while this device's lock and ownership
+     reservation are still held.
+   Queued buffers are freed by the finalizer. Leased buffers are freed by their
+   lease.
+
+The adapter issues no second explicit thread stop. `close()` then drops the
+native device and **only then** releases the reservation. An old finalizer
+therefore cannot run after a reopen. `arv_shutdown()` is never called.
+
+### Start, stop, close and restart policy
+
+- **`create_stream()`** returns a lightweight wrapper. It creates no native
+  stream, receiver or buffer, writes nothing, and fails with `disconnected`
+  after close. The native stream is constructed in `start()`, because the SDK
+  stream constructor starts its receiver thread immediately.
+- **One acquisition per logical device.** `DeviceCore::active` admits a single
+  run, so a repeated or competing `start()`, from any wrapper, fails with
+  `busy` and creates no native stream. Several wrappers may exist, but a wrapper
+  that never started cannot stop another wrapper's run.
+- **Configuration.** `apply()` fails with `invalid_state` before any native
+  write while a run is active. Start, stop and retirement hold D, so no
+  intermediate state is visible to `apply()`.
+- **Each run** re-reads a fresh snapshot, requires the unchanged
+  `aravis-mono8-free-running-v1` preconditions and a representable
+  configuration, and freezes that configuration and the
+  `configuration_generation` passed to `start()`. It gets a new, process-wide
+  `stream_generation`, including when the wrapper is new. It also gets a
+  **fresh native stream and pool**, so stale buffers from an earlier run cannot
+  be relabelled.
+- **Start prerequisites.** `AcquisitionMode` must already be `Continuous`.
+  `AcquisitionStart` and `AcquisitionStop` must be implemented, available,
+  writable GenICam commands, and `PayloadSize` must be readable. Anything else
+  is rejected explicitly. The adapter never changes trigger mode, automatic
+  controls, pixel format, frame rate, exposure or gain to make streaming work.
+- **Restart** on the same open device is refused with `resource_exhausted`
+  while leases from the previous run are outstanding. This applies through a
+  replacement wrapper too. Once they are released, an explicit `start()` works.
+  Configuration may change after a completed stop. Old lease descriptors and
+  bytes stay unchanged.
+- **Reopen.** A separately reopened device may start once the old device's
+  native work is retired. Releasing an old lease then frees its buffer and
+  never touches the new acquisition.
+- **`request_stop()`** (noexcept) sets the cancel flag only. **`stop()`**
+  (noexcept) retires the wrapper's active run. It is safe before start, after a
+  failed start, after a normal stop, and when repeated.
+- **`close()`** wakes `receive()`, which then returns `disconnected`. It retires
+  native work and blocks later device operations. The existing caller contract
+  still applies: join the receiving thread before destroying a stream wrapper.
+- **Start failure after partial setup.** `AcquisitionStart` is the last native
+  step. If it fails (or allocation fails), the adapter cancels, retires and
+  drops the new native stream; its finalizer stops the receiver and frees every
+  queued buffer. Nothing is published, no acquisition owner remains, and
+  configuration is unchanged. The error keeps the SDK operation context and
+  says to retry `start()` explicitly. `AcquisitionStop` is not sent for a start
+  that did not succeed.
+- **Stop-command failure.** Local resources are still retired. The first
+  failure, with its operation, feature and generation context, is kept and
+  returned once by `close()`: "… local stream resources were retired anyway;
+  the camera may still be acquiring". The diagnostic reports it as a cleanup
+  failure. The camera is never claimed to have stopped.
+
+**Command evidence.** Starting and stopping are verified independently of
+frame arrival. The Fake receiver produces frames whether or not acquisition
+was commanded, so a frame proves nothing about the commands. The tests read the
+Fake acquisition register (address `0x124`, written only by
+`AcquisitionStart`/`AcquisitionStop`) through the SDK's public
+`arv_fake_camera_get_acquisition_status()`.
+
+### Pool limits and statistics
+
+| Item | Value |
+| --- | --- |
+| Buffers per run | 4 (`aravis_profile::pool_buffers`), allocated with `arv_buffer_new_allocate()` before `AcquisitionStart`; never per frame |
+| Buffer size | The `PayloadSize` readback; it must be positive and at least width × height |
+| Per-buffer limit | 64 MiB |
+| Pool limit | 256 MiB |
+| Arithmetic | Every conversion and product is overflow-checked; violations fail before allocation (`unsupported` or `resource_exhausted`) |
+
+Pool exhaustion never allocates more: `receive()` times out.
+
+Statistics belong to each wrapper and **accumulate across that wrapper's
+runs**. Snapshots are atomic loads, safe during `receive()` and shutdown.
+
+| Counter | Meaning |
+| --- | --- |
+| `delivered_frames` | Successful leases returned |
+| `incomplete_frames` | Popped native buffers with a non-success completion status (timeout, missing or wrong packets, aborted). They are requeued and never published. |
+| `timeout_count` | Expired **public** `receive()` calls, not internal polling slices |
+| `pool_starvation_events` | Episodes in which a native wait slice found nothing while **every** pool buffer was held by a lease for the whole slice. Counted once per episode and cleared by a lease release. An arbitrary SDK underrun or empty queue is not counted. |
+
+### Receive deadline and cancellation
+
+`receive(timeout)` computes **one** overall steady-clock deadline, saturating
+instead of overflowing for huge timeouts.
+
+- A negative timeout returns `invalid_argument`.
+- A zero timeout performs exactly one non-blocking `arv_stream_try_pop_buffer()`
+  and no native wait.
+- Otherwise each native wait is `arv_stream_timeout_pop_buffer()` for at most
+  **5 ms**. The SDK unit is microseconds, and the conversion is checked. The
+  cancel flag is checked before every slice, so `request_stop()`, `stop()` and
+  `close()` end a genuinely blocked receive within about one slice.
+- The deadline is never restarted after a slice or after a discarded buffer.
+- A null pop is a transient wait result. It is **never** reported as
+  disconnection or packet loss. Physical transport recovery is out of scope.
+- A receive that popped a valid buffer before retirement may still return its
+  lease, as `backend.hpp` allows. The provider gates publication itself.
+- Before start, `receive()` returns `stopped`. After `stop()`/`request_stop()`
+  it returns `stopped`, and after `close()` it returns `disconnected`.
+
+### Supported payload and explicit exclusions
+
+The SDK's completion status is checked **before** any accessor whose
+precondition is a successful image, so no GLib critical is provoked. The test
+executable makes GLib warnings and criticals fatal. A buffer is accepted only
+when it is a complete, chunk-free, single-part 2-D image with:
+
+- PFNC `Mono8` (`0x01080001`): one band, 8 storage and 8 significant bits;
+- byte order `not_applicable`, because the samples are single bytes;
+- width, height, `OffsetX` and `OffsetY` equal to the frozen configuration;
+- no Y padding, and X padding represented as `row_stride = width + x_padding`;
+- an image part lying inside the SDK-reported received size and the
+  allocation;
+- an SDK-reported image size of at least `row_stride × height`.
+
+The leased span is exactly `row_stride × height` bytes of SDK-reported valid
+data. Allocation capacity is never used as evidence, and final-row padding is
+never fabricated.
+
+The following are not delivered:
+
+| Buffer | Treatment |
+| --- | --- |
+| **Incomplete** (non-success status) | Counted, requeued, and retried within the same deadline |
+| **Malformed complete:** another status, chunk, extended-chunk, multipart or non-image payloads, packed or other pixel formats, a geometry mismatch, Y padding, inconsistent sizes, arithmetic overflow | Requeued, not counted as incomplete, and retried within the deadline. If the deadline expires, the `timeout` error names the last rejection reason. |
+
+`native_frame_id` is the SDK value, unmodified. It is not assumed to be
+globally monotonic or non-wrapping; the Fake ID is 16-bit and skips 0. It is
+kept distinct from the stream and configuration generations.
+
+### Direct capture
+
+```sh
+build/aravis-dev/gige_mel_aravis_diagnostic capture DEVICE_ID OUTPUT.pgm
+```
+
+The command validates its arguments before any device I/O. It then:
+
+1. opens exactly the discovered `DEVICE_ID` on the production GigE-only
+   backend, with no Fake fallback;
+2. reads the current supported, representable configuration, writing nothing;
+3. starts one acquisition and waits up to **5 s** (one deadline) for one
+   validated Mono8 frame;
+4. writes a tightly packed binary PGM (`P5`, maxval 255, rows copied without
+   stride padding);
+5. stops and closes.
+
+Cleanup runs on start, receive, validation and output failures. A failed
+`AcquisitionStop` is reported as a cleanup failure, and the exit status is 1.
+The command reuses `aravis::capture_one()` (`aravis_capture.cpp`), the same
+routine the tests drive with the private Fake backend. Example output from that
+routine, as printed by the diagnostic (Fake defaults; no physical camera was
+used):
+
+```text
+Aravis runtime 0.8.36, compiled against 0.8.36
+Captured device Fake_1: 512x512 Mono8, source row stride 512 bytes, native frame ID 65401, stream generation 1
+  timestamp: unqualified (FrameTimestamp invalid; no camera, UTC/PTP or integration-start claim)
+  configuration:
+  width=512 height=512 offset_x=0 offset_y=0 frame_rate_hz=25 exposure_ns=10000000
+  statistics: delivered 1, incomplete 0, timeouts 0, pool starvation 0
+  wrote OUTPUT.pgm (262159 bytes, tightly packed P5)
+```
+
+Generated images are not committed.
+
+### Unqualified timestamps and negative MEL admission evidence
+
+<a id="negative-mel-admission-evidence"></a>Every returned frame uses
+`FrameTimestamp{}`: `valid == false`, with domain and event `unspecified`.
+No clock, epoch or integration-start mapping is claimed. Specifically, the
+adapter does not do any of the following:
+
+- relabel the Fake fill time (host wall clock) as integration start;
+- relabel host time as `host_monotonic`;
+- treat a GigE fallback timestamp as camera time;
+- subtract exposure from a receive time;
+- infer UTC or PTP from a number.
+
+`backend.hpp` is unchanged. Raw SDK timestamps are neither exposed nor printed.
+
+The common provider accepts only valid integration-start timestamps in its
+declared domain. It therefore **correctly rejects** every Aravis frame. Its
+admission code is unchanged. `aravis_mel_embedding` proves this as **negative**
+evidence:
+
+- Destination buffers are filled with the sentinel `0xA5` and registered.
+  Image `enable()` succeeds, and the real SDK `AcquisitionStart` runs.
+- A test-only observing decorator records the frames the adapter actually
+  returns. Every one meets all non-time admission conditions (layout,
+  configuration and generation, Mono8, complete, span) and carries exactly the
+  default invalid timestamp.
+- `provider_statistics().rejected_frames` increases with them.
+- There are zero Image callbacks, the destination bytes are unchanged, and no
+  stream or callback failure occurs. Health shows the acquisition as `running`
+  (owned, not faulted). Configuration is rejected while it is owned.
+- After explicit `disable()`, configuration works again, the buffers
+  unregister and re-register, and a second enable/disable cycle again yields
+  only rejected frames.
+
+Health state rules were not changed. This is **not** successful MEL image
+publication, and Aravis is not added to the shared positive MEL scenarios.
+
+### Fake-device evidence and its limits
+
+`aravis_stream_contract` runs these scenarios against real `ArvStream`
+receiver threads and SDK buffers:
+
+| Group | Behavior |
+| --- | --- |
+| A | Commands and a single acquisition owner |
+| B | Every pixel checked against `(x + y + native_frame_id) % 255` at 10 000 µs exposure and gain 0, a setup verified by readback |
+| C | Pool exhaustion and release |
+| D | Cancellation of a receive proven blocked in native waits, via `request_stop`, `stop` and `close`, three times each |
+| E | Lease lifetime beyond stop, close and owner destruction; release on another thread; reopen |
+| F | Restart policy |
+| G | SDK-arranged command failures |
+| H | Real SDK arrangements, allocation limits, and the labelled decoded-facts seam (see below) |
+| I | Exception unwind while receive is blocked |
+| J | The shared capture routine, with an independent PGM check |
+
+**Decoded-facts seam.** The `TestHooks::decoded_facts` seam edits only the
+*facts* decoded from real popped buffers before the production validator sees
+them. The pinned Fake cannot emit incomplete, chunked, multipart, padded or
+short buffers, so this is how those payloads are tested. Positive streaming
+never uses a project-generated frame.
+
+**Limits.** The Fake stream is in-process. It does not exercise GVSP packets,
+resend, packet loss, socket buffers, controller privilege, the GigE finalizer's
+register write, disconnection, real exposure timing or throughput.
+
+### SDK versus project sanitizer coverage
+
+The sanitizer lanes instrument the project's adapter, provider and tests only.
+Aravis 0.8.36, GLib and libxml2 are **not** instrumented, so project sanitizer
+coverage does not imply instrumented SDK coverage.
+
+Under TSan this matters for one reason. On Linux, GLib's `g_mutex_lock`, used
+by Aravis's `GAsyncQueue` buffer handoff, is an inline futex rather than
+`pthread_mutex_lock`. TSan cannot see that synchronization. It does see
+`malloc`/`free`/`memset` called from those libraries, so it reports the SDK's
+correctly locked handoffs (`g_queue_pop_tail`, `arv_buffer_set_n_parts`) as
+races.
+
+The two SDK-driving test executables link
+`tests/support/tsan_uninstrumented_sdk.cpp`. Its
+`__tsan_default_suppressions()` lists exactly those two SDK functions.
+`TSAN_OPTIONS`, presets and CI lanes are unchanged, and accesses by the
+project's own code, including reads of leased pixels, remain checked with
+`halt_on_error=1`.
+
 ## Qualification boundaries
 
 The evidence covers the project adapter and tests, executed against the real
@@ -470,7 +798,9 @@ Aravis 0.8.36 library and its in-process Fake camera. It does **not** establish:
 - GVCP/GVSP network behavior, controller privilege, heartbeat or packet
   behavior;
 - thread safety of Aravis itself;
-- image acquisition or timing.
+- camera timing, timestamps, PTP/UTC, transport (GVSP) acquisition,
+  disconnection recovery or hardware performance. GIGE-MEL-009 source
+  acquisition is exercised only with the SDK's in-process Fake stream.
 
 The first physical-camera qualification and a second real SDK implementation
 remain pending. Sanitizer jobs instrument the project's code only, not the
