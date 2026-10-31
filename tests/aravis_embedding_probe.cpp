@@ -1,9 +1,12 @@
 // Focused, TEST-ONLY embedding probe (GIGE-MEL-008): the unchanged common
 // provider driven through make_api_manager(settings, internal Aravis backend)
 // and the upstream getControl/getBuffer functions, with the real Aravis 0.8.36
-// library and its in-process Fake interface. It exercises the MEL CONFIGURATION
-// paths only. It is not a supported Aravis MEL profile: acquisition is not
-// implemented, so Image enable must fail. Optics below are VIRTUAL test values.
+// library and its in-process Fake interface. It exercises the MEL configuration
+// paths and, since GIGE-MEL-009, NEGATIVE image admission: real SDK Fake
+// acquisition runs through the provider, but every frame carries the default
+// invalid FrameTimestamp{}, so the unchanged provider rejects it and no Image
+// is published. This is not a supported Aravis MEL image profile and not
+// successful MEL image publication. Optics below are VIRTUAL test values.
 #include <gige_mel/provider.hpp>
 #include "aravis_fake_support.hpp"
 
@@ -73,6 +76,12 @@ template <class T> struct Reports {
     }
     std::size_t count() { std::lock_guard lock(mutex); return items.size(); }
     T last() { std::lock_guard lock(mutex); CHECK(!items.empty()); return items.back(); }
+    // The report at a fixed index, waiting (bounded) until it exists.
+    T at(std::size_t index) {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 5s, [&] { return items.size() > index; }));
+        return items[index];
+    }
     template <class Predicate> T wait_match(std::size_t after, Predicate predicate) {
         std::unique_lock lock(mutex);
         std::optional<T> found;
@@ -91,6 +100,52 @@ std::map<std::string, std::string> detail_values(const mel::MFA_StatusDetailed& 
     return values;
 }
 
+// GIGE-MEL-009-R1 (finding D) corrected Detailed-Health selector: the
+// required acquisition state AND a valid configuration in the payload.
+auto health_is(std::string state) {
+    return [state = std::move(state)](const mel::MFA_StatusDetailed& r) {
+        const auto v = detail_values(r);
+        return v.count("gige_mel.acquisition_state") && v.at("gige_mel.acquisition_state") == state &&
+               v.at("gige_mel.configuration_valid") == "true";
+    };
+}
+// The reviewed GIGE-MEL-009 selector, kept only to demonstrate the stale
+// batch it accepts; never used to select a report for an assertion.
+bool old_unconditional_selector(const mel::MFA_StatusDetailed&) { return true; }
+
+// Holds ONE MFA_Status callback while armed. Publication calls Status and
+// then Detailed from the same already-captured batch, so the held batch's
+// Detailed report necessarily carries the state captured BEFORE whatever
+// the test does while it is held. Watchdog: expiry is recorded and fails
+// the check; it never counts as a successful release. Lifetime: declared
+// before the publisher is enabled and released before Health is disabled.
+struct StatusGate {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool armed{false}, held{false}, released{false}, expired{false};
+    std::function<void(ir::Channel&, const mel::MFA_Status*)> callback() {
+        return [this](ir::Channel&, const mel::MFA_Status*) {
+            std::unique_lock lock(mutex);
+            if (!armed) return;
+            armed = false;
+            held = true;
+            changed.notify_all();
+            if (!changed.wait_for(lock, 5s, [&] { return released; })) expired = true;
+            held = false;
+        };
+    }
+    void arm() { std::lock_guard lock(mutex); armed = true; held = released = false; }
+    void wait_held() {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 5s, [&] { return held; }));
+    }
+    void release() {
+        { std::lock_guard lock(mutex); released = true; armed = false; }
+        changed.notify_all();
+    }
+    void check() { std::lock_guard lock(mutex); CHECK(!expired); }
+};
+
 // Counts image callbacks; none may ever arrive.
 class CountingListener final : public ir::ImageListener {
 public:
@@ -99,6 +154,102 @@ public:
         images.fetch_add(1);
         if (buffer) (void)buffer->release();
     }
+};
+
+// TEST-ONLY observing decorator around the real Aravis backend. It forwards
+// every call unchanged and records, for each frame the adapter returns to the
+// common provider, whether that frame meets every NON-time admission
+// condition the provider checks, plus its timestamp. It never alters a frame
+// or a result, so the provider sees exactly what the adapter returned.
+struct FrameLog {
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::size_t frames{0}, admissible_except_time{0}, default_timestamp{0};
+    std::uint64_t configuration_generation{0};
+    backend::CameraConfiguration last_configuration{};
+    void record(const backend::FrameLease& f, std::uint64_t started_generation) {
+        const auto& d = f.descriptor();
+        const auto& c = d.configuration;
+        const bool layout = d.width == c.width && d.height == c.height && d.configuration_generation == started_generation &&
+                            d.pixel_format == backend::PixelFormat::mono8 && d.storage_bits_per_pixel == 8 &&
+                            d.significant_bits_per_pixel == 8 && d.bands == 1 && d.row_stride_bytes >= d.width &&
+                            d.height > 0 && d.status == backend::FrameStatus::complete &&
+                            f.bytes().size() >= d.row_stride_bytes * d.height;
+        const auto& t = d.timestamp;
+        const bool unqualified = !t.valid && t.domain == backend::ClockDomain::unspecified &&
+                                 t.event == backend::TimestampEvent::unspecified && t.value.count() == 0 &&
+                                 t.clock_generation == 0;
+        {
+            std::lock_guard lock(mutex);
+            ++frames;
+            if (layout) ++admissible_except_time;
+            if (unqualified) ++default_timestamp;
+            configuration_generation = d.configuration_generation;
+            last_configuration = c;
+        }
+        changed.notify_all();
+    }
+};
+
+class ObservedStream final : public backend::IFrameStream {
+public:
+    ObservedStream(std::unique_ptr<backend::IFrameStream> inner, std::shared_ptr<FrameLog> log)
+        : inner_(std::move(inner)), log_(std::move(log)) {}
+    backend::Status start(std::uint64_t generation) override {
+        generation_ = generation;
+        return inner_->start(generation);
+    }
+    backend::Result<backend::FrameLease> receive(std::chrono::milliseconds timeout) override {
+        auto result = inner_->receive(timeout);
+        if (result) log_->record(result.value(), generation_);
+        return result;
+    }
+    void request_stop() noexcept override { inner_->request_stop(); }
+    void stop() noexcept override { inner_->stop(); }
+    backend::StreamStatistics statistics() const override { return inner_->statistics(); }
+
+private:
+    std::unique_ptr<backend::IFrameStream> inner_;
+    std::shared_ptr<FrameLog> log_;
+    std::uint64_t generation_{0};
+};
+
+class ObservedDevice final : public backend::ICameraDevice {
+public:
+    ObservedDevice(std::shared_ptr<backend::ICameraDevice> inner, std::shared_ptr<FrameLog> log)
+        : inner_(std::move(inner)), log_(std::move(log)) {}
+    backend::CameraCapabilities capabilities() const override { return inner_->capabilities(); }
+    backend::Result<backend::CameraConfiguration> configuration() const override { return inner_->configuration(); }
+    backend::Result<backend::CameraConfiguration> apply(const backend::CameraConfiguration& c) override {
+        return inner_->apply(c);
+    }
+    backend::Result<std::unique_ptr<backend::IFrameStream>> create_stream() override {
+        auto created = inner_->create_stream();
+        if (!created) return created.error();
+        return std::unique_ptr<backend::IFrameStream>(std::make_unique<ObservedStream>(std::move(created).value(), log_));
+    }
+    backend::Status close() override { return inner_->close(); }
+
+private:
+    std::shared_ptr<backend::ICameraDevice> inner_;
+    std::shared_ptr<FrameLog> log_;
+};
+
+class ObservedBackend final : public backend::ICameraBackend {
+public:
+    ObservedBackend(std::shared_ptr<backend::ICameraBackend> inner, std::shared_ptr<FrameLog> log)
+        : inner_(std::move(inner)), log_(std::move(log)) {}
+    std::string_view id() const noexcept override { return inner_->id(); }
+    backend::Result<std::vector<backend::DeviceInfo>> enumerate() override { return inner_->enumerate(); }
+    backend::Result<std::shared_ptr<backend::ICameraDevice>> open(std::string_view id) override {
+        auto opened = inner_->open(id);
+        if (!opened) return opened.error();
+        return std::shared_ptr<backend::ICameraDevice>(std::make_shared<ObservedDevice>(std::move(opened).value(), log_));
+    }
+
+private:
+    std::shared_ptr<backend::ICameraBackend> inner_;
+    std::shared_ptr<FrameLog> log_;
 };
 
 ir::CameraCommand camera_command(std::uint32_t id, const backend::CameraConfiguration& c) {
@@ -136,8 +287,10 @@ void embedding_probe() {
     Reports<ir::CommandStatus> statuses;
     Reports<ir::CameraCommandResp> replies;
     Reports<mel::MFA_StatusDetailed> details;
+    StatusGate status_gate; // outlives the Health publisher (released in cleanup)
     std::vector<std::vector<std::byte>> storage;
     auto listener = std::make_shared<CountingListener>();
+    auto frames = std::make_shared<FrameLog>(); // outlives the provider worker
 
     gige_mel::ProviderSettings settings;
     settings.instance = "aravis-fake-probe";
@@ -145,9 +298,12 @@ void embedding_probe() {
     settings.maximum_registered_buffers = 4;
     settings.horizontal_radians_per_pixel = 0.0002; // VIRTUAL test optics only
     settings.vertical_radians_per_pixel = 0.0003;   // VIRTUAL test optics only
-    settings.timestamp_domain = backend::ClockDomain::device; // unused: no frames
+    // The provider requires a declared domain; the adapter's frames carry
+    // FrameTimestamp{} (no domain), so none can satisfy it.
+    settings.timestamp_domain = backend::ClockDomain::device;
 
-    auto manager = gige_mel::make_api_manager(settings, aravis_fake::make_backend());
+    auto manager = gige_mel::make_api_manager(
+        settings, std::make_shared<ObservedBackend>(aravis_fake::make_backend(), frames));
     CHECK(manager);
     CHECK(!ir::getControl("synthetic", manager));
     auto control = ir::getControl(settings.instance, manager);
@@ -176,11 +332,15 @@ void embedding_probe() {
     CHECK(c2->registerMetadataCallback(statuses.callback()) == ir::Return::Success);
     CHECK(image->registerMetadataCallback(replies.callback()) == ir::Return::Success);
     CHECK(health->registerMetadataCallback(details.callback()) == ir::Return::Success);
+    CHECK(health->registerMetadataCallback(status_gate.callback()) == ir::Return::Success);
 
+    // Installed before Health is enabled. Every gate is released before
+    // Health is disabled/drained.
     struct Cleanup {
         std::function<void()> run;
         ~Cleanup() { try { run(); } catch (...) {} }
     } cleanup{[&] {
+        status_gate.release();
         (void)image->disable();
         (void)health->disable(); // drains admitted Health callbacks
         (void)control->detachChannel(image);
@@ -249,29 +409,121 @@ void embedding_probe() {
     baseline = details.count();
     details.wait_match(baseline, [](const auto& r) { return detail_values(r).at("gige_mel.configuration_valid") == "true"; });
 
-    // Image enable with valid configuration and registered buffers: the
-    // adapter's explicit unsupported stream yields the existing Fail result.
+    // NEGATIVE MEL ADMISSION (GIGE-MEL-009). Real SDK Fake acquisition is
+    // started through the common provider. The adapter returns genuine Mono8
+    // frames that meet every non-time admission condition but carry
+    // FrameTimestamp{} (invalid, unspecified domain/event); the unchanged
+    // provider must reject every one: no Image callback, destination bytes
+    // untouched, no stream failure.
+    constexpr std::byte sentinel{0xA5};
     const auto bytes = static_cast<std::size_t>(image->getCapabilities().getBufferSize());
     std::vector<std::shared_ptr<ir::Buffer>> buffers;
     for (int i = 0; i < 2; ++i) {
-        storage.emplace_back(bytes);
+        storage.emplace_back(bytes, sentinel);
         auto buffer = ir::getBuffer(settings.instance, manager);
         CHECK(buffer && buffer->init(storage.back().data(), bytes, i) == ir::Return::Success);
         CHECK(image->registerBuffer(buffer) == ir::Return::Success);
         buffers.push_back(buffer);
     }
-    CHECK(image->enable() == ir::Return::Fail);
-    const auto stats = gige_mel::provider_statistics(manager);
-    CHECK(contains(stats.last_error, "acquisition is not implemented"));
-    CHECK(stats.delivered_frames == 0 && stats.stream_failures == 0);
-    baseline = details.count();
-    values = detail_values(details.wait_match(baseline, [](const auto&) { return true; }));
+    const auto before = gige_mel::provider_statistics(manager);
+    // FORCED STALE BATCH, idle -> running (R1 finding D). Hold MFA_Status of
+    // a batch captured while idle, enable Image from THIS (external) thread,
+    // record the Detailed count while Status is still held, then release.
+    status_gate.arm();
+    status_gate.wait_held();
+    const std::size_t enable_baseline = details.count(); // held batch's Detailed is not yet delivered
+    CHECK(image->enable() == ir::Return::Success); // AcquisitionStart through the real SDK
+    status_gate.release();
+    const auto stale_idle = details.at(enable_baseline); // first new report, by fixed baseline index
+    CHECK(detail_values(stale_idle).at("gige_mel.acquisition_state") == "idle"); // the OLD state
+    CHECK(old_unconditional_selector(stale_idle)); // the reviewed selector would accept it
+    CHECK(!health_is("running")(stale_idle));      // the corrected predicate rejects it
+    status_gate.check();
+    {
+        // Observe actual returned backend frames AND the provider rejecting them.
+        std::unique_lock lock(frames->mutex);
+        CHECK(frames->changed.wait_for(lock, 5s, [&] { return frames->frames >= 3; }));
+    }
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (gige_mel::provider_statistics(manager).rejected_frames < before.rejected_frames + 3) {
+        CHECK(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(5ms);
+    }
+    std::size_t observed = 0;
+    {
+        std::lock_guard lock(frames->mutex);
+        observed = frames->frames;
+        // Every returned frame met the non-time admission conditions and
+        // carried exactly the default, invalid timestamp.
+        CHECK(frames->admissible_except_time == frames->frames);
+        CHECK(frames->default_timestamp == frames->frames);
+        CHECK(frames->last_configuration == recovery);
+    }
+    // A later report in the required state, by payload (not by count).
+    values = detail_values(details.wait_match(enable_baseline, health_is("running")));
+    CHECK(values.at("gige_mel.acquisition_state") == "running"); // owned, not faulted
+    // Configuration is rejected while acquisition is owned (existing meaning).
+    const auto blocked = error_of(image->send(camera_command(8007, initial)));
+    CHECK(contains(blocked.getDescription(), "disable image acquisition before configuring"));
+
+    // Explicit disable joins and drains the provider worker (AcquisitionStop).
+    // FORCED STALE BATCH, running -> idle: the held batch was captured while
+    // running; disable runs from this thread while its Status is held.
+    status_gate.arm();
+    status_gate.wait_held();
+    const std::size_t disable_baseline = details.count();
+    CHECK(image->disable() == ir::Return::Success);
+    status_gate.release();
+    const auto stale_running = details.at(disable_baseline);
+    CHECK(detail_values(stale_running).at("gige_mel.acquisition_state") == "running"); // the OLD state
+    CHECK(old_unconditional_selector(stale_running));
+    CHECK(!health_is("idle")(stale_running));
+    status_gate.check();
+    const auto after = gige_mel::provider_statistics(manager);
+    CHECK(after.rejected_frames >= before.rejected_frames + 3);
+    CHECK(after.delivered_frames == before.delivered_frames && after.dropped_no_buffer == before.dropped_no_buffer);
+    CHECK(after.stream_failures == before.stream_failures && after.callback_failures == before.callback_failures);
+    CHECK(contains(after.last_error, "timestamp contract"));
+    CHECK(listener->images == 0); // zero Image callbacks
+    for (const auto& block : storage)
+        if (block.size() == bytes)
+            CHECK(std::all_of(block.begin(), block.end(), [&](std::byte value) { return value == sentinel; }));
+    {
+        // Rejections came from returned frames; each rejected frame was one.
+        std::lock_guard lock(frames->mutex);
+        CHECK(after.rejected_frames - before.rejected_frames <= frames->frames && frames->frames >= observed);
+    }
+    values = detail_values(details.wait_match(disable_baseline, health_is("idle")));
     CHECK(values.at("gige_mel.acquisition_state") == "idle" && values.at("gige_mel.configuration_valid") == "true");
-    // Configuration remains possible: no acquisition is owned.
-    CHECK(response(image->send(camera_command(8007, initial)))->getCommandSuccess());
+
+    // Recovery: configuration works again, buffers clean up, and a second
+    // explicit enable/disable cycle starts a fresh acquisition.
+    CHECK(response(image->send(camera_command(8008, initial)))->getCommandSuccess());
+    check_geometry(image->getCapabilities(), initial);
+    for (const auto& buffer : buffers) CHECK(image->unregisterBuffer(buffer) == ir::Return::Success);
+    buffers.clear();
+    const auto initial_bytes = static_cast<std::size_t>(initial.width) * initial.height;
+    for (int i = 0; i < 2; ++i) {
+        storage.emplace_back(initial_bytes, sentinel);
+        auto buffer = ir::getBuffer(settings.instance, manager);
+        CHECK(buffer && buffer->init(storage.back().data(), initial_bytes, 10 + i) == ir::Return::Success);
+        CHECK(image->registerBuffer(buffer) == ir::Return::Success);
+        buffers.push_back(buffer);
+    }
+    const std::size_t frames_before_restart = [&] { std::lock_guard lock(frames->mutex); return frames->frames; }();
+    CHECK(image->enable() == ir::Return::Success);
+    {
+        std::unique_lock lock(frames->mutex);
+        CHECK(frames->changed.wait_for(lock, 5s, [&] { return frames->frames >= frames_before_restart + 2; }));
+        CHECK(frames->last_configuration == initial && frames->default_timestamp == frames->frames);
+    }
+    CHECK(image->disable() == ir::Return::Success);
+    CHECK(listener->images == 0 && gige_mel::provider_statistics(manager).stream_failures == before.stream_failures);
     CHECK(health->disable() == ir::Return::Success);
     for (const auto& buffer : buffers) CHECK(image->unregisterBuffer(buffer) == ir::Return::Success);
-    CHECK(listener->images == 0); // no image callback ever ran
+    for (const auto& block : storage)
+        if (block.size() == bytes || block.size() == initial_bytes)
+            CHECK(std::all_of(block.begin(), block.end(), [&](std::byte value) { return value == sentinel; }));
 }
 
 } // namespace
@@ -286,6 +538,6 @@ int main() {
         std::cerr << "FAIL Aravis MEL embedding probe: " << error.what() << '\n';
         return 1;
     }
-    std::cout << "PASS Aravis MEL configuration-path embedding probe\n";
+    std::cout << "PASS Aravis MEL configuration-path and negative timestamp-admission embedding probe\n";
     return 0;
 }

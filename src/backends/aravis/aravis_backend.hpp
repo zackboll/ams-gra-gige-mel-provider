@@ -1,13 +1,16 @@
 #pragma once
 
-// Optional, internal Aravis camera-control foundation (GIGE-MEL-008). Built
-// only with -DGIGE_MEL_BUILD_ARAVIS=ON; never installed or exported, and not
-// selectable through getAPI_Manager(). Deliberately SDK-type free so callers
-// need no Aravis/GLib include paths. Acquisition is NOT implemented:
-// create_stream() always returns ErrorCode::unsupported.
+// Optional, internal Aravis adapter: camera control (GIGE-MEL-008) and bounded
+// Mono8 source acquisition (GIGE-MEL-009). Built only with
+// -DGIGE_MEL_BUILD_ARAVIS=ON; never installed or exported, and not selectable
+// through getAPI_Manager(). Deliberately SDK-type free so callers need no
+// Aravis/GLib include paths. Frames carry FrameTimestamp{} (unqualified), so
+// the common MEL provider rejects them; see docs/aravis-integration.md.
 
 #include <gige_mel/backend.hpp>
 
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,5 +45,34 @@ struct Inspection {
     std::vector<std::string> problems;                         // precise unsupported/unrepresentable reasons
 };
 Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id);
+
+// Bounded direct capture used by the diagnostic `capture` command and, with
+// the private Fake backend, by tests (the SAME routine). Opens exactly
+// device_id on `backend`, uses the current supported and representable
+// configuration (no feature write), starts one acquisition, waits for one
+// validated Mono8 frame until `deadline`, writes a tightly packed binary PGM
+// (P5, maxval 255; rows copied without source stride padding) to
+// output_path, then stops and closes. Cleanup runs on every path. Device
+// I/O starts only after the arguments are validated.
+struct CaptureReport {
+    std::string device_id;
+    CameraConfiguration configuration;  // frozen readback for the frame
+    std::uint32_t width{0}, height{0};
+    std::size_t source_row_stride{0};
+    std::uint64_t native_frame_id{0};
+    std::uint64_t stream_generation{0};
+    bool timestamp_valid{false};        // always false in GIGE-MEL-009
+    std::size_t pgm_bytes{0};           // total file size written
+    StreamStatistics statistics;
+};
+struct CaptureOutcome {
+    std::optional<CaptureReport> report; // set when a frame was captured and written
+    std::optional<Error> error;          // first failure (start/receive/output)
+    std::optional<Error> cleanup_error;  // stop/close failure, reported separately
+    [[nodiscard]] bool ok() const noexcept { return report && !error && !cleanup_error; }
+};
+inline constexpr std::chrono::milliseconds default_capture_deadline{5000};
+CaptureOutcome capture_one(ICameraBackend& backend, std::string_view device_id, const std::string& output_path,
+                           std::chrono::milliseconds deadline = default_capture_deadline);
 
 } // namespace gige_mel::backend::aravis

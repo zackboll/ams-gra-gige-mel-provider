@@ -21,12 +21,13 @@ if(NOT GIGE_MEL_ARAVIS_FOUND)
     "Provision it explicitly with scripts/provision_aravis.sh PREFIX, then set "
     "PKG_CONFIG_PATH=PREFIX/lib/pkgconfig. See docs/aravis-integration.md.")
 endif()
-message(STATUS "Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION} (internal camera-control adapter): ${GIGE_MEL_ARAVIS_LINK_LIBRARIES}")
+message(STATUS "Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION} (internal camera-control and acquisition adapter): ${GIGE_MEL_ARAVIS_LINK_LIBRARIES}")
 
 # Internal adapter. Not installed or exported; consumers of the installed
 # package never see Aravis, GLib or this target.
 add_library(gige_mel_aravis STATIC
   src/backends/aravis/aravis_backend.cpp
+  src/backends/aravis/aravis_capture.cpp
   src/backends/aravis/camera_profile.cpp)
 target_include_directories(gige_mel_aravis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/aravis)
 target_link_libraries(gige_mel_aravis PUBLIC gige_mel_backend PkgConfig::GIGE_MEL_ARAVIS
@@ -46,12 +47,21 @@ if(BUILD_TESTING)
   target_link_libraries(aravis_adapter_tests PRIVATE gige_mel_aravis_test_support gige_mel_build_options Threads::Threads)
   add_test(NAME aravis_adapter COMMAND aravis_adapter_tests)
 
-  add_executable(aravis_embedding_probe tests/aravis_embedding_probe.cpp)
+  add_executable(aravis_embedding_probe tests/aravis_embedding_probe.cpp tests/support/tsan_uninstrumented_sdk.cpp)
   target_link_libraries(aravis_embedding_probe PRIVATE gige_mel_provider gige_mel_aravis_test_support
     gige_mel_build_options Threads::Threads)
   add_test(NAME aravis_mel_embedding COMMAND aravis_embedding_probe)
 
+  # GIGE-MEL-009 acquisition contract: real SDK Fake streams, pool, cancel,
+  # lifetime, restart, failure cleanup and the shared direct-capture routine.
+  add_executable(aravis_stream_contract_tests tests/aravis_stream_contract.cpp
+    tests/support/tsan_uninstrumented_sdk.cpp)
+  target_link_libraries(aravis_stream_contract_tests PRIVATE gige_mel_aravis_test_support gige_mel_build_options
+    Threads::Threads)
+  add_test(NAME aravis_stream_contract COMMAND aravis_stream_contract_tests)
+
   # --help must succeed without device I/O (no network discovery is started).
   add_test(NAME aravis_diagnostic_help COMMAND gige_mel_aravis_diagnostic --help)
-  set_tests_properties(aravis_adapter aravis_mel_embedding aravis_diagnostic_help PROPERTIES TIMEOUT 60)
+  set_tests_properties(aravis_adapter aravis_mel_embedding aravis_stream_contract aravis_diagnostic_help
+    PROPERTIES TIMEOUT 120)
 endif()
