@@ -95,14 +95,52 @@ has no backend-name branch.
 - no installed path below the prefix mentions Aravis, except
   `share/doc/…/docs/aravis-integration.md`. The prefix's own name is not
   examined;
-- every non-documentation symlink (R2) resolves, within 16 hops and inside the
-  prefix, to an existing regular file. Its **resolved content is checked under
-  the link's own public-path policy**, so a public alias of a file inside the
-  excluded documentation tree is still scanned. The only links skipped are
-  same-directory `libX.so[.N]` → `libX.so.N.M` version links to an ELF file;
-  their target is a non-documentation regular file that receives the symbol
-  checks itself. Broken links, cycles, directory links and targets outside the
-  prefix are explicit `installed-links` failures.
+- every non-documentation symlink resolves to an existing regular file inside
+  the prefix, and that file's **content is checked under the link's own
+  public-path policy**. A public alias of a file in the excluded documentation
+  tree is still scanned (R2). R3 made the following rules precise:
+  - **Filesystem-order resolution.** The verifier resolves a link one
+    component at a time, using a queue of unresolved components. A symlink in
+    any component, directory or final, is expanded before the next component
+    is processed. A following `..` therefore applies to the directory that the
+    link actually reaches. Relative targets are interpreted in the link's own
+    directory. `..` is never simplified lexically (R2's `normpath` was): with
+    `alias -> /outside/a/b/c/d`, `alias/../x` is `/outside/a/b/c/x`, not
+    the sibling `x` of `alias`.
+  - **Containment.** The boundary is the canonical (`realpath`) install
+    prefix. A link whose relative `..` would climb above it fails. So does an
+    absolute target that does not spell that canonical path component by
+    component (`..` is not simplified there either). The rule applies to
+    **every** expansion, including links in directory components and links
+    under the excluded documentation tree that a public path passes through.
+    An excursion outside the prefix fails even if a later link returns inside.
+    A clean outside target fails regardless of its content.
+  - **Hop accounting.** At most **16 symlink expansions** are followed per
+    resolution, counting directory-component and final-component links
+    alike: 16 pass, the 17th fails. Cycles, including cycles in directory
+    components, fail as overlong chains.
+  - **Explicit failures.** Missing targets, cycles, overlong chains, a
+    non-directory used as a directory, `lstat`/`readlink`/read errors and
+    final targets that are not regular files (including directories and
+    FIFOs) are all `installed-links` failures. No traceback or blocking open
+    is possible: reads use `O_NOFOLLOW | O_NONBLOCK` and confirm that the
+    opened inode is the validated one.
+  - **One file throughout.** Containment, the regular-file check, ELF
+    classification, version-link eligibility, the text read and `nm` all use
+    the one canonical file that resolution produced. Diagnostics and the
+    policy still use the public link's path.
+  - **Version-link exemption.** A link is skipped, rather than scanned under
+    its own name, only when its **actual** target meets all of these
+    conditions: it is a regular ELF file; it is in the link's own real
+    directory; it is named `<link>.N[.M…]` for a link named
+    `lib….so[.N…]`; it lies outside the documentation tree; and the walk
+    enumerated it as a regular file, so its own symbol check runs. A clean
+    lexical lookalike cannot satisfy this, and neither can a library-named
+    file in the documentation tree. The real `libgige_mel_provider.so` →
+    `.so.0` → `.so.0.1.0` chain qualifies.
+  - **Quiescence.** The install tree is assumed not to change during
+    verification. The inode check detects a swapped final file, but this is
+    not a concurrent-filesystem security design.
 
 `tests/verify_package_isolation_tests.py` (CTest `package_isolation_verifier`,
 which needs no SDK and runs in every CI job) exercises the real verifier CLI

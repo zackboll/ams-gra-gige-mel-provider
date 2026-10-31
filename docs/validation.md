@@ -1,5 +1,146 @@
 # Bootstrap validation record
 
+## GIGE-MEL-008-R3 filesystem-order symlink resolution (2026-11-01)
+
+This is an ordinary corrective commit on the R2 head, commit
+`a7334529f6dc7bc672d54e1d056a0c79e828f8d3`, tree
+`d928455c043705137448ab4699d1e882e8f68615`. The local branch, the remote
+branch and the PR #8 head all matched that revision, and the worktree was
+clean. Main was unchanged: `039de755644ad2b15dd5827878ae71c028218e8f`, tree
+`01476757e59fec54f66de1f3fa0820f0429b7375`. Only the Python verifier, its
+test suite and these two documents changed. The C++ sources and tests,
+public interfaces, CMake, the workflow, manifests and provisioning are
+unchanged.
+
+### Finding and correction
+
+R2's `resolve_link()` computed each hop as
+`normpath(current.parent / target)`. That collapses `..` **before** any
+preceding directory symlink is expanded. With
+`share/doc/…/alias -> <outside>/a/b/c/d`, the public link
+`lib/libextra.so -> ../share/doc/…/alias/../../../../lib/libextra.so.1`
+lexically names the clean `<prefix>/lib/libextra.so.1`. The kernel resolves it
+to `<outside>/lib/libextra.so.1`. R2 validated the lexical file and treated the
+pair as a same-directory version link, so it skipped the public link. It then
+scanned only the clean sibling and reported success.
+
+R3 resolves each link in filesystem order, inside the canonical prefix, with
+a queue of unresolved components. Any expansion that leaves the prefix fails.
+All 16 permitted expansions count, including directory-component links. The
+same resolved inode is opened with `O_NOFOLLOW|O_NONBLOCK`, classified, read
+and passed to `nm`. The version-link exemption is evaluated only on that
+**actual** target, which must be enumerated and lie outside the documentation
+tree. See `docs/aravis-integration.md` for the full contract.
+
+### Before/after: permanent fixture suite (stub `ldd`/`nm`/`cmake`)
+
+The baseline verifier is the unchanged reviewed blob
+`6ceb07ce071c0cf049acacde0b1a0cd8c42c18c0`, extracted with
+`git cat-file` to `/tmp/gm8/r3/baseline/scripts/`. Its `git hash-object`
+matches the blob, and its SHA-256 is `47c5b620…2a66`. The R3 test file was
+copied unchanged next to it (`cmp` identical), so fixtures, stubs and
+expectations are identical in both runs.
+
+| Case | a733452 verifier | R3 verifier |
+| --- | --- | --- |
+| 01–09 (the 17 R2 cases) | pass | pass |
+| 10 clean outside header via `alias/../clean.hpp` | **exit 0, "package isolation verified"** (`3 non-documentation text files are Aravis-free`) | `FAIL [installed-links] include/gige_mel/optional.hpp: link share/doc/…/alias -> <outside>/a/b/c/d resolves outside the installation prefix` |
+| 11 outside forbidden library hidden by a clean lexical `.so.1` | **exit 0, "package isolation verified"** (`2 installed binaries have no Aravis symbols`) | `FAIL [installed-links] lib/libextra.so: link share/doc/…/alias -> … resolves outside the installation prefix`; the clean sibling is still `nm`-scanned and passes |
+| 12 in-prefix composition, forbidden actual header | pass, only because R2 validated the lexical file but then read the *unresolved* public path, which the kernel resolved | pass, validating and reading the same resolved file |
+| 12b in-prefix composition, forbidden actual library | **exit 0** (alias skipped as a "version link") | `FAIL [installed-symbols] lib/libextra.so contains … arv_camera_new` |
+| 12c clean supported compositions | pass, but scans 2 binaries instead of the 3 actually reached | pass, scans 3 |
+| 13 outside excursion returning inside | **exit 0** | two `installed-links` "outside the installation prefix" failures |
+| 14 directory-component cycle | fails, but as "outside … or unresolvable" | "link chain exceeds 16 symlink expansions" |
+| 14b exactly 16 expansions | **wrongly rejected** (final chain of 16) | pass |
+| 14c 17 expansions | the directory chain is not counted | both chains fail at the 17th expansion |
+| 15 FIFO/non-directory/unstatable components | **uncaught `PermissionError` traceback** | four explicit failures |
+| 16, 16b ordinary version links and forbidden regular file | pass | pass |
+
+Baseline: 29 run, 9 failed. R3: 29 run, 0 failed.
+
+### Before/after: real compiled ELF files and real `nm`
+
+`/tmp/gm8/r3/elf-demo` is a fresh real install of `build/aravis-dev`. Two
+shared objects were compiled with `gcc -shared` and the same soname:
+
+- the clean `<prefix>/lib/libextra.so.1` (`nm -D`: `T extra_clean`);
+- the outside `<outside>/lib/libextra.so.1` (`nm -D`: `T arv_camera_new`).
+
+The misleading public alias uses the exact link text above. `normpath` gives
+`<prefix>/lib/libextra.so.1`; `realpath -e` gives
+`<outside>/lib/libextra.so.1`. The verifier used the real SDK-enabled
+adapter, provider, `ldd`, `nm`, `cmake` and consumer, not stubs:
+
+- **a733452:** exit 0, "package isolation verified" (`3 installed binaries
+  have no Aravis symbols`).
+- **R3:** exit 1 with `FAIL [installed-links] lib/libextra.so: link
+  share/doc/ams-gra-gige-mel-provider/alias -> <outside>/a/b/c/d resolves
+  outside the installation prefix`.
+- **Control:** the byte-identical forbidden ELF installed as an ordinary
+  `lib/libextra.so.1` in a fresh prefix is rejected by **both** verifiers
+  with `FAIL [installed-symbols] lib/libextra.so.1 contains Aravis/GObject
+  symbols: arv_camera_new`.
+
+### Permanent regressions and counts
+
+`tests/verify_package_isolation_tests.py` grows from **17 to 29** cases. The
+17 existing cases and their assertions are unchanged. The `nm` stub is also
+content-aware: a `FIXTURE-SYMBOL=` marker affects only the file that carries
+it, and the stub records each scanned path. The new cases do not use the
+global `FIXTURE_NM_SYMBOL`. Each case first checks its fixture facts with
+`realpath` and `normpath`, independently of the verifier. It then requires
+the specific failure and an exact failure count. The new cases are 10, 11,
+12, 12b, 12c, 13, 14, 14b, 14c, 15, 16 and 16b. CTest entries are unchanged:
+**8** SDK-free and **11** SDK-enabled.
+
+### Local results (executed)
+
+- **Python suite:** 29/29 pass. It ran as uid 1000, so the
+  unstatable-directory branch of case 15 was exercised.
+- **CTest:** the GCC dev, Release and Clang 19 dev SDK-free builds pass
+  **8/8** each. The GCC dev, Release and Clang 19 dev Aravis builds pass
+  **11/11** each.
+  - The C++ inputs were unchanged, so the existing builds were reused. The
+    incremental build only reran the pinned-dependency check.
+  - `package_isolation_verifier` also passes in the existing ASan, TSan,
+    Aravis-ASan and Aravis-TSan build trees.
+  - The sanitizer C++ suites were not rerun, because no C++ changed.
+- **Offline verifiers:** `vendor_upstream.py --verify` (97 files) and
+  `verify_json.py` (2 files) pass.
+- **Real packages:** each of the dev, Release and Clang Aravis builds was
+  installed to a fresh `/tmp/gm8/r3/real/<build>/gige-mel-aravis-install`.
+  Each was verified with its own consumer build directory. In each run:
+  - the adapter loads `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`;
+  - the provider has 6 dependencies and none from the Aravis/GLib stack;
+  - the install has 157 paths, 97 clean text files and 2 clean binaries;
+  - the consumer cache has 0 SDK-discovery entry names, and the consumer
+    builds and runs; and
+  - the run ends with "package isolation verified".
+
+  The only symlinks are `lib/libgige_mel_provider.so` and `.so.0`. Both
+  resolve to `lib/libgige_mel_provider.so.0.1.0` and are exempt as version
+  links. A logging `nm` wrapper around real `/usr/bin/nm` shows that the
+  scan covered exactly `libgige_mel_backend.a` and
+  `libgige_mel_provider.so.0.1.0`.
+- **Whitespace:** `git diff --check` is clean over the R3 range and the full
+  PR range.
+
+### Hosted CI and final revision
+
+The final commit cannot record its own hash. The R3 section of the PR #8
+description records the pushed commit, its tree and its hosted results for
+the push and pull_request workflows.
+
+### Remaining limitations
+
+The new symlink arrangements are verifier fixtures and controlled
+demonstrations; they are not findings about the real package. The verifier
+assumes a quiescent install tree; it is not a concurrent-filesystem or
+file-descriptor-relative security design. The fixture `ldd`/`nm`/`cmake`
+stubs exercise the verifier only. The installed-consumer qualification comes
+from the real-package runs above. No hardware, camera, acquisition, clock
+mapping or full MEL qualification is claimed.
+
 ## GIGE-MEL-008-R2 review corrections (2026-11-01)
 
 This is an ordinary corrective commit on top of the R1 head: commit
@@ -37,7 +178,13 @@ uninstrumented).
   The only exemption is a same-directory `libX.so[.N]` → `libX.so.N.M` version
   link to an ELF file; that target is itself a non-documentation regular file
   scanned with symbol checks. Broken links, cycles, directory links and
-  outside targets fail explicitly (`installed-links`).
+  outside targets fail explicitly (`installed-links`). *(Superseded by R3: R2's
+  resolution was not complete. It normalized each hop lexically (`normpath`),
+  collapsing `..` before expanding a preceding directory symlink, so it could
+  validate and scan a clean in-prefix file while the public link actually
+  reached a different file outside the prefix. Its hop count and containment
+  also ignored directory-component links. The 17 R2 fixture cases did pass as
+  recorded below.)*
 - **D. Documentation.** The R1 claim that `check_current` runs in
   `capabilities_from` is marked superseded above; the implementation is
   unchanged.

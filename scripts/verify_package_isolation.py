@@ -18,15 +18,22 @@ Checks:
   installed-symbols  installed libraries define/require no Aravis symbols
   installed-names    no installed file or directory name below the prefix
                      mentions Aravis, except the intended documentation file
-  installed-links    every non-documentation symlink resolves, within a bounded
-                     number of hops and inside the prefix, to an existing
-                     regular file; its RESOLVED content is then checked under
-                     the LINK's own (public) path policy, so a public alias of
-                     an excluded documentation file is still scanned. Only a
-                     same-directory libX.so[.N] -> libX.so.N.M version link to an
-                     ELF file is skipped, because that target is itself a
-                     scanned public path. Directory links, cycles, broken links
-                     and targets outside the prefix are explicit failures.
+  installed-links    every non-documentation symlink is resolved in FILESYSTEM
+                     order (a symlink in a directory component is expanded
+                     before a following ".."), counting every expansion
+                     (16 allowed), and no expansion may leave the canonical
+                     prefix, even transiently. The final target must be an
+                     existing regular file; exactly that file's content is
+                     then checked under the LINK's own (public) path policy,
+                     so a public alias of an excluded documentation file is
+                     still scanned. Only a libX.so[.N] -> libX.so.N.M version
+                     link whose ACTUAL target is a regular ELF, enumerated,
+                     non-documentation file in the link's own directory is
+                     skipped, because that target is symbol-checked itself.
+                     Directory links, cycles, overlong chains, broken links,
+                     unresolvable components and excursions outside the
+                     prefix are explicit failures. The tree is assumed
+                     quiescent during verification.
   consumer           a separate consumer configures (without PKG_CONFIG_PATH),
                      builds and runs against the install prefix
 """
@@ -36,6 +43,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -191,83 +199,179 @@ def scan_symbols(verifier: Verifier, path: Path, relative: Path, kind: str) -> b
 MAX_LINK_HOPS = 16
 
 
-def resolve_link(prefix: Path, path: Path) -> tuple[Path | None, str]:
-    """Follows one installed symlink chain hop by hop, bounded.
+OUTSIDE = "outside the installation prefix"
+# libX.so[.N...] -> libX.so.N[.M...]: both names are matched exactly.
+LIBRARY_LINK_NAME = re.compile(r"lib.+\.so(\.[0-9]+)*")
+VERSION_SUFFIX = re.compile(r"[0-9]+(\.[0-9]+)*")
 
-    Returns (final regular-file target, "") or (None, reason). Unsupported:
-    a missing target, a link cycle or overlong chain, any hop outside the
-    installation prefix, and a final target that is not a regular file
-    (directory links would hide content os.walk does not traverse).
+
+def strip_root(root: Path, pieces: list[str]) -> list[str] | None:
+    """For an ABSOLUTE link target split on "/", returns its components after
+    the canonical root, or None when it does not spell the root. Only the
+    no-op components "" and "." are skipped; ".." is never simplified, so
+    "/…/prefix/../prefix/x" counts as leaving the prefix. The root's
+    components are canonical real directories, so spelling them reaches
+    exactly the root without expanding any symlink."""
+    rest, index = pieces[1:], 0
+    for wanted in root.parts[1:]:
+        while index < len(rest) and rest[index] in ("", "."):
+            index += 1
+        if index >= len(rest) or rest[index] != wanted:
+            return None
+        index += 1
+    return rest[index:]
+
+
+def resolve_installed(root: Path, relative: Path) -> tuple[Path, os.stat_result] | str:
+    """Resolves an installed path in FILESYSTEM order, inside the canonical root.
+
+    Returns (canonical target relative to root, its lstat) or a failure
+    reason. Components are consumed from a queue. A symlink in ANY position
+    (directory or final component) is expanded by pushing its target's
+    components to the front of the queue, so a following ".." acts on the
+    directory the link actually reaches; relative targets are interpreted in
+    the link's own directory. `resolved` only ever holds lstat-verified real
+    directories below the root, so ".." just drops the last one; nothing is
+    normalized lexically. Every expansion counts towards MAX_LINK_HOPS
+    (16 are allowed, the 17th fails). Any expansion or ".." that leaves the
+    root fails at once: a later link pointing back inside does not excuse
+    the excursion. The install tree is assumed quiescent while verified.
     """
-    root = prefix.resolve()
-    current = path
-    for _ in range(MAX_LINK_HOPS):
-        if not current.is_symlink():
-            break
+    resolved: list[str] = []
+    pending: list[str] = list(relative.parts)
+    expansions = 0
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue  # resolved is a directory here: a non-directory with pending parts fails below
+        if part == "..":
+            if not resolved:
+                return f"'..' above the prefix resolves {OUTSIDE}"
+            resolved.pop()
+            continue
+        component = Path(*resolved, part)
         try:
-            target = os.readlink(current)
+            info = os.lstat(root / component)
+        except FileNotFoundError:
+            return f"broken link: target {component} does not exist"
         except OSError as error:
-            return None, f"cannot read link: {error.strerror or error}"
-        current = Path(os.path.normpath(current.parent / target))
-        try:
-            current.parent.resolve(strict=True).relative_to(root)
-        except (OSError, ValueError):
-            return None, f"link hop {current} is outside the installation prefix or unresolvable"
-    else:
-        return None, f"link chain exceeds {MAX_LINK_HOPS} hops (cycle?)"
-    if not os.path.lexists(current):
-        return None, f"broken link: target {current} does not exist"
-    if current.is_dir():
-        return None, f"directory link to {current} is unsupported (its content would not be traversed)"
-    if not current.is_file():
-        return None, f"link target {current} is not a regular file"
-    return current, ""
+            return f"cannot stat {component}: {error.strerror or error}"
+        if stat.S_ISLNK(info.st_mode):
+            expansions += 1
+            if expansions > MAX_LINK_HOPS:
+                return f"link chain exceeds {MAX_LINK_HOPS} symlink expansions at {component} (cycle?)"
+            try:
+                target = os.readlink(root / component)
+            except OSError as error:
+                return f"cannot read link {component}: {error.strerror or error}"
+            if not target:
+                return f"link {component} has an empty target and is unresolvable"
+            pieces = target.split("/")
+            if target.startswith("/"):
+                rest = strip_root(root, pieces)
+                if rest is None:
+                    return f"link {component} -> {target} resolves {OUTSIDE}"
+                resolved, pieces = [], rest
+            pending[:0] = pieces
+            continue
+        if pending and not stat.S_ISDIR(info.st_mode):
+            return f"unresolvable component: {component} is not a directory"
+        resolved.append(part)
+    final = Path(*resolved)
+    try:
+        info = os.lstat(root / final)
+    except OSError as error:
+        return f"cannot stat link target {final}: {error.strerror or error}"
+    if stat.S_ISDIR(info.st_mode):
+        return f"directory link to {final} is unsupported (its content would not be traversed)"
+    if not stat.S_ISREG(info.st_mode):
+        return f"link target {final} is not a regular file"
+    return final, info
 
 
-def is_library_version_link(link: Path, target: Path) -> bool:
-    """Narrow exception: libX.so[.N] -> regular ELF libX.so.N.M in the SAME directory.
+def read_validated(path: Path, expected: os.stat_result) -> bytes:
+    """Reads exactly the validated regular file: the final component is not
+    followed, a special file cannot block the open, and the opened inode
+    must be the one that was validated. Raises OSError otherwise."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
+            raise OSError(f"{path} is not the validated regular file")
+        return handle.read()
 
-    The caller has already excluded documentation paths, so the target is a
-    non-documentation installed regular file that the scan visits in its own
-    right, under the public policy, with symbol checks.
+
+def is_library_version_link(link: Path, target: Path, enumerated: set[Path]) -> bool:
+    """Narrow exception: libX.so[.N] -> libX.so.N.M in the SAME actual directory.
+
+    `link` is the public link's path and `target` its ACTUAL resolved
+    target, both relative to the canonical root; the caller has established
+    that the target is a regular ELF file. The target must also be a
+    non-documentation file that the walk enumerated (and, being a regular
+    file, will itself receive the symbol checks under the public policy).
+    A lexical lookalike cannot qualify, because only the actual target is
+    compared.
     """
-    return (target.parent == link.parent and link.name.startswith("lib") and ".so" in link.name
-            and target.name.startswith(link.name) and target.name != link.name)
+    suffix = target.name[len(link.name) + 1:]
+    return (target.parent == link.parent and not is_documentation(target) and target in enumerated
+            and LIBRARY_LINK_NAME.fullmatch(link.name) is not None
+            and target.name.startswith(link.name + ".") and VERSION_SUFFIX.fullmatch(suffix) is not None)
 
 
 def check_installed_content(verifier: Verifier, prefix: Path, paths: list[Path]) -> None:
     text_files = binaries = 0
     text_clean = symbols_clean = True
+    try:
+        root = prefix.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        verifier.fail("installed-links", f"cannot canonicalize the installation prefix {prefix}: {error}")
+        verifier.fail("installed-text", "installed content was not checked")
+        return
+    enumerated = set(paths)
     for relative in paths:
-        path = prefix / relative
         if is_documentation(relative):
             continue
-        if path.is_symlink():
-            target, reason = resolve_link(prefix, path)
-            if target is None:
-                verifier.fail("installed-links", f"{relative}: {reason}")
+        # walk() does not follow directory links, so every ancestor of
+        # `relative` is a real directory below the canonical root.
+        path = root / relative
+        try:
+            info = os.lstat(path)
+        except OSError as error:
+            verifier.fail("installed-text", f"cannot stat {relative}: {error.strerror or error}")
+            text_clean = False
+            continue
+        is_link = stat.S_ISLNK(info.st_mode)
+        if is_link:
+            resolution = resolve_installed(root, relative)
+            if isinstance(resolution, str):
+                verifier.fail("installed-links", f"{relative}: {resolution}")
                 text_clean = False
                 continue
-            try:
-                is_elf = target.read_bytes()[:4] == b"\x7fELF"
-            except OSError as error:
-                verifier.fail("installed-links", f"cannot read link target of {relative}: {error.strerror or error}")
-                text_clean = False
-                continue
-            if is_elf and is_library_version_link(path, target):
-                continue  # the regular ELF target is a public path and receives symbol checks itself
-            # Every other link: its RESOLVED content is checked under the
-            # link's own (public) path policy below, never the target's.
-            # Documentation exclusion of the target does not exempt the alias.
-        elif path.is_dir():
+            # From here on ONLY the actual resolved file is read, classified
+            # and symbol-checked, under the LINK's own (public) path policy,
+            # never the target's: documentation exclusion of a target does
+            # not exempt its public alias.
+            target, info = resolution
+            path = root / target
+        elif stat.S_ISDIR(info.st_mode):
+            continue
+        elif not stat.S_ISREG(info.st_mode):
+            verifier.fail("installed-text", f"{relative} is not a regular file")
+            text_clean = False
             continue
         try:
-            data = path.read_bytes()
+            data = read_validated(path, info)
         except OSError as error:
-            verifier.fail("installed-text", f"cannot read {relative}: {error.strerror or error}")
+            if is_link:
+                verifier.fail("installed-links", f"cannot read link target of {relative}: {error.strerror or error}")
+            else:
+                verifier.fail("installed-text", f"cannot read {relative}: {error.strerror or error}")
             text_clean = False
             continue
         kind = binary_kind(data[:8])
+        if is_link and kind == "elf" and is_library_version_link(relative, target, enumerated):
+            continue  # the actual regular ELF target is an enumerated public file, symbol-checked itself
         if kind is not None:
             binaries += 1
             symbols_clean = scan_symbols(verifier, path, relative, kind) and symbols_clean
