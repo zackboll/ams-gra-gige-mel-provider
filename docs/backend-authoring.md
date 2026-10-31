@@ -169,7 +169,7 @@ GenTL standardizes the transport-layer producer boundary; it does not remove cam
 
 Do not force every backend through GenTL. An SDK with a well-supported native API can implement `ICameraBackend` directly. GenTL is one useful adapter implementation, not the provider's universal internal ABI.
 
-## Current real-SDK adapter: Aravis control foundation
+## Current real-SDK adapter: Aravis control and source acquisition
 
 The optional `src/backends/aravis/` adapter (GIGE-MEL-008, Aravis 0.8.36) is the
 first code that follows this guide against a real SDK. It writes GenICam nodes
@@ -177,9 +177,13 @@ directly instead of using the `ArvCamera` convenience setters described above.
 It keeps the profile translation in an SDK-free `camera_profile.cpp`. Its
 direct tests (`aravis_adapter`) cover the unknown-device, exclusive-open,
 validation, readback and close items from the checklist below, using Aravis's
-in-process Fake device. It is **not yet a supported adapter**: acquisition
-(stream, leases, stop wakeup, timestamps), a portability `BackendCase` and any
-hardware qualification are pending. See [Aravis integration](aravis-integration.md).
+in-process Fake device. GIGE-MEL-009 adds `IFrameStream`: SDK-buffer-backed
+leases that survive stop and close, a bounded pool, receive timeout, stop and
+close wakeup, restart and failure cleanup (`aravis_stream_contract`). It is
+**not yet a supported adapter**: timestamps are deliberately invalid (no time
+mapping), so the common provider rejects its frames; disconnection handling, a
+portability `BackendCase` and any hardware qualification are pending. See
+[Aravis integration](aravis-integration.md).
 
 ## Adapter acceptance checklist
 

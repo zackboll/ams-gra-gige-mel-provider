@@ -4,6 +4,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <initializer_list>
 #include <limits>
 #include <utility>
@@ -433,6 +434,102 @@ Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& c, const
     for (auto* group : {&roi_x, &roi_y, &timing})
         for (auto& write : *group) plan.push_back(std::move(write));
     return plan;
+}
+
+// ---------------------------------------------------------------------------
+// Acquisition profile.
+
+Result<PoolPlan> plan_pool(std::int64_t payload_size, const CameraConfiguration& frozen, std::size_t buffers,
+                           std::size_t frame_limit, std::size_t pool_limit) {
+    if (payload_size <= 0)
+        return fail(ErrorCode::unsupported, "PayloadSize returned " + std::to_string(payload_size) +
+                                                "; a positive payload is required; nothing was allocated");
+    const auto payload = static_cast<std::uint64_t>(payload_size);
+    // Both factors are uint32_t, so the product is exact in 64 bits.
+    const std::uint64_t image = std::uint64_t{frozen.width} * std::uint64_t{frozen.height};
+    if (image == 0)
+        return fail(ErrorCode::unsupported, "the frozen configuration has an empty image; nothing was allocated");
+    if (payload < image)
+        return fail(ErrorCode::unsupported, "PayloadSize " + std::to_string(payload) + " bytes is smaller than the " +
+                                                std::to_string(frozen.width) + "x" + std::to_string(frozen.height) +
+                                                " Mono8 image (" + std::to_string(image) + " bytes); nothing was allocated");
+    if (payload > std::numeric_limits<std::size_t>::max() || payload > frame_limit)
+        return fail(ErrorCode::resource_exhausted, "PayloadSize " + std::to_string(payload) +
+                                                       " bytes exceeds the per-frame limit of " + std::to_string(frame_limit) +
+                                                       " bytes; nothing was allocated");
+    if (buffers == 0) return fail(ErrorCode::invalid_argument, "the source pool needs at least one buffer");
+    const auto per_buffer = static_cast<std::size_t>(payload);
+    if (per_buffer > std::numeric_limits<std::size_t>::max() / buffers || per_buffer * buffers > pool_limit)
+        return fail(ErrorCode::resource_exhausted, std::to_string(buffers) + " buffers of " + std::to_string(per_buffer) +
+                                                       " bytes exceed the pool limit of " + std::to_string(pool_limit) +
+                                                       " bytes; nothing was allocated");
+    return PoolPlan{per_buffer, buffers, per_buffer * buffers};
+}
+
+FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguration& frozen) {
+    FrameDecision d;
+    const auto reject = [&](std::string reason, ErrorCode code = ErrorCode::io_error) {
+        d.verdict = FrameVerdict::reject;
+        d.code = code;
+        d.reason = "native frame " + std::to_string(f.frame_id) + " rejected: " + std::move(reason);
+        return d;
+    };
+    if (f.status == NativeStatus::incomplete) {
+        d.verdict = FrameVerdict::incomplete;
+        d.reason = "native frame " + std::to_string(f.frame_id) + " is incomplete (SDK buffer status " +
+                   std::to_string(f.raw_status) + ")";
+        return d;
+    }
+    if (f.status != NativeStatus::success)
+        return reject("SDK buffer status " + std::to_string(f.raw_status) + " is not a completed image", ErrorCode::unsupported);
+    if (f.payload != NativePayload::image)
+        return reject("payload type " + std::to_string(f.raw_payload) +
+                      " is not a plain image (chunk, extended-chunk, multipart and other payloads are unsupported)", ErrorCode::unsupported);
+    if (f.has_chunks) return reject("the buffer carries chunk data, which is unsupported", ErrorCode::unsupported);
+    if (f.parts != 1) return reject(std::to_string(f.parts) + " parts; exactly one image part is supported", ErrorCode::unsupported);
+    if (!f.part_is_2d_image) return reject("part 0 is not a 2-D image", ErrorCode::unsupported);
+    if (f.pixel_format != pfnc_mono8) {
+        char code[16];
+        std::snprintf(code, sizeof code, "0x%08x", static_cast<unsigned>(f.pixel_format));
+        return reject(std::string("pixel format ") + code +
+                      " is not Mono8 (0x01080001); packed and other formats are unsupported", ErrorCode::unsupported);
+    }
+    const auto geometry = [](auto w, auto h, auto x, auto y) {
+        return std::to_string(w) + "x" + std::to_string(h) + "@(" + std::to_string(x) + "," + std::to_string(y) + ")";
+    };
+    if (f.width != frozen.width || f.height != frozen.height || f.offset_x != frozen.offset_x ||
+        f.offset_y != frozen.offset_y)
+        return reject("geometry " + geometry(f.width, f.height, f.offset_x, f.offset_y) +
+                      " differs from the frozen configuration " +
+                      geometry(frozen.width, frozen.height, frozen.offset_x, frozen.offset_y));
+    if (f.padding_x < 0 || f.padding_y != 0)
+        return reject("padding (" + std::to_string(f.padding_x) + ", " + std::to_string(f.padding_y) +
+                      ") is unsupported; only nonnegative X padding without Y padding is representable", ErrorCode::unsupported);
+    if (!f.data_present) return reject("the SDK reported no image data");
+    // Row stride: Mono8 is one byte per pixel plus the per-row X padding.
+    // Width/height equal the uint32 configuration here, so they are positive.
+    const auto width = static_cast<std::uint64_t>(f.width);
+    const auto pad = static_cast<std::uint64_t>(f.padding_x);
+    if (pad > std::numeric_limits<std::size_t>::max() - width) return reject("row stride overflows");
+    const auto stride = static_cast<std::size_t>(width + pad);
+    const auto height = static_cast<std::size_t>(f.height);
+    if (height == 0 || stride > std::numeric_limits<std::size_t>::max() / height) return reject("image span overflows");
+    const std::size_t span = stride * height;
+    // The image part must lie inside both the received payload and the
+    // allocation (subtractions are guarded, so nothing wraps).
+    if (f.received_bytes > f.capacity_bytes || f.part_offset > f.received_bytes ||
+        f.image_bytes > f.received_bytes - f.part_offset)
+        return reject("SDK image part [" + std::to_string(f.part_offset) + ", +" + std::to_string(f.image_bytes) +
+                      ") is not inside the received size " + std::to_string(f.received_bytes) +
+                      " within the buffer capacity " + std::to_string(f.capacity_bytes));
+    if (f.image_bytes < span)
+        return reject("SDK image size " + std::to_string(f.image_bytes) + " bytes is shorter than row stride " +
+                      std::to_string(stride) + " x height " + std::to_string(height) + " = " + std::to_string(span) +
+                      " bytes; no padding is fabricated");
+    d.verdict = FrameVerdict::accept;
+    d.row_stride = stride;
+    d.span_bytes = span;
+    return d;
 }
 
 } // namespace gige_mel::backend::aravis_profile

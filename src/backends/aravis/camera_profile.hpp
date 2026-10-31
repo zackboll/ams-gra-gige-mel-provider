@@ -140,4 +140,73 @@ struct NativeWrite {
 Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& request, const NativeSnapshot& current,
                                              const NativeSnapshot& envelope);
 
+// ---------------------------------------------------------------------------
+// Acquisition profile (GIGE-MEL-009). SDK-free decisions consumed by the
+// adapter's stream; the SDK mechanics stay in aravis_backend.cpp.
+
+// Fixed source pool and explicit allocation limits. A run allocates exactly
+// pool_buffers SDK buffers of PayloadSize bytes each, once, before the
+// acquisition-start command; nothing is allocated per frame afterwards.
+inline constexpr std::size_t pool_buffers = 4;
+inline constexpr std::size_t maximum_frame_bytes = std::size_t{64} << 20; // 64 MiB per buffer
+inline constexpr std::size_t maximum_pool_bytes = std::size_t{256} << 20; // 256 MiB per run
+// The only accepted native acquisition mode (no SingleFrame/MultiFrame).
+inline constexpr std::string_view acquisition_mode = "Continuous";
+
+// Checked pool requirement for one run: payload (PayloadSize readback) must be
+// positive, at least width*height for the frozen Mono8 configuration, at most
+// maximum_frame_bytes, and buffers*payload at most maximum_pool_bytes. Every
+// product is overflow-checked. ErrorCode::unsupported/resource_exhausted with
+// the values; nothing is allocated by this function.
+struct PoolPlan {
+    std::size_t buffer_bytes{0};
+    std::size_t buffers{0};
+    std::size_t total_bytes{0};
+};
+Result<PoolPlan> plan_pool(std::int64_t payload_size, const CameraConfiguration& frozen,
+                           std::size_t buffers = pool_buffers, std::size_t frame_limit = maximum_frame_bytes,
+                           std::size_t pool_limit = maximum_pool_bytes);
+
+// Facts decoded from one popped SDK buffer through public accessors only.
+// Fields after `status` are meaningful only when the adapter could read them
+// (the SDK's image accessors require SUCCESS status); see validate_frame().
+enum class NativeStatus { success, incomplete, other };
+enum class NativePayload { image, chunk_or_extended, multipart, other };
+struct NativeFrameFacts {
+    NativeStatus status{NativeStatus::other};
+    int raw_status{0};            // SDK enum value, for diagnostics only
+    NativePayload payload{NativePayload::other};
+    int raw_payload{0};
+    bool has_chunks{false};
+    unsigned parts{0};
+    bool part_is_2d_image{false};
+    std::uint32_t pixel_format{0}; // PFNC code
+    std::int64_t width{0}, height{0}, offset_x{0}, offset_y{0};
+    std::int64_t padding_x{0}, padding_y{0};
+    std::size_t image_bytes{0};    // SDK-reported valid bytes of part 0
+    std::size_t part_offset{0};    // part 0 data address minus buffer data address
+    std::size_t received_bytes{0}; // SDK-reported received payload size
+    bool data_present{false};      // non-null image data pointer at or after the buffer base
+    std::size_t capacity_bytes{0}; // allocated size of this pool buffer
+    std::uint64_t frame_id{0};
+};
+// PFNC Mono8 (0x01080001): monochrome, 8 bits per pixel, unpacked.
+inline constexpr std::uint32_t pfnc_mono8 = 0x01080001u;
+
+enum class FrameVerdict { accept, incomplete, reject };
+struct FrameDecision {
+    FrameVerdict verdict{FrameVerdict::reject};
+    ErrorCode code{ErrorCode::io_error}; // reject: unsupported (payload/format/layout) or io_error (inconsistent facts)
+    std::size_t row_stride{0};    // accepted frames: bytes between rows
+    std::size_t span_bytes{0};    // accepted frames: row_stride * height
+    std::string reason;           // incomplete/reject: precise explanation
+};
+// The ONLY payload accepted is one complete, single-part, chunk-free 2-D Mono8
+// image whose geometry equals the frozen configuration, with no Y padding and
+// X padding representable as row stride, and whose SDK-reported valid bytes
+// cover row_stride * height (no fabricated final-row padding). All arithmetic
+// is overflow-checked. Non-success SDK status is `incomplete`; everything
+// else that is not acceptable is `reject` with the reason.
+FrameDecision validate_frame(const NativeFrameFacts& facts, const CameraConfiguration& frozen);
+
 } // namespace gige_mel::backend::aravis_profile

@@ -1266,10 +1266,15 @@ void close_destruction_and_streaming() {
     auto camera = aravis_fake::make_backend(observed->hooks());
     auto device = open_fake(*camera);
     const auto caps = device->capabilities();
-    // Explicitly unsupported acquisition: no native stream object is created.
-    const auto stream = device->create_stream();
-    CHECK(!stream && stream.error().code == backend::ErrorCode::unsupported);
-    CHECK(contains(stream.error().message, "acquisition is not implemented"));
+    // GIGE-MEL-009: create_stream() returns a lightweight wrapper; it starts
+    // no native acquisition (the Fake acquisition register stays 0) and the
+    // wrapper may outlive close (its later start() is rejected). Full
+    // streaming coverage lives in aravis_stream_contract.
+    auto stream = device->create_stream();
+    CHECK(stream && stream.value());
+    native(*device, [](ArvDevice* d) {
+        CHECK(arv_fake_camera_get_acquisition_status(arv_fake_device_get_fake_camera(ARV_FAKE_DEVICE(d))) == 0);
+    });
     CHECK(observed->live() == 1);
 
     // Idempotent logical close; later I/O is rejected; capabilities() returns
@@ -1280,6 +1285,8 @@ void close_destruction_and_streaming() {
     CHECK(device->configuration().error().code == backend::ErrorCode::disconnected);
     CHECK(device->apply(fake_initial).error().code == backend::ErrorCode::disconnected);
     CHECK(device->create_stream().error().code == backend::ErrorCode::disconnected);
+    CHECK(stream.value()->start(1).error().code == backend::ErrorCode::disconnected);
+    stream.value().reset();
     CHECK(!aravis::with_native_device_for_testing(*device, [](ArvDevice*) {}));
     const auto after = device->capabilities();
     CHECK(after.sensor_width == caps.sensor_width && after.maximum_frame_rate_hz == caps.maximum_frame_rate_hz);
@@ -1331,7 +1338,7 @@ int main(int argc, char** argv) {
         {"optional string feature query error is not absence", optional_feature_query_errors},
         {"optional Boolean feature query error is not absence", optional_boolean_query_errors},
         {"exposure feature query error does not fall back", exposure_selection_query_errors},
-        {"close, destruction and unsupported streaming", close_destruction_and_streaming},
+        {"close, destruction and lightweight stream wrapper", close_destruction_and_streaming},
     };
     std::size_t passed = 0;
     for (const auto& [name, run] : tests) {
