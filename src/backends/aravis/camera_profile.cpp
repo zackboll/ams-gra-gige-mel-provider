@@ -296,12 +296,30 @@ Result<CameraConfiguration> configuration_from(const NativeSnapshot& n) {
 
 namespace {
 
+// Fresh maximum of one ROI feature, as validated against the ORDERED plan.
+// Supported coupling: a feature's maximum may depend on its axis companion,
+// and only a smaller companion can raise it (a smaller offset can raise the
+// size maximum; a smaller size can raise the offset maximum). The maximum is
+// therefore deferred to the SDK range check ONLY when `relaxed` - an earlier
+// write of this plan decreases the companion. Otherwise (first write on the
+// axis, companion unchanged, increased, or written later) the fresh maximum
+// is final and enforced before any write.
+Status roi_maximum(std::int64_t requested, const IntegerFeature& feature, bool relaxed, std::string_view name,
+                   std::string_view companion) {
+    if (relaxed || requested <= feature.maximum) return {};
+    return fail(ErrorCode::invalid_argument, std::string(name) + " " + std::to_string(requested) +
+                                                 " is above the fresh native maximum " + std::to_string(feature.maximum) +
+                                                 "; no earlier write of this request decreases " + std::string(companion) +
+                                                 ", so the bound cannot be relaxed; nothing was written");
+}
+
 // One ROI axis. Final limits (fresh snapshot): the native minimum and
-// increment grid, a positive size, the sensor extent, and the coupled sum
-// offset + size <= sensor. The features' current maxima may depend on the
-// other feature of the axis (a large far offset lowers the size maximum and
-// vice versa), so they are not treated as final here; the SDK revalidates them
-// at each write (range checking is enabled on the adapter's device).
+// increment grid, a positive size, the sensor extent, the coupled sum
+// offset + size <= sensor, and each written feature's fresh maximum unless an
+// earlier write of this plan decreases its companion (see roi_maximum). An
+// unchanged feature is not written and its current value is not judged
+// against new limits (truthful readback and recovery). The SDK range check
+// stays enabled for deferred maxima and later native changes.
 // Requires check_limits() and check_current() on the snapshot.
 Status plan_axis(std::uint32_t size, std::uint32_t off, const IntegerFeature& size_feature,
                  const IntegerFeature& off_feature, std::int64_t sensor, std::string_view size_name,
@@ -324,7 +342,16 @@ Status plan_axis(std::uint32_t size, std::uint32_t off, const IntegerFeature& si
     // order keeps every intermediate ROI inside the sensor. Overflow-free
     // form of requested_offset + current_size <= sensor: check_current()
     // bounded the current size to [1, sensor].
-    if (requested_offset <= sensor - size_feature.value) {
+    const bool offset_first = requested_offset <= sensor - size_feature.value;
+    if (size_changes) {
+        const bool relaxed = offset_first && offset_changes && requested_offset < off_feature.value;
+        if (auto ok = roi_maximum(requested_size, size_feature, relaxed, size_name, off_name); !ok) return ok;
+    }
+    if (offset_changes) {
+        const bool relaxed = !offset_first && size_changes && requested_size < size_feature.value;
+        if (auto ok = roi_maximum(requested_offset, off_feature, relaxed, off_name, size_name); !ok) return ok;
+    }
+    if (offset_first) {
         if (offset_changes) writes.push_back(offset_write);
         if (size_changes) writes.push_back(size_write);
     } else {

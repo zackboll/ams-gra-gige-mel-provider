@@ -1,5 +1,169 @@
 # Bootstrap validation record
 
+## GIGE-MEL-008-R2 review corrections (2026-11-01)
+
+This is an ordinary corrective commit on top of the R1 head: commit
+`e82b812c4ee7852a2462694967f00b3dc9ae150c`, tree
+`7257279aa1d62177038e2f06059ebd77f5d9a47f`. The branch had not advanced past
+it. Main was unchanged (`039de75`). The environment, SDK prefix and SDK
+instrumentation limits are the same as for R1 (the SDK, GLib and libxml2 are
+uninstrumented).
+
+### Corrections
+
+- **A. Fresh ROI maxima are enforced according to the write order.** R1's
+  `plan_axis()` never read a ROI feature's maximum. R2 checks each **written**
+  feature against its fresh maximum before any write, on both axes. The check
+  is skipped only when an **earlier write of the same plan decreases the
+  companion** — offset written first and moving toward 0 for the size, or size
+  written first and shrinking for the offset — because a smaller companion is
+  the only supported way a coupled maximum can rise. It is not skipped when the
+  companion is unchanged, increases, or is written later. Unchanged features
+  are not written or judged, so current-state readback and recovery are
+  unaffected.
+- **B. SDK increment absence is distinguished from invalid values.** Per
+  `arvgcfloat.c`/`arvgcfloatnode.c` at the pinned commit
+  `97ff5e330919d7a44b871df4eda669feeafdf342`, `arv_gc_float_get_inc()` returns
+  `G_MINDOUBLE` when the increment is undefined, and failures arrive as a
+  `GError`, which is still checked first. Only `== G_MINDOUBLE` now becomes
+  `std::nullopt`. R1's `increment > DBL_MIN` turned 0, negative values and NaN
+  into absence. Those values now reach `check_limits()` and are rejected with
+  feature and value context.
+- **C. Installed symlinks are checked under the link's public-path policy.**
+  R1 skipped any link resolving inside the prefix, through a tautological
+  parent comparison. R2 follows each non-documentation link hop by hop (at most
+  16 hops, every hop inside the prefix). The final target must be an existing
+  regular file, and its content is scanned under the **link's** path policy.
+  The only exemption is a same-directory `libX.so[.N]` → `libX.so.N.M` version
+  link to an ELF file; that target is itself a non-documentation regular file
+  scanned with symbol checks. Broken links, cycles, directory links and
+  outside targets fail explicitly (`installed-links`).
+- **D. Documentation.** The R1 claim that `check_current` runs in
+  `capabilities_from` is marked superseded above; the implementation is
+  unchanged.
+
+### Before/after controls
+
+The baseline is **unchanged R1 production code**: `git archive e82b812` in
+`/tmp/gm8/r2/ctl-ab`. Every adapter source, `cmake/GigeMelAravis.cmake` and
+`CMakeLists.txt` were byte-identical to e82b812. The build used
+`GIGE_MEL_SANITIZERS=address,undefined`, and the adapter was linked from that
+build's own static `libgige_mel_aravis.a`, which has no `roi_maximum` symbol.
+`ldd` shows `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`, version 0.8.36.
+Only test code and harnesses were new.
+
+**A — snapshot profile.** A separate harness linked `camera_profile.cpp` from
+each revision (e82b812 blob SHA-256 prefix `ddfa4f1f34b7d0e0`; corrected
+`bc8883dcb852c065`):
+
+| Case | Expected | e82b812 | Corrected |
+| --- | --- | --- | --- |
+| A1: Height max 512, request 640×640 @ (0,0) | reject | **accepted** `Width=640 Height=640 ExposureTimeAbs=1000 AcquisitionFrameRate=25` | `invalid_argument` "Height 640 is above the fresh native maximum 512; no earlier write of this request decreases OffsetY …" |
+| A2: OffsetY max 4, request 640×512 @ (0,8) | reject | **accepted** `Width=640 OffsetY=8 ExposureTimeAbs=1000 AcquisitionFrameRate=25` | "OffsetY 8 is above the fresh native maximum 4 …" |
+| A3: Height max 512, OffsetY rises 0 → 16 | reject (no exemption) | **accepted** `Width=640 OffsetY=16 Height=640 …` | rejected |
+
+**A — real SDK (Fake device).** A `<Max>` was added through the SDK's GenICam
+DOM, and the SDK readback was asserted first. Every case used a fresh device:
+
+| Case | e82b812: writes attempted → result | Corrected |
+| --- | --- | --- |
+| A1 | `Width, Height` → SDK "Value '640' greater than allowed maximum '512'"; partial state 640×512 | zero attempts, 512×512 unchanged |
+| A2 | `Width, OffsetY` → SDK "Value '8' greater than allowed maximum '4'"; Width left at 640 | zero attempts |
+| A3 | `Width, OffsetY, Height` → SDK rejection after two writes | zero attempts |
+
+**B — real SDK extraction.** An explicit `<Inc>` was added to
+`ExposureTimeAbs`, and the raw `arv_gc_float_get_inc()` result was recorded
+with no `GError`:
+
+| `<Inc>` | Raw SDK value | e82b812 open | Corrected open |
+| --- | --- | --- | --- |
+| *(none)* | `G_MINDOUBLE` (2.2250738585072014e-308) | succeeds | succeeds (absence); 1250.5 µs still quantizes to 1250 µs |
+| `0` | 0 | **succeeds**; 1250.5 µs applied as if there were no increment | `unsupported` "ExposureTimeAbs advertises invalid increment 0 us" |
+| `-5` | −5 | **succeeds** | rejected |
+| `nan` | NaN | **succeeds** | rejected |
+| `inf` | +inf | rejected (inf > `DBL_MIN` was kept, so R1 already rejected it) | rejected |
+| `100` | 100 | — | grid enforced: 1050 µs rejected, 1010 µs applied |
+
+Against the baseline, the committed adapter tests fail at the new assertions:
+- "fresh ROI maxima by write order" fails in the shared `expect_rejected`
+  helper, on the A1 expectation;
+- "known SDK ROI maxima …" fails with "expected no native write attempt, but
+  attempted: Width, Height";
+- "SDK float increment …" fails because the `<Inc>0` open was not rejected.
+
+The R1 regressions (native validation, fresh constraints, late failure) still
+pass on the baseline, so these controls isolate the R2 findings.
+
+**C — verifier.** The exact e82b812 verifier (SHA-256 prefix
+`54786074284f904a`, equal to the blob) was run under the new permanent suite.
+10 of 17 cases pass and 7 fail. Each failing case is accepted with exit 0:
+- 03, a public-header symlink to forbidden content under the excluded
+  documentation tree;
+- 04, a broken public-header link;
+- 05c, a broken same-directory library link;
+- 05d, a library-named link to a documentation ELF;
+- 06, a directory link;
+- 06b, a link cycle;
+- 06c, a link to a target outside the prefix.
+
+The corrected verifier passes all 17. These are fixture controls with stub
+`ldd`/`nm`/`cmake`, not findings about the real package.
+
+### Permanent regressions and counts
+
+- **Adapter scenarios: 18 → 21.** The three new scenarios are:
+  - "fresh ROI maxima by write order": A1, A2, a rising companion, a companion
+    decreased only later, both coupled transitions with the preceding
+    bound-relaxing write asserted, and current-above-maximum recovery;
+  - "known SDK ROI maxima rejected before the first write";
+  - "SDK float increment absence versus invalid values". This covers proven
+    `G_MINDOUBLE` absence; 0, −5, NaN and inf rejected at open with
+    native-object and reservation cleanup and a clean reopen; `<Inc>0` added
+    to an open device and rejected at `apply()` with zero writes and the same
+    exposure feature (no "changed from"); and a valid increment of 100
+    enforced.
+- **Verifier suite:** new `tests/verify_package_isolation_tests.py`, 17
+  `unittest` cases, standard library only. It is registered as the CTest
+  `package_isolation_verifier`, so CTest grows from **7 → 8** (SDK-free) and
+  **10 → 11** (SDK-enabled). It needs no SDK, so it runs in all five CI jobs,
+  in both their SDK-free and SDK-enabled CTest invocations.
+- **Unchanged:** provider 74, backend 8, portability 12 + 2.
+
+### Local results
+
+| Configuration | CTest | Provider / backend / portability | Aravis adapter | MEL probe |
+| --- | --- | --- | --- | --- |
+| GCC dev, Release, ASan+UBSan, TSan — SDK-free | **8/8** each | 74 / 8 / 12 + 2 (dev) | — | — |
+| Clang 19 dev (`/usr/bin/clang++-19`), SDK-free | **8/8** | pass | — | — |
+| GCC dev, Release, ASan+UBSan, TSan + Aravis | **11/11** each | 74 / 8 / 12 + 2 (dev) | **21/21** | pass |
+| Clang 19 dev + Aravis | **11/11** | pass | 21/21 | pass |
+
+Other checks:
+
+- **Sanitizers:** run with `detect_leaks=1:halt_on_error=1` (ASan) and
+  `halt_on_error=1` (UBSan, TSan); no reports.
+- **Offline verifiers:** both pass.
+- **Diagnostic and capture:** `--help` exits 0; capture produced a 64×48 PGM.
+- **Real package isolation:** the corrected verifier passes on the real dev,
+  Release and Clang SDK-enabled installs, each under a prefix named
+  `gige-mel-aravis-install`. The real installs' only symlinks are
+  `lib/libgige_mel_provider.so` and `.so.0`; both are accepted as version
+  links, and their regular ELF target is symbol-checked.
+- **Installed consumer:** the default install's consumer passes, and the
+  SDK-free and SDK-enabled installs have identical non-documentation file
+  sets.
+- **Whitespace:** `git diff --check` is clean on both the corrective range and
+  the full PR range.
+- **Concurrency:** no concurrency code changed, so no repeat campaign was run.
+
+### Remaining limitations
+
+This is software and Fake-device evidence only. The maxima and increments were
+arranged through the SDK's own GenICam nodes; no physical camera produced
+them. The verifier symlink cases are fixtures. Acquisition, clock mapping,
+physical-camera qualification and a second real SDK remain future work. The
+two deferred PR #3 notes remain separate.
+
 ## GIGE-MEL-008-R1 review corrections (2026-10-31)
 
 This is an ordinary corrective commit on
@@ -17,7 +181,11 @@ cover only the project's adapter, tests and provider.
 
 - **A. Native facts are validated before arithmetic.** `check_limits` and
   `check_current` run on every snapshot inside `capabilities_from` and
-  `plan_writes`; no caller is trusted. They cover:
+  `plan_writes`; no caller is trusted. *(Superseded by R2: this sentence
+  overstated the implementation. `capabilities_from` runs
+  `check_preconditions` and `check_limits`; only `plan_writes` additionally
+  runs `check_current`. The code was not changed to match the old wording.)*
+  They cover:
   - sensor extent;
   - ROI increments, minimum ≤ maximum, and supported grid origins;
   - scalar bounds and increments;
@@ -40,7 +208,9 @@ cover only the project's adapter, tests and provider.
   - the exposure maximum, except when the period lengthens first.
 
   Coupled ROI maxima stay with the SDK range check, which remains enabled.
-  See `docs/aravis-integration.md` for the full policy.
+  *(Superseded by R2: R1 never used the fresh ROI maxima at all. R2 enforces
+  them before writes unless an earlier write of the plan decreases the
+  companion.)* See `docs/aravis-integration.md` for the full policy.
 - **C. Optional-feature query errors.** `present()` returns `Result<bool>`:
   - absent or successfully unimplemented → `false`;
   - implemented → `true`;

@@ -18,6 +18,15 @@ Checks:
   installed-symbols  installed libraries define/require no Aravis symbols
   installed-names    no installed file or directory name below the prefix
                      mentions Aravis, except the intended documentation file
+  installed-links    every non-documentation symlink resolves, within a bounded
+                     number of hops and inside the prefix, to an existing
+                     regular file; its RESOLVED content is then checked under
+                     the LINK's own (public) path policy, so a public alias of
+                     an excluded documentation file is still scanned. Only a
+                     same-directory libX.so[.N] -> libX.so.N.M version link to an
+                     ELF file is skipped, because that target is itself a
+                     scanned public path. Directory links, cycles, broken links
+                     and targets outside the prefix are explicit failures.
   consumer           a separate consumer configures (without PKG_CONFIG_PATH),
                      builds and runs against the install prefix
 """
@@ -179,17 +188,79 @@ def scan_symbols(verifier: Verifier, path: Path, relative: Path, kind: str) -> b
     return True
 
 
+MAX_LINK_HOPS = 16
+
+
+def resolve_link(prefix: Path, path: Path) -> tuple[Path | None, str]:
+    """Follows one installed symlink chain hop by hop, bounded.
+
+    Returns (final regular-file target, "") or (None, reason). Unsupported:
+    a missing target, a link cycle or overlong chain, any hop outside the
+    installation prefix, and a final target that is not a regular file
+    (directory links would hide content os.walk does not traverse).
+    """
+    root = prefix.resolve()
+    current = path
+    for _ in range(MAX_LINK_HOPS):
+        if not current.is_symlink():
+            break
+        try:
+            target = os.readlink(current)
+        except OSError as error:
+            return None, f"cannot read link: {error.strerror or error}"
+        current = Path(os.path.normpath(current.parent / target))
+        try:
+            current.parent.resolve(strict=True).relative_to(root)
+        except (OSError, ValueError):
+            return None, f"link hop {current} is outside the installation prefix or unresolvable"
+    else:
+        return None, f"link chain exceeds {MAX_LINK_HOPS} hops (cycle?)"
+    if not os.path.lexists(current):
+        return None, f"broken link: target {current} does not exist"
+    if current.is_dir():
+        return None, f"directory link to {current} is unsupported (its content would not be traversed)"
+    if not current.is_file():
+        return None, f"link target {current} is not a regular file"
+    return current, ""
+
+
+def is_library_version_link(link: Path, target: Path) -> bool:
+    """Narrow exception: libX.so[.N] -> regular ELF libX.so.N.M in the SAME directory.
+
+    The caller has already excluded documentation paths, so the target is a
+    non-documentation installed regular file that the scan visits in its own
+    right, under the public policy, with symbol checks.
+    """
+    return (target.parent == link.parent and link.name.startswith("lib") and ".so" in link.name
+            and target.name.startswith(link.name) and target.name != link.name)
+
+
 def check_installed_content(verifier: Verifier, prefix: Path, paths: list[Path]) -> None:
     text_files = binaries = 0
     text_clean = symbols_clean = True
     for relative in paths:
         path = prefix / relative
-        if is_documentation(relative) or (path.is_dir() and not path.is_symlink()):
+        if is_documentation(relative):
             continue
         if path.is_symlink():
-            target = path.resolve()
-            if target.parent == path.resolve().parent and prefix.resolve() in target.parents:
-                continue  # library version link inside the prefix; the target itself is scanned
+            target, reason = resolve_link(prefix, path)
+            if target is None:
+                verifier.fail("installed-links", f"{relative}: {reason}")
+                text_clean = False
+                continue
+            try:
+                is_elf = target.read_bytes()[:4] == b"\x7fELF"
+            except OSError as error:
+                verifier.fail("installed-links", f"cannot read link target of {relative}: {error.strerror or error}")
+                text_clean = False
+                continue
+            if is_elf and is_library_version_link(path, target):
+                continue  # the regular ELF target is a public path and receives symbol checks itself
+            # Every other link: its RESOLVED content is checked under the
+            # link's own (public) path policy below, never the target's.
+            # Documentation exclusion of the target does not exempt the alias.
+        elif path.is_dir():
+            continue
         try:
             data = path.read_bytes()
         except OSError as error:

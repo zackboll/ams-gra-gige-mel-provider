@@ -121,15 +121,17 @@ struct NativeWrite {
 //
 // Fresh limits treated as final before writes: the ROI minimum/increment grid,
 // a positive requested size, the sensor extent and offset + size <= sensor;
-// the frame-rate minimum and maximum; the exposure minimum and increment;
-// advertised scalar increments; and the exposure maximum whenever the exposure
-// is written before the rate. Supported coupling that is NOT prevalidated: a
-// current ROI maximum may depend on the other ROI feature of its axis, and the
-// exposure maximum may depend on the frame period when the plan lengthens the
-// period first. Those are enforced by the SDK at each write (the adapter
-// enables Aravis range checking on its own device). This profile does not
-// model a rate maximum raised by an earlier write in the same request; such a
-// request is rejected before writes and can be applied in two steps.
+// each WRITTEN ROI feature's fresh maximum (R2: unless an EARLIER write of
+// this plan DECREASES its axis companion, the only supported way a coupled
+// ROI maximum can rise); the frame-rate minimum and maximum; the exposure
+// minimum and increment; advertised scalar increments; and the exposure
+// maximum whenever the exposure is written before the rate. Deferred to the
+// SDK range check at the write (the adapter enables Aravis range checking on
+// its own device): a ROI maximum after such a companion decrease, and the
+// exposure maximum when the plan lengthens the period first. This profile
+// does not model a rate maximum raised by an earlier write in the same
+// request; such a request is rejected before writes and can be applied in two
+// steps.
 //
 // ROI order per axis: offset first when it fits the current size, otherwise
 // size first, so every intermediate ROI stays inside the sensor. Timing order:

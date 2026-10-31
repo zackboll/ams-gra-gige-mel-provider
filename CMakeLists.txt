@@ -114,6 +114,10 @@ if(BUILD_TESTING)
   add_test(NAME native_loader COMMAND loader_tests $<TARGET_FILE:gige_mel_provider>)
   add_test(NAME upstream_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify)
   add_test(NAME json_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py)
+  # Fixture-based regressions for the package-isolation verifier (no SDK needed).
+  add_test(NAME package_isolation_verifier
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_package_isolation_tests.py)
+  set_tests_properties(package_isolation_verifier PROPERTIES TIMEOUT 120)
   set_tests_properties(backend_contract provider_contract provider_backend_portability configuration_public_api
     native_loader PROPERTIES TIMEOUT 30)
 endif()

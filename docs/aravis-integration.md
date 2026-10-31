@@ -94,7 +94,19 @@ has no backend-name branch.
 - installed binaries contain no Aravis symbols;
 - no installed path below the prefix mentions Aravis, except
   `share/doc/…/docs/aravis-integration.md`. The prefix's own name is not
-  examined.
+  examined;
+- every non-documentation symlink (R2) resolves, within 16 hops and inside the
+  prefix, to an existing regular file. Its **resolved content is checked under
+  the link's own public-path policy**, so a public alias of a file inside the
+  excluded documentation tree is still scanned. The only links skipped are
+  same-directory `libX.so[.N]` → `libX.so.N.M` version links to an ELF file;
+  their target is a non-documentation regular file that receives the symbol
+  checks itself. Broken links, cycles, directory links and targets outside the
+  prefix are explicit `installed-links` failures.
+
+`tests/verify_package_isolation_tests.py` (CTest `package_isolation_verifier`,
+which needs no SDK and runs in every CI job) exercises the real verifier CLI
+against fixture trees and stub `ldd`/`nm`/`cmake`.
 
 It then configures, builds and runs a separate consumer with
 `PKG_CONFIG_PATH` unset, and checks that the consumer's cache records no SDK
@@ -250,9 +262,13 @@ requires the supported profile. It validates the **complete** request against
 that fresh snapshot before writing anything. All limits come from the fresh
 readback, not from the open-time envelope (R1):
 
-1. **Structural safety** (`check_limits`, `check_current`). Every native fact
-   used in arithmetic is checked first, on every snapshot; no caller is trusted
-   to have validated it. The checks are:
+1. **Structural safety.** Every native fact used in arithmetic is checked
+   before use, and no caller is trusted to have validated it.
+   `capabilities_from()` (open, `inspect`) runs `check_preconditions` and
+   `check_limits`. `plan_writes()` (every `apply()`) runs those plus
+   `check_current`. Open deliberately does **not** run `check_current`, so an
+   unusual current state does not block the open that could recover it. The
+   checks are:
    - sensor extent in 1..2^32−1;
    - per ROI feature: increment in 1..2^32−1, minimum ≤ maximum, and a grid
      origin (the minimum) that is a multiple of the increment and lies in
@@ -279,26 +295,54 @@ readback, not from the open-time envelope (R1):
    before any write:
    - the ROI minimum and increment grid, a positive size (zero is rejected
      even if a native minimum would allow it), and offset + size ≤ sensor;
+   - each **written** ROI feature's fresh maximum, according to the ordered
+     plan (R2; see below);
    - the frame-rate minimum and maximum;
    - the exposure minimum and advertised float increments;
    - the exposure maximum, except in one case: when the plan lengthens the
      period first. Then the exposure maximum may legitimately rise with that
      rate write, so it is left to the SDK.
 
-   **Supported coupling that is not prevalidated:** a current ROI maximum that
-   depends on the other feature of its axis (for example `Width.max` =
-   sensor − `OffsetX`). Treating those as final would break the small/far ↔
-   large/near transitions. This profile does not model a rate maximum raised by
-   an earlier write of the same request; such a request is rejected before any
-   write and can be applied in two steps.
+   **ROI maxima and supported coupling (R2).** A ROI maximum may depend on its
+   axis companion; for example `Width.max` = sensor − `OffsetX`. Only a
+   **smaller** companion can raise it. A written feature's fresh maximum is
+   therefore deferred to the SDK range check **only** when an **earlier write
+   of the same plan decreases its companion**. Two cases qualify:
+   - the size, when the offset is written first and moves toward 0;
+   - the offset, when the size is written first and shrinks.
+
+   In every other case the fresh maximum is final and is enforced before any
+   native write, on either axis:
+   - the feature is the first write on its axis;
+   - the companion is unchanged;
+   - the companion increases;
+   - the companion is written later.
+
+   So a known-invalid `Height` or `OffsetY` request can no longer let an
+   earlier `Width` write through. An unchanged feature is not written, and its
+   current value is not judged against a newly lowered maximum. The valid
+   small/far → large/near and large/near → small/far transitions still work.
+   This profile does not model a rate maximum raised by an earlier write of the
+   same request; such a request is rejected before any write and can be applied
+   in two steps.
 
 Writes go directly to the GenICam nodes in a safe order. On each axis, the
 offset is written first if it fits the current size; otherwise the size is
 written first. The rate is written first when the period lengthens, and the
 exposure first otherwise. Unchanged integers are not rewritten. Aravis range
 and access checking stay enabled for constraints that change **after**
-prevalidation, and for the coupled maxima above. After the writes, the complete
-actual configuration is read back.
+prevalidation, and for the deferred coupled maxima above. After the writes, the
+complete actual configuration is read back.
+
+**Float increments (R2).** Aravis 0.8.36's `arv_gc_float_get_inc()` returns
+exactly `G_MINDOUBLE` when no increment is defined, and reports failures as a
+`GError`. The adapter treats only that exact value, returned without a
+`GError`, as "no increment". Any other successfully returned value is kept and
+validated: an explicit `<Inc>` of `0`, `-5`, `nan` or `inf` is rejected as
+"`<feature>` advertises invalid increment … us" at open, or in an
+already-open `apply()` before any write. A query `GError` is still reported as
+an error. (Before R2, values ≤ `DBL_MIN` — zero, negatives and NaN — silently
+became "no increment".)
 
 If a later write fails, the original SDK error is kept (operation, feature,
 GError domain and code). The adapter appends the earlier successful writes,

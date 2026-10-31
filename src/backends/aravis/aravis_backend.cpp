@@ -11,7 +11,6 @@
 
 #include <arv.h>
 
-#include <cfloat>
 #include <cstdio>
 #include <map>
 #include <mutex>
@@ -214,8 +213,13 @@ Result<profile::FloatFeature> read_float_feature(ArvDevice* device, std::string_
     double increment = 0;
     if (!error.failed()) increment = arv_gc_float_get_inc(real, error.out());
     if (error.failed()) return translate("read value/bounds of", name, *error.take());
-    // Aravis 0.8.36 reports G_MINDOUBLE when no increment is advertised.
-    if (increment > DBL_MIN) f.increment = increment;
+    // Aravis 0.8.36 (arv_gc_float_get_inc, arvgcfloat.c) documents exactly
+    // G_MINDOUBLE (== DBL_MIN) as "not defined"; a failure is the GError
+    // handled above. Only that value is absence. Every other successfully
+    // returned value - including zero, negative and nonfinite ones from an
+    // explicit <Inc> - is kept unchanged so check_limits() rejects it with
+    // feature/value context instead of it silently becoming "no increment".
+    if (increment != G_MINDOUBLE) f.increment = increment;
     if (const char* unit = arv_gc_float_get_unit(real); unit && *unit) f.unit = unit;
     return f;
 }

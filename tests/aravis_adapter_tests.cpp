@@ -136,6 +136,32 @@ void gc_add_boolean(ArvDevice* d, const char* name, bool value) {
     gc_add(d, gc_add(d, nullptr, "Integer", storage.c_str()), "Value", nullptr, value ? "1" : "0");
     gc_add(d, gc_add(d, nullptr, "Boolean", name), "pValue", nullptr, storage.c_str());
 }
+// Fixed <Max> on an integer feature through the SDK's property node; the SDK
+// readback proves the arrangement before it is relied upon.
+void gc_set_integer_max(ArvDevice* d, const char* feature, std::int64_t maximum) {
+    gc_add(d, ARV_DOM_NODE(arv_device_get_feature(d, feature)), "Max", nullptr, std::to_string(maximum).c_str());
+    GError* error = nullptr;
+    CHECK(arv_gc_integer_get_max(ARV_GC_INTEGER(arv_device_get_feature(d, feature)), &error) == maximum);
+    CHECK(!error);
+}
+// Explicit <Inc> on a float feature. Returns the RAW value the pinned SDK
+// getter reports for it, after asserting that the query raised no GError.
+double gc_set_float_inc(ArvDevice* d, const char* feature, const char* text) {
+    auto* real = ARV_GC_FLOAT(arv_device_get_feature(d, feature));
+    gc_add(d, ARV_DOM_NODE(real), "Inc", nullptr, text);
+    GError* error = nullptr;
+    const double raw = arv_gc_float_get_inc(real, &error);
+    if (error) { g_error_free(error); throw std::runtime_error(std::string("Inc query failed for ") + feature); }
+    return raw;
+}
+double sdk_float_inc(ArvDevice* d, const char* feature, bool& failed) {
+    GError* error = nullptr;
+    const double raw = arv_gc_float_get_inc(ARV_GC_FLOAT(arv_device_get_feature(d, feature)), &error);
+    failed = error != nullptr;
+    if (error) g_error_free(error);
+    return raw;
+}
+
 // The SDK SUCCESSFULLY reports `feature` as not implemented (no GError).
 void gc_set_unimplemented(ArvDevice* d, const char* feature) {
     const std::string flag = std::string("GigeMelTestZeroFor") + feature;
@@ -535,6 +561,69 @@ void fresh_constraints() {
     large.offset_x = {0, 0, 0, 1};
     CHECK((order(profile::plan_writes({64, 512, 1900, 0, 25, 1ms}, large, open_time).value()) ==
            std::vector<std::string>{"Width", "OffsetX", "ExposureTimeAbs", "AcquisitionFrameRate"}));
+}
+
+// R2 (finding A): a fresh ROI maximum is enforced before any write unless an
+// EARLIER write of the same plan DECREASES its companion (the only supported
+// way the coupled maximum can be raised). Snapshot-level profile regressions.
+void roi_maxima_by_write_order() {
+    const auto open_time = snapshot_model(); // 2048x2048 sensor, 512x512 @ (0,0)
+    // A1: fresh Height maximum 512, OffsetY unchanged: Height 640 rejected
+    //     (R1 accepted Width=640, Height=640, ExposureTimeAbs, AcquisitionFrameRate).
+    auto a1 = open_time;
+    a1.height.maximum = 512;
+    expect_rejected(profile::plan_writes({640, 640, 0, 0, 25, 1ms}, a1, open_time), backend::ErrorCode::invalid_argument,
+                    "Height 640 is above the fresh native maximum 512; no earlier write of this request decreases OffsetY");
+    CHECK(profile::plan_writes({640, 512, 0, 0, 25, 1ms}, a1, open_time)); // at the maximum: allowed
+    // A2: fresh OffsetY maximum 4, Height unchanged: OffsetY 8 rejected
+    //     (R1 accepted Width=640, OffsetY=8, ExposureTimeAbs, AcquisitionFrameRate).
+    auto a2 = open_time;
+    a2.offset_y.maximum = 4;
+    expect_rejected(profile::plan_writes({640, 512, 0, 8, 25, 1ms}, a2, open_time), backend::ErrorCode::invalid_argument,
+                    "OffsetY 8 is above the fresh native maximum 4; no earlier write of this request decreases Height");
+    CHECK(profile::plan_writes({640, 512, 0, 4, 25, 1ms}, a2, open_time));
+    // A known-invalid Y request never yields a plan containing the X writes.
+    CHECK(!profile::plan_writes({1024, 640, 16, 0, 25, 1ms}, a1, open_time));
+
+    // A companion change that cannot relax the bound gets no exemption:
+    // increasing OffsetY (written first, since it fits) cannot raise Height's maximum.
+    auto rising = open_time;
+    rising.height.maximum = 512;
+    rising.offset_y.value = 0;
+    expect_rejected(profile::plan_writes({512, 640, 0, 16, 25, 1ms}, rising, open_time), backend::ErrorCode::invalid_argument,
+                    "Height 640 is above the fresh native maximum 512");
+    // ... nor does a companion DECREASE that is written AFTER the bounded
+    // feature: OffsetY 8 fits the current Height, so it is written first and
+    // the Height decrease (512 -> 256) only follows it.
+    auto later = open_time;
+    later.offset_y.maximum = 4;
+    expect_rejected(profile::plan_writes({512, 256, 0, 8, 25, 1ms}, later, open_time), backend::ErrorCode::invalid_argument,
+                    "OffsetY 8 is above the fresh native maximum 4; no earlier write of this request decreases Height");
+
+    // Deferred ONLY where a preceding write decreases the companion. The plan
+    // makes that preceding bound-relaxing write visible.
+    auto coupled = open_time; // 64 wide at OffsetX 1900: Width.max = 148, OffsetX.max = 1984
+    coupled.width = {64, 1, 2048 - 1900, 1};
+    coupled.offset_x = {1900, 0, 2048 - 64, 1};
+    const auto grow = profile::plan_writes({2048, 512, 0, 0, 25, 1ms}, coupled, open_time);
+    CHECK((order(grow.value()) == std::vector<std::string>{"OffsetX", "Width", "ExposureTimeAbs", "AcquisitionFrameRate"}));
+    CHECK(grow.value()[0].integer == 0 && grow.value()[1].integer == 2048); // OffsetX 1900 -> 0 precedes Width 2048 > 148
+    auto wide = open_time; // 2048 wide at 0: OffsetX.max = 0, Width.max = 2048
+    wide.width = {2048, 1, 2048, 1};
+    wide.offset_x = {0, 0, 0, 1};
+    const auto shrink = profile::plan_writes({64, 512, 1900, 0, 25, 1ms}, wide, open_time);
+    CHECK((order(shrink.value()) == std::vector<std::string>{"Width", "OffsetX", "ExposureTimeAbs", "AcquisitionFrameRate"}));
+    CHECK(shrink.value()[0].integer == 64 && shrink.value()[1].integer == 1900); // Width 2048 -> 64 precedes OffsetX 1900 > 0
+
+    // Current-state facts stay separate from request legality: a current value
+    // above a newly lowered maximum is reported and recoverable, and an
+    // unchanged feature is not judged against its new maximum.
+    auto above = open_time;
+    above.height = {1024, 1, 512, 1}; // current 1024 > fresh maximum 512
+    CHECK(profile::configuration_from(above).value().height == 1024);
+    CHECK((order(profile::plan_writes({640, 512, 0, 0, 25, 1ms}, above, open_time).value()) ==
+           std::vector<std::string>{"Width", "Height", "ExposureTimeAbs", "AcquisitionFrameRate"}));
+    CHECK(profile::plan_writes({640, 1024, 0, 0, 25, 1ms}, above, open_time)); // Height unchanged: not written
 }
 
 // Bounded gate: the owner opens it on every unwind path.
@@ -957,6 +1046,114 @@ std::shared_ptr<backend::ICameraBackend> arranged_backend(const std::shared_ptr<
     return aravis_fake::make_backend(hooks);
 }
 
+// R2 (finding A) through the real SDK: a known fresh ROI maximum, with an
+// unrelated Width change in the same request, is rejected before the FIRST
+// write. Each case uses a freshly opened Fake device (a new GenICam tree).
+void known_roi_maxima_before_writes() {
+    struct Case {
+        const char* bounded;
+        std::int64_t maximum;
+        backend::CameraConfiguration request;
+        const char* message;
+    };
+    const Case cases[] = {
+        {"Height", 512, {640, 640, 0, 0, 25, 1ms}, "Height 640 is above the fresh native maximum 512"},     // A1
+        {"OffsetY", 4, {640, 512, 0, 8, 25, 1ms}, "OffsetY 8 is above the fresh native maximum 4"},         // A2
+        {"Height", 512, {640, 640, 0, 16, 25, 1ms}, "Height 640 is above the fresh native maximum 512"},    // OffsetY rises: no relaxation
+    };
+    for (const auto& c : cases) {
+        WriteAttempts writes;
+        auto camera = aravis_fake::make_backend(writes.hooks());
+        auto device = open_fake(*camera);
+        native(*device, [&](ArvDevice* d) { gc_set_integer_max(d, c.bounded, c.maximum); });
+        // Actual SDK current values and maximum before the request.
+        CHECK(native_integer(*device, "Height") == 512 && native_integer(*device, "OffsetY") == 0);
+        CHECK(native_integer(*device, "Width") == 512);
+        const auto before = unrelated(*device);
+        const auto period = native_integer(*device, "AcquisitionFramePeriod");
+        const auto rejected = device->apply(c.request);
+        expect_no_writes(writes.attempted); // not even the unrelated Width write
+        CHECK(!rejected && rejected.error().code == backend::ErrorCode::invalid_argument);
+        if (!contains(rejected.error().message, c.message))
+            throw std::runtime_error("expected '" + std::string(c.message) + "' in: " + rejected.error().message);
+        CHECK(device->configuration().value() == fake_initial);
+        CHECK(native_integer(*device, "AcquisitionFramePeriod") == period);
+        CHECK(native_integer(*device, "ExposureTimeAbsRegister") == 10'000);
+        CHECK(unrelated(*device) == before);
+        CHECK(device->close());
+    }
+}
+
+// R2 (finding B) through the real SDK: an explicit invalid <Inc> on the
+// exposure feature is preserved by extraction and rejected; the documented
+// absence value is not. Every arrangement first proves the RAW SDK result.
+void float_increment_extraction() {
+    // Genuine absence: the Fake's ExposureTimeAbs has no <Inc>, and its linked
+    // converter is not linear, so the SDK returns exactly G_MINDOUBLE.
+    {
+        auto camera = aravis_fake::make_backend();
+        auto device = open_fake(*camera);
+        bool failed = true;
+        native(*device, [&](ArvDevice* d) { CHECK(sdk_float_inc(d, "ExposureTimeAbs", failed) == G_MINDOUBLE); });
+        CHECK(!failed);
+        const backend::CameraConfiguration fine{512, 512, 0, 0, 25, 1'250'500ns}; // no grid: SDK quantizes to 1250 us
+        CHECK(device->apply(fine).value().exposure == 1'250'000ns);
+        CHECK(device->close());
+    }
+    // Invalid explicit increments rejected during open; cleanup, then a clean open.
+    // Pinned-SDK facts (asserted, not assumed): <Inc>0</Inc> -> 0, -5 -> -5,
+    // nan -> NaN, inf -> +inf, each with no GError (g_ascii_strtod parsing).
+    for (const char* text : {"0", "-5", "nan", "inf"}) {
+        auto observed = std::make_shared<NativeOpens>();
+        double raw = 1.0;
+        auto camera = arranged_backend(observed, [&](ArvDevice* d) { raw = gc_set_float_inc(d, "ExposureTimeAbs", text); });
+        const auto refused = camera->open(aravis_fake::device_id);
+        const std::string t(text);
+        const bool expected_raw = t == "nan"   ? std::isnan(raw)
+                                  : t == "inf" ? raw == std::numeric_limits<double>::infinity()
+                                               : raw == std::stod(t);
+        CHECK(expected_raw); // the pinned SDK returned exactly this value, with no GError
+        CHECK(!refused && refused.error().code == backend::ErrorCode::unsupported);
+        if (!contains(refused.error().message, "ExposureTimeAbs advertises invalid increment"))
+            throw std::runtime_error(std::string("Inc ") + text + ": " + refused.error().message);
+        CHECK(observed->live() == 0);
+        auto clean = open_fake(*aravis_fake::make_backend()); // reservation released
+        CHECK(clean->close());
+    }
+    // Already-open apply after a fresh invalid increment: the same exposure
+    // feature stays selected, so only the increment explains the rejection.
+    {
+        WriteAttempts writes;
+        auto camera = aravis_fake::make_backend(writes.hooks());
+        auto device = open_fake(*camera);
+        double raw = 1.0;
+        native(*device, [&](ArvDevice* d) { raw = gc_set_float_inc(d, "ExposureTimeAbs", "0"); });
+        CHECK(raw == 0.0);
+        const auto rejected = device->apply({640, 480, 16, 8, 40, 2ms});
+        expect_no_writes(writes.attempted);
+        CHECK(!rejected && rejected.error().code == backend::ErrorCode::unsupported);
+        CHECK(contains(rejected.error().message, "ExposureTimeAbs advertises invalid increment 0 us"));
+        CHECK(!contains(rejected.error().message, "changed from"));
+        CHECK(native_integer(*device, "Width") == 512 && native_integer(*device, "AcquisitionFramePeriod") == 40'000);
+        CHECK(device->close());
+    }
+    // A valid explicit increment reaches the profile and its grid is enforced.
+    {
+        WriteAttempts writes;
+        auto camera = aravis_fake::make_backend(writes.hooks());
+        auto device = open_fake(*camera);
+        double raw = 0.0;
+        native(*device, [&](ArvDevice* d) { raw = gc_set_float_inc(d, "ExposureTimeAbs", "100"); });
+        CHECK(raw == 100.0);
+        const auto off_grid = device->apply({512, 512, 0, 0, 25, 1'050'000ns}); // 10 + k*100 us grid
+        expect_no_writes(writes.attempted);
+        CHECK(!off_grid && contains(off_grid.error().message, "not on the advertised increment 100"));
+        const backend::CameraConfiguration on_grid{512, 512, 0, 0, 25, 1'010'000ns};
+        CHECK(device->apply(on_grid).value() == on_grid);
+        CHECK(device->close());
+    }
+}
+
 // Optional Boolean (AcquisitionFrameRateEnable): implemented is read; a failed
 // query is an error on the already-open read path; a successfully reported
 // "not implemented" is supported absence.
@@ -1118,6 +1315,7 @@ int main(int argc, char** argv) {
         {"profile translation, prevalidation and write order", profile_translation},
         {"native fact validation and overflow-safe planning", native_fact_validation},
         {"fresh native constraints in prevalidation", fresh_constraints},
+        {"fresh ROI maxima by write order", roi_maxima_by_write_order},
         {"construction without I/O and copied discovery", construction_and_discovery},
         {"exact device selection", exact_selection},
         {"ownership and failed-open cleanup", ownership_and_failed_open},
@@ -1128,6 +1326,8 @@ int main(int argc, char** argv) {
         {"fresh SDK exposure limit enforced before the first write", fresh_exposure_limit_before_writes},
         {"fresh SDK Width grid enforced before the first write", fresh_width_grid_before_writes},
         {"unsafe SDK ROI facts rejected before the first write", unsafe_native_roi_before_writes},
+        {"known SDK ROI maxima rejected before the first write", known_roi_maxima_before_writes},
+        {"SDK float increment absence versus invalid values", float_increment_extraction},
         {"optional string feature query error is not absence", optional_feature_query_errors},
         {"optional Boolean feature query error is not absence", optional_boolean_query_errors},
         {"exposure feature query error does not fall back", exposure_selection_query_errors},
