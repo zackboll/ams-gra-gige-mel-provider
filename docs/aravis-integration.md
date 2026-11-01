@@ -27,8 +27,12 @@ GIGE-MEL-011 runs the **unchanged production** `make_backend()` (Aravis's GigE
 Vision interface) against the pinned SDK's own network camera simulator,
 `ArvGvFakeCamera`, on IPv4 loopback. That exercises real GigE discovery, GVCP
 control and GVSP image transfer over UDP. It is simulated network transport,
-not physical-camera, NIC or timing qualification. See
-[Loopback GigE Vision transport (GIGE-MEL-011)](#loopback-gige-vision-transport-gige-mel-011).
+not physical-camera, NIC or timing qualification. The client's traffic is
+loopback-only. The simulator, however, also binds a wildcard
+255.255.255.255:3956 discovery listener, so the test runs under a documented
+test-only network exception; owner acceptance is pending. See
+[Loopback GigE Vision transport (GIGE-MEL-011)](#loopback-gige-vision-transport-gige-mel-011)
+and [Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1).
 
 | Evidence | What it is | What it is not |
 | --- | --- | --- |
@@ -104,7 +108,7 @@ exported:
 | `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration and negative timestamp-admission probe |
 | `aravis_stream_contract_tests` → CTest `aravis_stream_contract` | GIGE-MEL-009 acquisition contract against the real SDK Fake stream |
 | `aravis_timestamp_contract_tests` → CTest `aravis_timestamp_contract` | GIGE-MEL-010: native timestamp observation, the time-probe routine against the Fake, and positive/negative MEL publication through the **test-only** virtual clock (`tests/support/aravis_virtual_clock.*`) |
-| `aravis_gige_loopback_contract_tests` → CTest `aravis_gige_loopback_contract` | GIGE-MEL-011: the production GigE backend against the SDK's `ArvGvFakeCamera` on 127.0.0.1 (real discovery, GVCP, GVSP); test-only fixture `tests/support/aravis_gv_loopback.*`. Needs IPv4 loopback with UDP 3956 free; never skipped |
+| `aravis_gige_loopback_contract_tests` → CTest `aravis_gige_loopback_contract` | GIGE-MEL-011: the production GigE backend against the SDK's `ArvGvFakeCamera` (GVCP/GVSP on 127.0.0.1; real discovery, GVCP, GVSP), plus the R1 socket-audit control case. Test-only fixture `tests/support/aravis_gv_loopback.*`. Needs IPv4 loopback with UDP 3956 free; never skipped. **While it runs, the simulator holds a wildcard 255.255.255.255:3956 listener** ([test-only exception](#network-exposure-of-the-simulator-gige-mel-011-r1)) |
 | `gige_mel_aravis_diagnostic` → CTest `aravis_diagnostic_help` | Diagnostic tool (`--help` performs no device I/O) |
 
 ```sh
@@ -212,8 +216,11 @@ project camera mock replaces it.
 
 GIGE-MEL-011 adds a third test-only arrangement that does **not** change the
 client: the loopback test uses the production `make_backend()` itself, and the
-private fixture only starts the SDK's network simulator and restricts GigE
-discovery to the loopback interface for that test process (see below).
+private fixture only starts the SDK's network simulator and restricts the
+client's GigE discovery to the loopback interface for that test process. The
+simulator itself is **not** loopback-confined: it also holds a wildcard
+discovery listener (see
+[Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1)).
 
 Neither path changes process-wide interface enable flags or calls
 `arv_shutdown()`. Factory construction performs no discovery, open or
@@ -1397,7 +1404,10 @@ current exposure is implemented, and none may be.
 The server is the pinned SDK's network camera simulator, `ArvGvFakeCamera`
 (`src/arvgvfakecamera.c`, public API `arv_gv_fake_camera_new()`,
 `arv_gv_fake_camera_is_running()` and `arv_gv_fake_camera_get_fake_camera()`).
-It runs in the test process on its own thread, bound to `127.0.0.1`. This is
+It runs in the test process on its own thread. Its GVCP and GVSP sockets are
+bound to `127.0.0.1`, but it **also** binds a wildcard global-discovery
+listener on 255.255.255.255:3956 (see
+[Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1)). This is
 the same object the upstream `tests/fakegv.c` uses, created the same way:
 `arv_gv_fake_camera_new("127.0.0.1", "GVTest")`. It answers GVCP on UDP
 127.0.0.1:3956 and sends GVSP datagrams to whatever stream destination the
@@ -1419,11 +1429,15 @@ following:
 - It finds the up IPv4 loopback interface carrying 127.0.0.1 (`lo`).
 - It requires UDP 127.0.0.1:3956 to be **free** before start. A busy port is an
   immediate failure with the `bind` error, never a skip.
-- It restricts GigE discovery to that interface for the test process through
-  the public `arv_gv_interface_set_discovery_interface_name()` (0.8.34+).
-  Discovery broadcasts therefore never leave loopback, and no physical camera
-  can be discovered. The previous value is restored afterwards. The production
-  adapter's discovery policy is unchanged.
+- It restricts the **client's** GigE discovery to that interface for the test
+  process through the public `arv_gv_interface_set_discovery_interface_name()`
+  (0.8.34+). The client's discovery sockets are then bound to 127.0.0.1, its
+  limited-broadcast discovery is routed over `lo`, and no physical camera can
+  be discovered. The previous value is restored afterwards. The production
+  adapter's discovery policy is unchanged. *This setting does not restrict the
+  simulator's own listening sockets.* (GIGE-MEL-011-R1 supersedes the earlier
+  wording "discovery broadcasts never leave loopback", which described only
+  the client's outgoing discovery.)
 - It checks the following after start:
   - `is_running`;
   - an `ArvFakeCamera` underneath;
@@ -1439,12 +1453,216 @@ following:
   for failure paths.
 - Discovery waits are bounded at 10 s. Each attempt is a 1 s SDK poll. Expiry
   reports the interface, what was found, `is_running` and the port state.
-- After every scenario, `/proc/self/fd` joined with `/proc/net/udp` proves that
-  every UDP socket the process owns is bound to 127.0.0.1, or to
-  255.255.255.255 (the simulator's global-discovery socket).
+- A structured UDP socket audit (GIGE-MEL-011-R1) classifies every UDP socket
+  the process owns. It runs before and after simulator start, during
+  acquisition, after client close, after simulator destruction and after every
+  scenario. See
+  [Socket audit](#socket-audit-contract-gige-mel-011-r1). (This replaces the
+  earlier `require_loopback_only_sockets()`. That check accepted any socket on
+  127.0.0.1 **or** 255.255.255.255, and the earlier record described the result
+  as loopback-only. Both are superseded.)
 
 `arv_shutdown()` is never called. The test runs under CTest
 `RESOURCE_LOCK gige_gvcp_loopback_3956`, because port 3956 is fixed.
+
+### Network exposure of the simulator (GIGE-MEL-011-R1)
+
+> **Security qualification.** The GIGE-MEL-011 client restricts GigE
+> discovery and normal GVCP/GVSP traffic to loopback. However, pinned Aravis
+> 0.8.36's network simulator also creates a global GVCP discovery listener
+> bound to 255.255.255.255:3956. On Linux that binding is effectively
+> wildcard, so the simulator process is not strictly confined to loopback.
+>
+> `aravis_gige_loopback_contract` therefore runs under an **explicitly
+> documented test-only exception**. It does not establish strict network
+> isolation. Acceptance of this exception is the repository owner's decision,
+> and that decision is **pending**.
+
+**Sockets the pinned simulator creates.** Pinned commit
+`97ff5e330919d7a44b871df4eda669feeafdf342`. Its `src/arvgvfakecamera.c` is
+byte-identical (SHA-256 `2a7366a7…8de37`) to the file in the provisioned,
+checksum-verified tarball. `arv_gv_fake_camera_start()` calls
+`_create_and_bind_input_socket()` (lines 443-484). That helper uses
+`g_socket_bind()`, which sets `SO_REUSEADDR` and, for datagram sockets,
+`SO_REUSEPORT` when `allow_reuse` is TRUE. It never sets `SO_BINDTODEVICE`.
+
+| | Socket (pinned lines) | Bound to | Options (observed) | Purpose |
+| --- | --- | --- | --- | --- |
+| A | GVCP input (518-520) | 127.0.0.1:3956 | no reuse | Control: discovery replies, register/memory access |
+| B | GVSP output (516-517) | 127.0.0.1:*kernel-assigned* (port 0) | no reuse | Source of GVSP datagrams sent to the client's programmed destination |
+| C | Global discovery (522-526) | **255.255.255.255:3956** | `SO_REUSEADDR=1`, `SO_REUSEPORT=1`, no device | Receives GigE Vision discovery sent to the limited broadcast address. Created whenever the GVCP address is not 255.255.255.255 |
+| D | Subnet discovery (530-536) | the interface broadcast address, port 3956 | n/a | **Not created for `lo`.** It is created only if the interface broadcast address differs from the GVCP address. On Linux, the pinned enumeration copies `ifa_ifu.ifu_broadaddr` (`src/arvnetwork.c:380-381`). For `lo` that is 127.0.0.1 (`IFF_BROADCAST` clear), which equals the GVCP address. The fixture asserts this before relying on it |
+
+**Why upstream creates C.** A GigE Vision camera must answer discovery
+commands sent to the limited broadcast address 255.255.255.255:3956. The pinned
+client's discovery also sends there first, and uses a directed broadcast only
+as a fallback (`src/arvgvinterface.c:180-206`). On Linux, a socket bound to
+127.0.0.1 does not receive datagrams addressed to 255.255.255.255. The
+simulator therefore binds a separate socket to that address. It does so with
+`allow_reuse` TRUE, so other reuse-enabled sockets may share the port. The
+pinned source has no property or option to suppress the socket; the only
+condition is that the GVCP address is not itself 255.255.255.255.
+
+**Linux binding semantics.** ip(7): "INADDR_BROADCAST (255.255.255.255) has
+the same effect on bind(2) as INADDR_ANY for historical reasons." The
+kernel's `inet_bind()` keeps 255.255.255.255 as the receive address
+(`net/ipv4/af_inet.c`, v6.12). So `/proc/net/udp` reports `FFFFFFFF:0F74` and
+`getsockname()` returns 255.255.255.255, **not** 0.0.0.0. The following were
+observed locally (Linux 6.12, no reuse options, out-of-repository probes):
+
+- 255.255.255.255:P conflicts with both 0.0.0.0:P and another
+  255.255.255.255:P;
+- it coexists with 127.0.0.1:P;
+- a 255.255.255.255-bound socket has no `SO_BINDTODEVICE`;
+- it received a limited broadcast sent from 127.0.0.1 over `lo`.
+
+For broadcast and multicast delivery, the kernel's `__udp_is_mcast_sock()`
+compares the bound address with the packet destination and applies a device
+check only if `SO_BINDTODEVICE` is set. Nothing ties C to `lo`.
+
+**Three different things.**
+
+1. *Intended traffic is loopback-only.* The client's discovery sockets are
+   bound to 127.0.0.1. Its limited broadcast is routed via `lo`
+   (`ip route get 255.255.255.255 from 127.0.0.1` gives `dev lo`). GVCP goes to
+   127.0.0.1:3956, and GVSP goes from 127.0.0.1 to the client's 127.0.0.1
+   port. The client's discovery-interface setting governs only the client.
+2. *The binding scope is wildcard.* Socket C is bound with
+   INADDR_ANY-equivalent semantics on every interface of the network
+   namespace, for the simulator's whole lifetime.
+3. *Unsolicited non-loopback traffic could be received.* A GVCP datagram
+   that reaches this host on any interface, addressed to 255.255.255.255:3956,
+   can be delivered to C. The simulator handles every input socket alike
+   (`_handle_control_packet`). It answers DISCOVERY, READREG and READMEM, and
+   while no controller holds CCP it also accepts WRITEREG/WRITEMEM.
+   - Its reply is sent **from C to the requester's address**, so it may leave
+     the host on a non-loopback interface.
+   - A local GVCP READREG sent to 255.255.255.255:3956 *from 127.0.0.1* was
+     answered (out-of-repository probe), which demonstrates that C is a live
+     control endpoint.
+   - A unicast datagram to the host's own non-loopback address on port 3956
+     was **not** answered, because C only matches destination
+     255.255.255.255.
+   - No datagram was sent to or from an external interface or another host.
+     Whether a broadcast from another host on the attached segment reaches C
+     was **not** tested.
+
+**No host firewall is relied on or claimed.** The local rule set could not be
+read without root, and nothing here depends on it. No firewall rule,
+`SO_BINDTODEVICE`, network namespace, VM or other restriction has been added
+or validated. **GitHub-hosted runners are not claimed to isolate this
+listener.** Their network isolation has not been verified.
+
+**Lifetime.** C exists from `arv_gv_fake_camera_new()` (inside
+`lb::Simulator`'s constructor) until the simulator is finalized in
+`Simulator::finish()` (or the non-throwing destructor on a failure path).
+The pinned `arv_gv_fake_camera_stop()` (lines 571-591) joins the simulator
+thread and then closes A, C (`input_sockets[]`) and B.
+
+- Each scenario and the audit case creates its own simulator, so C exists
+  only while one of them runs.
+- On a clean run that is about 45 s in total, across 12 sequential simulator
+  instances in 11 cases (L uses three).
+- A watchdog abort (`_Exit(3)`) or a crash closes it with the process.
+
+**Cleanup verification.** `finish()` requires the following after
+destruction:
+
+- the GObject weak reference fired;
+- an audit with **no** permitted exception finds no wildcard or non-loopback
+  UDP socket, and none of the three recorded inodes;
+- `bind(127.0.0.1:3956)` succeeds again;
+- `bind(255.255.255.255:3956)` without reuse succeeds. This is
+  namespace-wide: no process holds 255.255.255.255:3956 or 0.0.0.0:3956;
+- the previous discovery-interface name is restored and read back.
+
+The test driver repeats the audit with no exception and both bind probes
+after every case. These checks show the release. They do **not** show that
+the simulator was unreachable through another interface while it was
+running.
+
+**Recommended environment.** Run `aravis_gige_loopback_contract` only where
+the operator accepts this temporary discovery-listener exposure, or inside an
+independently established isolated network environment, such as a network
+namespace without external interfaces or an isolated VM/container network.
+That environment must be set up and verified outside this repository. Do not
+run it on a host attached to a production camera network or to untrusted
+networks without that acceptance. The other SDK tests use the in-process Fake
+interface and open no sockets of this kind.
+
+### Socket audit contract (GIGE-MEL-011-R1)
+
+`tests/support/aravis_gv_loopback.*` (test-only, uninstalled) provides the
+audit.
+
+**Socket inventory.** `owned_udp_sockets()` joins `/proc/self/fd` (socket
+inode → fd) with `/proc/net/udp` **and** `/proc/net/udp6` by inode, so every
+listed socket belongs to this process. It reads `SO_TYPE`, `SO_PROTOCOL`,
+`SO_REUSEADDR`, `SO_REUSEPORT` and `SO_BINDTODEVICE` from the same fd. The fd
+must keep the same inode before and after the reads.
+
+**Classification.** `classify_udp_socket(socket, listener)` is pure and
+returns one of three values:
+
+- `loopback`: IPv4, bound to 127.0.0.1.
+- `simulator_global_discovery`: only when all of the following hold:
+  - IPv4 UDP datagram socket;
+  - bound to exactly 255.255.255.255, port exactly 3956;
+  - `SO_REUSEADDR` and `SO_REUSEPORT` set, and no bound device;
+  - **the same inode and fd as the listener the live simulator recorded at
+    start**.
+
+  With no live simulator (`listener == nullptr`), nothing qualifies.
+- `unexpected`: everything else, including every other 0.0.0.0,
+  255.255.255.255 or IPv6 socket.
+
+**Audit result.** `audit_udp_sockets()` and `require_socket_audit()` return a
+`SocketAudit`. It holds:
+
+- the loopback-bound sockets;
+- the matched listener(s);
+- the unexpected sockets, with full address, port, inode, fd and options;
+- the expected listener count: 1 with a live simulator, else 0;
+- whether the exception was observed.
+
+`summary()` names the upstream source. `passed()` requires zero unexpected
+sockets and exactly the expected listener count.
+
+**Identification at start.** First, the fixture requires that nothing
+conflicts with 255.255.255.255:3956 or 0.0.0.0:3956, and that the process
+owns no wildcard UDP socket. It then identifies the sockets that appeared
+across construction. These must be exactly A, B and C above, with the options
+shown, and D must be absent; anything else fails. C's identity is recorded
+for the classifier.
+
+| Audit point | Exception permitted | Checked |
+| --- | --- | --- |
+| Before simulator start | none | no wildcard socket |
+| After simulator start (A, S) | the recorded listener | 2 loopback + 1 listener, 0 unexpected |
+| During GVCP/GVSP acquisition (C) | the recorded listener | the client's GVSP socket is loopback-bound; 0 unexpected |
+| After client close (A) | the recorded listener | only the simulator's 2 loopback + 1 listener remain |
+| After simulator destruction (every `finish()`) | none | no wildcard socket; recorded inodes gone; both bind probes succeed |
+| After every case (driver) | none | the same, plus both bind probes again |
+
+**Audit-control case S.** It runs in the same executable and the same CTest
+entry. It is not a transport scenario.
+
+- The listener classifies as `simulator_global_discovery` only with its
+  recorded identity, and as `unexpected` with no listener. It is never
+  counted as loopback.
+- Forged variants are all `unexpected`: 0.0.0.0, port 3957, a different
+  inode, no `SO_REUSEPORT`, bound to `lo`, non-UDP and IPv6.
+- Three real temporary sockets of this process are bound one at a time:
+  - `0.0.0.0` on a kernel-assigned ephemeral port;
+  - `255.255.255.255` on an ephemeral port;
+  - a lookalike `255.255.255.255:3956` with the same reuse options.
+
+  For each one, the audit must report exactly that socket as the one
+  unexpected socket and still recognize the simulator's listener, and the
+  checked form must throw. The socket is then closed and the normal audit
+  must pass again.
+
+S sends no datagram and changes no host setting.
 
 ### Identity, SDK and provenance
 
@@ -1478,6 +1696,10 @@ device disables resend because the simulator does not advertise it. A timeout
 under simulated loss says nothing about physical disconnection, and the test
 asserts nothing of the kind. This is not a switch or NIC loss test.
 
+The same executable also runs the R1 audit-control case **S**
+([Socket audit](#socket-audit-contract-gige-mel-011-r1)). S is not a
+transport scenario. The ten transport groups above are unchanged.
+
 ### What loopback does and does not show
 
 The simulator's GVSP leader timestamp comes from the Fake's host wall clock
@@ -1488,6 +1710,12 @@ loss or reordering, no real heartbeat timeout and no camera firmware, so it
 says nothing about throughput or timing. The pixels are synthetic. A positive
 virtual-clock callback proves the network-image publication path, not camera
 timing. Production Aravis-backed MEL Image publication is still not enabled.
+
+"Loopback" describes the **intended traffic**: the client's discovery and all
+GVCP/GVSP exchanges. It is **not** a claim that the test process is confined
+to loopback. The simulator's 255.255.255.255:3956 discovery listener is
+wildcard-bound for the simulator's lifetime (see
+[Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1)).
 
 ## Qualification boundaries
 
@@ -1508,7 +1736,12 @@ loopback network simulator `ArvGvFakeCamera`. It does **not** establish:
 - any Aravis integration-start timestamp. GIGE-MEL-010 observes raw SDK
   values. Its positive MEL publication uses a **test-only virtual clock** and
   is not hardware timestamp qualification (see
-  [Native timestamp provenance](#native-timestamp-provenance-gige-mel-010)).
+  [Native timestamp provenance](#native-timestamp-provenance-gige-mel-010));
+- network isolation of the loopback test. The simulator's wildcard
+  255.255.255.255:3956 discovery listener is a documented test-only
+  exception. No `SO_BINDTODEVICE`, namespace, firewall or runner-isolation
+  property is implemented or verified, and owner acceptance of the exception
+  is pending.
 
 The first physical-camera qualification and a second real SDK implementation
 remain pending. Sanitizer jobs instrument the project's code only, not the

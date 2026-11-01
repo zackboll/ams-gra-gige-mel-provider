@@ -33,12 +33,19 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+
+#include <cerrno>
 #include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -167,8 +174,24 @@ std::string socket_text(GSocketAddress* address) {
 }
 bool owns_udp_port(std::uint32_t port) {
     for (const auto& s : lb::owned_udp_sockets())
-        if (s.port == port && s.address == lb::loopback_address) return true;
+        if (s.port == port && !s.ipv6 && s.address == lb::loopback_address) return true;
     return false;
+}
+
+// The live simulator's audit at one point of the scenario: exactly the one
+// documented global-discovery listener, recognized by its recorded identity
+// and reported separately from the loopback-bound sockets; nothing else.
+lb::SocketAudit audit_live(const lb::Simulator& sim, std::string_view where) {
+    auto audit = sim.require_socket_audit(where);
+    const auto& listener = sim.sockets().global_discovery;
+    CHECK(audit.passed() && audit.exception_observed() && audit.unexpected.empty());
+    CHECK(audit.discovery.size() == 1 && audit.expected_discovery == 1);
+    const auto& seen = audit.discovery.front();
+    CHECK(seen.inode == listener.inode && seen.fd == listener.fd);
+    CHECK(seen.address == "255.255.255.255" && seen.port == lb::gvcp_port && !seen.ipv6);
+    CHECK(seen.datagram_udp && seen.reuse_address && seen.reuse_port && seen.bound_device.empty());
+    for (const auto& s : audit.loopback) CHECK(s.inode != listener.inode && s.address == lb::loopback_address);
+    return audit;
 }
 
 // GObject weak-reference counter; never keeps the observed object alive.
@@ -298,7 +321,14 @@ std::uint64_t stream_info(ArvStream* stream, const char* name) {
 // A. Discovery and device ownership through real GigE Vision discovery/GVCP.
 void discovery_and_ownership() {
     lb::Simulator sim;
-    lb::require_loopback_only_sockets("after simulator start");
+    {
+        const auto started = audit_live(sim, "after simulator start");
+        // Exactly the pinned simulator's three sockets exist, two of them on
+        // 127.0.0.1 (GVCP 3956 and the GVSP output) and the documented
+        // wildcard listener, which is NOT counted as loopback.
+        CHECK(started.loopback.size() == 2);
+        std::cout << "  socket audit " << started.summary() << '\n';
+    }
     auto camera = aravis::make_backend(); // the production GigE factory, unchanged
     CHECK(camera->id() == aravis::backend_id);
     const auto devices = sim.discover(*camera);
@@ -357,10 +387,14 @@ void discovery_and_ownership() {
     CHECK(native_type(*reopened) == "ArvGvDevice" && sim.control_privilege() != 0);
     CHECK(reopened->close());
     CHECK(sim.control_privilege() == 0);
-    lb::require_loopback_only_sockets("after discovery and close");
+    // After client close only the simulator's own sockets remain.
+    CHECK(audit_live(sim, "after discovery and client close").loopback.size() == 2);
     reopened.reset();
     device.reset();
     sim.finish();
+    const auto& released = sim.release_audit();
+    CHECK(released && released->passed() && !released->exception_observed() && released->unexpected.empty());
+    std::cout << "  socket audit " << released->summary() << '\n';
 }
 
 // ===========================================================================
@@ -478,7 +512,13 @@ void gvsp_frame_transfer() {
     const auto port = sim.stream_port();
     CHECK(port != 0 && sim.stream_destination() == lb::loopback_address);
     CHECK(owns_udp_port(port)); // the GVSP destination is a socket of THIS process
-    lb::require_loopback_only_sockets("during GVSP acquisition");
+    {
+        const auto acquiring = audit_live(sim, "during GVCP/GVSP acquisition");
+        bool client_stream_socket = false; // the client's GVSP socket is loopback-bound
+        for (const auto& s : acquiring.loopback) client_stream_socket = client_stream_socket || s.port == port;
+        CHECK(client_stream_socket);
+        std::cout << "  socket audit " << acquiring.summary() << '\n';
+    }
     const auto packet_size = sim.read_register(0x0d04) & 0xffffu; // GVBS SCPS0 packet size
     CHECK(packet_size > 36 && packet_size <= 9000);
     // The simulator advertises no packet-resend capability (GVBS 0x0934 bit 2),
@@ -1239,6 +1279,126 @@ void packet_loss() {
     sim.finish();
 }
 
+// ===========================================================================
+// S. Socket-audit controls (GIGE-MEL-011-R1). Not a transport scenario. The
+// audit permits ONE socket that is not loopback-bound: the pinned
+// simulator's 255.255.255.255:3956 global-discovery listener, identified by
+// its recorded inode/fd as well as its address, port and options. Any other
+// wildcard socket is rejected. No datagram is sent by this case and no host
+// firewall or network setting is touched.
+class TemporaryUdpSocket {
+public:
+    TemporaryUdpSocket(const char* address, std::uint16_t port, bool reuse) {
+        fd_ = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+        if (fd_ < 0) throw std::runtime_error("socket() failed");
+        if (reuse) {
+            const int one = 1;
+            ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+            ::setsockopt(fd_, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
+        }
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_port = htons(port);
+        if (::inet_pton(AF_INET, address, &a.sin_addr) != 1 ||
+            ::bind(fd_, reinterpret_cast<const sockaddr*>(&a), sizeof a) != 0) {
+            const int error = errno;
+            ::close(fd_);
+            throw std::runtime_error(std::string("cannot bind temporary control socket ") + address + ": " +
+                                     std::strerror(error));
+        }
+        struct stat st{};
+        socklen_t length = sizeof a;
+        CHECK(::fstat(fd_, &st) == 0 && ::getsockname(fd_, reinterpret_cast<sockaddr*>(&a), &length) == 0);
+        inode_ = st.st_ino;
+        port_ = ntohs(a.sin_port);
+    }
+    ~TemporaryUdpSocket() { close(); }
+    TemporaryUdpSocket(const TemporaryUdpSocket&) = delete;
+    TemporaryUdpSocket& operator=(const TemporaryUdpSocket&) = delete;
+    void close() {
+        if (fd_ >= 0) ::close(fd_);
+        fd_ = -1;
+    }
+    std::uint64_t inode() const { return inode_; }
+    std::uint16_t port() const { return port_; }
+
+private:
+    int fd_{-1};
+    std::uint64_t inode_{0};
+    std::uint16_t port_{0};
+};
+
+// The audit must reject exactly `extra` and still recognize the simulator's
+// listener; the checked form must throw; closing `extra` restores a pass.
+void require_rejected(const lb::Simulator& sim, TemporaryUdpSocket& extra, const char* label) {
+    const auto rejected = sim.socket_audit(label);
+    CHECK(!rejected.passed());
+    CHECK(rejected.unexpected.size() == 1 && rejected.unexpected.front().inode == extra.inode());
+    CHECK(rejected.discovery.size() == 1 && rejected.discovery.front().inode == sim.sockets().global_discovery.inode);
+    bool threw = false;
+    try {
+        (void)sim.require_socket_audit(label);
+    } catch (const std::runtime_error& error) {
+        threw = contains(error.what(), "unexpected 1") && contains(error.what(), "FAIL");
+    }
+    CHECK(threw);
+    std::cout << "  rejected: " << rejected.summary() << '\n';
+    extra.close();
+    CHECK(audit_live(sim, std::string(label) + ", after closing it").unexpected.empty());
+}
+
+void socket_audit_controls() {
+    lb::Simulator sim;
+    const auto& listener = sim.sockets().global_discovery;
+    const auto normal = audit_live(sim, "audit control: simulator only");
+    std::cout << "  pinned simulator sockets: GVCP " << sim.sockets().gvcp.text() << "; GVSP output "
+              << sim.sockets().gvsp_output.text() << "; global discovery " << listener.text()
+              << "; lo broadcast " << sim.sockets().loopback_broadcast << " (no subnet-discovery socket)\n";
+    // Recognized by its documented identity, never as loopback and never
+    // without that identity.
+    CHECK(lb::classify_udp_socket(listener, &listener) == lb::SocketClass::simulator_global_discovery);
+    CHECK(lb::classify_udp_socket(listener, nullptr) == lb::SocketClass::unexpected);
+    for (const auto& s : normal.loopback) CHECK(s.inode != listener.inode);
+    auto variant = [&](auto change) {
+        auto forged = listener;
+        change(forged);
+        return lb::classify_udp_socket(forged, &listener);
+    };
+    CHECK(variant([](lb::UdpSocket& s) { s.address = "0.0.0.0"; }) == lb::SocketClass::unexpected);
+    CHECK(variant([](lb::UdpSocket& s) { s.port = 3957; }) == lb::SocketClass::unexpected);
+    CHECK(variant([](lb::UdpSocket& s) { s.inode += 1; }) == lb::SocketClass::unexpected);
+    CHECK(variant([](lb::UdpSocket& s) { s.reuse_port = false; }) == lb::SocketClass::unexpected);
+    CHECK(variant([](lb::UdpSocket& s) { s.bound_device = "lo"; }) == lb::SocketClass::unexpected);
+    CHECK(variant([](lb::UdpSocket& s) { s.datagram_udp = false; }) == lb::SocketClass::unexpected);
+    CHECK(variant([](lb::UdpSocket& s) { s.ipv6 = true; }) == lb::SocketClass::unexpected);
+
+    // Negative controls: real, temporary, unrelated wildcard UDP sockets of
+    // THIS process on kernel-assigned ephemeral ports, one at a time.
+    {
+        TemporaryUdpSocket any("0.0.0.0", 0, false);
+        CHECK(any.port() != 0 && any.port() != lb::gvcp_port);
+        require_rejected(sim, any, "audit control: extra 0.0.0.0 ephemeral socket");
+    }
+    {
+        TemporaryUdpSocket broadcast("255.255.255.255", 0, true);
+        CHECK(broadcast.port() != 0 && broadcast.port() != lb::gvcp_port);
+        require_rejected(sim, broadcast, "audit control: extra 255.255.255.255 ephemeral socket");
+    }
+    // A lookalike with the listener's exact address, port and options (the
+    // pinned reuse flags allow it to coexist) is still rejected: the
+    // exception is the simulator's recorded socket, not a socket pattern.
+    {
+        TemporaryUdpSocket lookalike("255.255.255.255", lb::gvcp_port, true);
+        require_rejected(sim, lookalike, "audit control: lookalike 255.255.255.255:3956 socket");
+    }
+    CHECK(audit_live(sim, "audit control: simulator only, again").loopback.size() == normal.loopback.size());
+    sim.finish();
+    const auto& released = sim.release_audit();
+    CHECK(released && released->passed() && released->discovery.empty() && released->unexpected.empty());
+    CHECK(lb::probe_udp_bind(lb::gvcp_port) == 0 && lb::probe_udp_bind("255.255.255.255", lb::gvcp_port) == 0);
+    std::cout << "  socket audit " << released->summary() << '\n';
+}
+
 // Any GLib/Aravis warning or critical (e.g. a simulator "Failed to bind" or a
 // g_return_if_fail reached by the adapter) aborts: failures, never noise.
 void fatal_glib_log(const gchar* domain, GLogLevelFlags level, const gchar* message, gpointer) {
@@ -1302,28 +1462,37 @@ int main(int argc, char** argv) {
         {"M1 positive MEL publication of network pixels (TEST-ONLY virtual time)", positive_publication},
         {"M2 negative control: production timestamps rejected", negative_publication},
         {"L  SIMULATED GVSP packet loss (gvsp-lost-ratio 0.0 / 1.0)", packet_loss},
+        // Not a transport scenario: the R1 socket-audit controls.
+        {"S  socket audit: documented wildcard discovery listener; unrelated wildcard rejected", socket_audit_controls},
     };
     // Usage: aravis_gige_loopback_contract_tests [FILTER [REPEAT]]
     const std::string filter = argc >= 2 ? argv[1] : "";
     const int repeat = argc >= 3 ? std::max(1, std::atoi(argv[2])) : 1;
-    std::size_t passed = 0;
+    std::size_t passed = 0, audit_cases = 0;
     for (int r = 0; r < repeat; ++r)
         for (const auto& [name, run] : tests) {
             if (!filter.empty() && std::string(name).find(filter) == std::string::npos) continue;
             try {
                 Watchdog watchdog(name, std::chrono::seconds{90});
                 run();
-                lb::require_loopback_only_sockets(name);
+                // Every simulator is destroyed: no wildcard UDP socket of any
+                // kind may remain (no exception is permitted here).
+                (void)lb::require_socket_audit(std::string(name) + ": after the scenario", nullptr);
                 if (lb::probe_udp_bind(lb::gvcp_port) != 0)
                     throw std::runtime_error("UDP 127.0.0.1:3956 still bound after the scenario");
+                if (lb::probe_udp_bind("255.255.255.255", lb::gvcp_port) != 0)
+                    throw std::runtime_error("UDP 255.255.255.255:3956 still bound after the scenario");
             } catch (const std::exception& error) {
                 std::cerr << "FAIL " << name << ": " << error.what() << '\n';
                 return 1;
             }
             ++passed;
+            if (run == socket_audit_controls) ++audit_cases;
             std::cout << "PASS " << name << std::endl;
         }
-    std::cout << passed << " Aravis GigE loopback scenarios passed (simulated network camera; no physical camera, "
-              << "NIC, exposure timing or timestamp qualification)\n";
+    std::cout << passed - audit_cases << " Aravis GigE loopback transport scenarios and " << audit_cases
+              << " socket-audit control case(s) passed (simulated network camera; no physical camera, NIC, exposure "
+              << "timing or timestamp qualification; the simulator's 255.255.255.255:3956 discovery listener is a "
+              << "documented test-only wildcard exception, NOT loopback confinement)\n";
     return passed ? 0 : 1;
 }

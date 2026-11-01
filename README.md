@@ -128,7 +128,7 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `examples/capture.cpp` | Standalone MEL consumer that dynamically loads the provider |
 | `tests/backend_tests.cpp` | Synthetic-specific backend lifetime, cancellation, validation, and pool contracts |
 | `tests/provider_backend_contract_tests.cpp` | Shared MEL-provider portability scenarios run against the synthetic backend and an independent test-only backend |
-| `tests/support/` | Test-only contract-fixture camera backend, Aravis Fake-interface selection, the Aravis loopback GigE simulator fixture (`ArvGvFakeCamera` on 127.0.0.1) and the test-only Aravis virtual integration-start clock; never installed or selectable by the exported factories |
+| `tests/support/` | Test-only contract-fixture camera backend, Aravis Fake-interface selection, the Aravis loopback GigE simulator fixture (`ArvGvFakeCamera`, GVCP/GVSP on 127.0.0.1, plus its wildcard 255.255.255.255:3956 discovery listener, audited as a documented test-only exception) and the test-only Aravis virtual integration-start clock; never installed or selectable by the exported factories |
 | `tests/aravis_*.cpp` | Optional real-SDK adapter, acquisition-, timestamp- and loopback GigE transport-contract tests, and the private MEL configuration/negative timestamp-admission embedding probe |
 | `tests/provider_tests.cpp` | MEL semantics, host memory, metadata, reentry, and shutdown regressions |
 | `tests/loader_tests.cpp` | Native ABI/export and image-delivery test with no provider link dependency |
@@ -214,6 +214,15 @@ all MEL channel code.
    production GigE backend against the SDK's own network camera simulator
    (`ArvGvFakeCamera`) on IPv4 loopback: real discovery, GVCP control and GVSP
    image transport over UDP, but simulated, not a physical camera or NIC.
+   The client restricts GigE discovery and normal GVCP/GVSP traffic to
+   loopback. However, pinned Aravis 0.8.36's network simulator also creates a
+   global GVCP discovery listener bound to 255.255.255.255:3956. On Linux that
+   binding is effectively wildcard, so the simulator process is not strictly
+   confined to loopback. That test therefore runs under an explicitly
+   documented **test-only network exception**. It is not network isolation,
+   and owner acceptance is pending; run it only where that exposure is
+   accepted or in an independently isolated network environment
+   ([details](docs/aravis-integration.md#network-exposure-of-the-simulator-gige-mel-011-r1)).
    Time mapping and physical-camera qualification are pending, and the adapter
    is not selectable through the exported factories. eBUS, vendor SDKs and
    GenTL consumers remain candidates for the second implementation.
