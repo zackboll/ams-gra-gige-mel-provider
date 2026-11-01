@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -112,11 +113,15 @@ enum class NativeInterface { gige_vision, fake, other };
 // frequency through the supported arv_gv_device_get_timestamp_tick_frequency()
 // (GVBS bootstrap registers 0x093C/0x0940). Writes nothing; starts nothing.
 // A failed identity or frequency query is an error, never treated as absence.
+// GIGE-MEL-010-R1: tick_frequency_hz is THIS separate diagnostic read, made
+// before any stream exists. The pinned SDK stream reads the frequency again,
+// itself, during stream construction (src/arvgvstream.c:1613, error ignored),
+// so this value does not establish which timestamp path the stream used.
 struct TimingContext {
     NativeInterface native_interface{NativeInterface::other};
     std::string native_device_type;                            // e.g. "ArvGvDevice", "ArvFakeDevice"
     std::vector<std::pair<std::string, std::string>> identity; // implemented identity features only
-    std::optional<std::uint64_t> tick_frequency_hz;            // GigE Vision devices only
+    std::optional<std::uint64_t> tick_frequency_hz;            // GigE Vision devices only (diagnostic read)
 };
 Result<TimingContext> read_timing_context(ICameraDevice& device);
 
@@ -129,6 +134,12 @@ Result<TimingContext> read_timing_context(ICameraDevice& device);
 // validated Mono8 frames within ONE overall `deadline`, releasing each lease
 // immediately, stops and closes. The JSONL report is written only after
 // cleanup; on any failure (including cleanup) the output file is removed.
+// GIGE-MEL-010-R1: ownership of the exclusively created output and of the
+// opened device/stream is held by RAII guards from the moment each exists,
+// so an exception from any later step (open, acquisition, rendering,
+// writing) also retires the native resources and removes the output. An
+// exception is reported through `error`; a cleanup failure stays separate in
+// `cleanup_error` and never replaces the first failure.
 struct TimeProbeFrame {
     NativeTimestampObservation native;
     bool descriptor_timestamp_valid{false}; // the production FrameDescriptor value (always false)
@@ -161,5 +172,37 @@ TimeProbeOutcome time_probe(ICameraBackend& backend, std::string_view device_id,
 // Wording written by the probe (also asserted by tests).
 std::string_view timing_origin(NativeInterface native_interface);
 std::string_view timestamp_qualification_reason();
+
+// GIGE-MEL-010-R1. The PRODUCTION JSONL serializer used by time_probe(),
+// declared here only so the adapter's own tests exercise exactly that code
+// with synthetic contexts (docs/aravis-integration.md, schema version 2).
+inline constexpr std::uint64_t time_probe_schema_version = 2;
+// Exact JSON string literal of well-formed UTF-8 (Unicode Table 3-7): valid
+// text is copied unchanged except for the escapes JSON needs (quote,
+// backslash, U+0000-U+001F) and DEL. Malformed input (stray or missing
+// continuation byte, overlong form, surrogate, above U+10FFFF, truncated
+// sequence) is an error; it is never replaced, re-encoded or guessed.
+Result<std::string> time_probe_json_string(std::string_view text);
+// Header, one line per frame, summary. Returns an error - never a substituted
+// value - naming the field that is not well-formed UTF-8, or rejecting an
+// inconsistent timing context (a GigE context without its diagnostic
+// frequency read result; a frequency for a device that is not an ArvGvDevice).
+Result<std::vector<std::string>> render_time_probe_report(const TimeProbeReport& report,
+                                                          std::chrono::milliseconds deadline,
+                                                          std::uint32_t requested_frames);
+
+// TEST-ONLY fault seam (GIGE-MEL-010-R1). Not reachable from the diagnostic
+// CLI, which calls only time_probe(). `checkpoint` runs at named production
+// boundaries of the SAME routine: "opened" (device open, nothing read yet),
+// "started" (acquisition running), "render" (native cleanup finished, before
+// serialization), "written" (header line written, before the rest). It may
+// throw to exercise exception cleanup; it must not touch the device or file.
+struct TimeProbeTestFaults {
+    std::function<void(std::string_view stage)> checkpoint;
+};
+TimeProbeOutcome time_probe_with_faults_for_testing(ICameraBackend& backend, std::string_view device_id,
+                                                    std::uint32_t frames, const std::string& output_path,
+                                                    std::chrono::milliseconds deadline,
+                                                    const TimeProbeTestFaults& faults);
 
 } // namespace gige_mel::backend::aravis

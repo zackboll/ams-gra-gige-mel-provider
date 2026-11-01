@@ -1024,7 +1024,11 @@ anything:
 - **only for an `ArvGvDevice`**, the tick frequency through the supported
   accessor above.
 
-A failed query is an error, never treated as absence. No frequency is ever
+A failed query is an error, never treated as absence. The frequency is this
+diagnostic's own pre-stream read, not the value the SDK stream samples during
+its construction (GIGE-MEL-010-R1; see
+[the `time-probe` provenance fields](#diagnostic-tick-frequency-observation-versus-the-streams-own-read)).
+No frequency is ever
 derived from frame intervals.
 
 ### `time-probe` diagnostic command
@@ -1054,25 +1058,123 @@ build/aravis-dev/gige_mel_aravis_diagnostic time-probe DEVICE_ID COUNT OUTPUT.js
   These are the stream destination address and port and, only when the
   device reports none, a default packet size. This is the same set-up
   `capture` already performs.
-- **Cleanup on every path:** stop, destroy the stream, close the device. The
-  JSONL report is written only **after** a clean stop and close. On any
-  failure, including a cleanup failure, the output file is removed.
+- **Cleanup on every path (GIGE-MEL-010-R1).** Two RAII guards own the
+  resources as soon as each one exists:
+  - The **output guard** owns only a pathname that this call created with
+    `fopen("wx")`. It closes the descriptor exactly once. It removes the path
+    on every ordinary error return and during exception unwinding, until the
+    complete report has been written, flushed and closed. When exclusive
+    creation fails, the guard owns nothing, so an existing file is never
+    removed or changed.
+  - The **native session** owns the opened device and, once created, its
+    stream. It runs the established cleanup exactly once: `stop()`
+    (noexcept; retires the native stream and pool), destruction of the stream
+    wrapper, then `close()`. There is no second native stop and no
+    `arv_shutdown()`.
+
+  The JSONL report is still rendered and written only **after** a clean stop
+  and close. Error reporting:
+  - The first failure goes in `error`. An exception escaping `open()`,
+    acquisition, rendering or writing is caught and reported there as
+    "time probe failed: …". After an open, the message adds "the device was
+    stopped and closed". In all cases it ends "the output was removed".
+  - A stop or close failure is reported separately in `cleanup_error`. It
+    never replaces the first failure.
+  - When `open()` itself fails or throws, no device cleanup is invented.
+  - An allocation failure while composing a message may leave that message
+    incomplete. The guards still release the device and remove the output.
 - **Exit status:** 0 on success, 1 on any operational, output or cleanup
   failure, 2 on usage errors.
 - **Shared code:** the logic is `aravis::time_probe()`
   (`aravis_time_probe.cpp`). Tests call the same routine with the private
   Fake backend; production interface selection is untouched.
 
-The output contract (schema `gige-mel.aravis-time-probe`, version 1) is:
+The output contract is schema `gige-mel.aravis-time-probe`, **version 2**
+(GIGE-MEL-010-R1). Version 1 is superseded. Its `tick_frequency_hz`,
+`tick_frequency_source` and GigE `sdk_buffer_timestamp_source` wording could
+be read as proof of the stream's timestamp path, so the meaning changed and
+the version was incremented.
 
 | Line | Fields |
 | --- | --- |
-| 1 `header` | `device_id`, `interface` (`gige_vision`/`fake`/`other`), `native_device_type`, `compiled_sdk_version`, `runtime_sdk_version`, `identity` (implemented features plus GenICam XML size and SHA-256), `tick_frequency_hz` (GigE accessor value, or `null`) and `tick_frequency_source`, `sdk_buffer_timestamp_source`, `sdk_system_timestamp_source`, `timing_origin`, `configuration`, `requested_frames`, `receive_deadline_ms`, `timestamp_units`, `timestamp_qualified: false`, `qualification_reason` |
-| 2 … COUNT+1 `frame` | `index`, `device_id`, `interface`, both SDK versions, `stream_generation`, `native_frame_id`, `width`, `height`, `offset_x`, `offset_y`, `sdk_buffer_timestamp_ns`, `sdk_system_timestamp_ns` (unsigned, unconverted), `descriptor_timestamp_valid: false`, `timestamp_qualified: false`, `qualification_reason` |
+| 1 `header` | `device_id`, `interface` (`gige_vision`/`fake`/`other`), `native_device_type`, `compiled_sdk_version`, `runtime_sdk_version`, `identity` (implemented features plus GenICam XML size and SHA-256), `diagnostic_tick_frequency_hz` and `diagnostic_tick_frequency_read`, `actual_stream_timestamp_path` and `actual_stream_timestamp_path_basis`, `sdk_stream_timestamp_paths`, `sdk_buffer_timestamp_source`, `sdk_system_timestamp_source`, `timing_origin`, `configuration`, `requested_frames`, `receive_deadline_ms`, `timestamp_units`, `timestamp_qualified: false`, `qualification_reason` |
+| 2 … COUNT+1 `frame` | `index`, `device_id`, `interface`, both SDK versions, `stream_generation`, `native_frame_id`, `width`, `height`, `offset_x`, `offset_y`, `sdk_buffer_timestamp_ns`, `sdk_system_timestamp_ns` (unsigned, unconverted), `actual_stream_timestamp_path`, `descriptor_timestamp_valid: false`, `timestamp_qualified: false`, `qualification_reason` |
 | last `summary` | `frames`, the stream statistics, `timestamp_qualified: false` |
 
-All strings are JSON-escaped (control bytes, DEL and bytes ≥ 0x80 as
-`\u00XX`), so arbitrary camera identity strings cannot produce invalid JSON.
+#### Diagnostic tick-frequency observation versus the stream's own read
+
+The pinned SDK reads the GigE tick frequency twice, independently:
+
+1. **This diagnostic** reads it once with
+   `arv_gv_device_get_timestamp_tick_frequency()` (GVBS `0x093C`/`0x0940`)
+   in `read_timing_context()`, **before** any stream exists. A read error
+   makes the probe fail. It is never reported as an absent frequency.
+2. **The SDK stream** reads it again during its own construction
+   (`src/arvgvstream.c:1613`, `arv_gv_device_get_timestamp_tick_frequency
+   (priv->gv_device, NULL)`) and stores that value for its receiver thread
+   (`:1640`). Here the error is **ignored**, so a failed read silently
+   becomes 0. This value is not exposed to the adapter.
+
+Only the second value selects the GigE timestamp branch
+(`src/arvgvstream.c:480-484`, also `:489-493`, `:522-528`):
+
+- **Non-zero:** the GVSP leader ticks are converted to nanoseconds by
+  `arv_gvsp_timestamp_to_ns()`.
+- **Zero:** the SDK substitutes its host reception wall-clock time.
+
+The two reads are separate register transactions at different times. They
+can return different values, or one can fail while the other succeeds. For
+example, the diagnostic reads 1 000 000 000 Hz, the stream's read fails, and
+the stream silently uses host reception time. The reverse can also happen.
+The diagnostic therefore reports:
+
+| Field | GigE (`ArvGvDevice`) | Fake (`ArvFakeDevice`) |
+| --- | --- | --- |
+| `diagnostic_tick_frequency_hz` | The diagnostic's observed value, exact and unsigned (including 0) | `null`: not an `ArvGvDevice`, so no supported accessor; never guessed |
+| `diagnostic_tick_frequency_read` | "separate read … before stream creation; NOT the value the SDK stream sampled during its own construction … not proof of the stream's timestamp path" | "not read: the in-process Fake device is not an ArvGvDevice" |
+| `actual_stream_timestamp_path` | **`"unverified"`** in the header and every frame record | `"pinned_fake_fill_host_wall_clock"` |
+| `actual_stream_timestamp_path_basis` | "not established by this diagnostic …" | Pinned source: `src/arvfakestream.c:93`, `src/arvfakecamera.c:786-787`; no GigE stream is constructed |
+| `sdk_stream_timestamp_paths` | Object with `stream_construction_frequency_source`, `stream_construction_frequency_nonzero` and `stream_construction_frequency_zero`: the conditional SDK behavior above, with citations | `null` |
+| `sdk_buffer_timestamp_source` | "conditional on the tick frequency the SDK stream read during its own construction … which branch this stream took is unverified" | "pinned SDK Fake fill: g_get_real_time() * 1000 (src/arvfakecamera.c:786)" |
+
+The GigE wording is the same text whatever the observed frequency is. The
+number is the only difference. No path is ever inferred from the diagnostic
+sample, from equal or unequal observed timestamps, from frame intervals, or
+from plausible-looking magnitudes. A successful conversion would still not
+prove integration start, a clock epoch, UTC, PTP synchronization,
+continuity or accuracy. The serializer refuses an inconsistent context: a
+GigE context without its read result, or a frequency for a device that is
+not an `ArvGvDevice`.
+
+The Fake statement is source-established, because the in-process Fake stream
+has exactly one fill path. Nothing here exercises GigE stream construction or
+a physical lost-frequency event. The GigE rows are tested only with synthetic
+private `TimingContext` values passed through the production serializer.
+
+#### Exact UTF-8 strings
+
+Every string, including identity values, the device ID and object keys, is
+written as exact UTF-8 by the production encoder
+`time_probe_json_string()`:
+
+- **Well-formed UTF-8** (Unicode Table 3-7) is copied byte for byte. Only
+  the characters JSON requires are escaped: `\"`, `\\`, `\b \f \n \r \t`,
+  and `\u00XX` for the other U+0000-U+001F (including an embedded NUL) and
+  DEL. Decoding the JSON returns the original string exactly, for example
+  `Cámara – König`, `カメラ Κάμερα` or `📷`.
+  Superseded: version 1 wrote each byte ≥ 0x80 as `\u00XX`, which decoded
+  `Cámara – König` as the mojibake `CÃ¡mara â\u0080\u0093 KÃ¶nig`.
+- **Malformed UTF-8 is an error and is never repaired.** This covers a
+  stray or missing continuation byte, an overlong form (`C0`/`C1`, `E0 80`–`9F`,
+  `F0 80`–`8F`), a UTF-16 surrogate (`ED A0`–`BF`), a code point above
+  U+10FFFF (`F4 90`+), bytes `F5`–`FF`, and a truncated final sequence.
+  - The probe fails with an `io_error` that names the field, for example
+    `'header.identity.DeviceModelName'`, and gives the byte offset and bytes.
+  - Native cleanup has already run, and the output file is removed.
+  - No U+FFFD, byte escape or replacement identity is ever written, so a
+    report cannot silently misidentify a camera.
+  - A malformed `DEVICE_ID` argument is refused as `invalid_argument`
+    before any output or device I/O.
 
 The `timing_origin` field depends on the device:
 
@@ -1081,17 +1183,19 @@ The `timing_origin` field depends on the device:
   not camera time, not exposure start, not host-monotonic".
 - **GigE:** "unverified … without a camera-specific timing profile".
 
-For GigE, `sdk_buffer_timestamp_source` also states whether the tick frequency
-read at probe time was zero. In that case the SDK substitutes host reception
-time. The probe's frequency read is separate from the stream's own read at
-construction.
-
-Fake output (abridged, from an `aravis_timestamp_contract` run; reports are
-not committed, and no physical camera was used):
+Fake output (abridged, schema version 2, from an `aravis_timestamp_contract`
+run; reports are not committed, and no physical camera was used):
 
 ```text
-{"record":"header",…,"interface":"fake","native_device_type":"ArvFakeDevice",…,"tick_frequency_hz":null,"tick_frequency_source":"not reported: the Fake device is not an ArvGvDevice","sdk_buffer_timestamp_source":"pinned SDK Fake fill: g_get_real_time() * 1000 (src/arvfakecamera.c:786)",…,"timestamp_qualified":false,…}
-{"record":"frame","index":0,"device_id":"Fake_1","interface":"fake",…,"stream_generation":2,"native_frame_id":65401,"width":512,"height":512,"offset_x":0,"offset_y":0,"sdk_buffer_timestamp_ns":1793501463400067000,"sdk_system_timestamp_ns":1793501463400067000,"descriptor_timestamp_valid":false,"timestamp_qualified":false,…}
+{"record":"header","schema":"gige-mel.aravis-time-probe","schema_version":2,"device_id":"Fake_1","interface":"fake","native_device_type":"ArvFakeDevice",…,"diagnostic_tick_frequency_hz":null,"diagnostic_tick_frequency_read":"not read: the in-process Fake device is not an ArvGvDevice","actual_stream_timestamp_path":"pinned_fake_fill_host_wall_clock",…,"sdk_stream_timestamp_paths":null,"sdk_buffer_timestamp_source":"pinned SDK Fake fill: g_get_real_time() * 1000 (src/arvfakecamera.c:786)",…,"timestamp_qualified":false,…}
+{"record":"frame","index":0,"device_id":"Fake_1","interface":"fake",…,"stream_generation":2,"native_frame_id":65401,"width":512,"height":512,"offset_x":0,"offset_y":0,"sdk_buffer_timestamp_ns":1793507721560068000,"sdk_system_timestamp_ns":1793507721560068000,"actual_stream_timestamp_path":"pinned_fake_fill_host_wall_clock","descriptor_timestamp_valid":false,"timestamp_qualified":false,…}
+```
+
+A synthetic GigE header (abridged; production serializer, synthetic
+`TimingContext` with a 1 GHz diagnostic read; no camera):
+
+```text
+{"record":"header",…,"interface":"gige_vision","native_device_type":"ArvGvDevice",…,"diagnostic_tick_frequency_hz":1000000000,"diagnostic_tick_frequency_read":"separate read by this diagnostic … before stream creation; NOT the value the SDK stream sampled during its own construction, which may differ or fail; not proof of the stream's timestamp path","actual_stream_timestamp_path":"unverified","actual_stream_timestamp_path_basis":"not established by this diagnostic: …","sdk_stream_timestamp_paths":{"stream_construction_frequency_source":"… (src/arvgvstream.c:1613, stored at :1640); a read error is ignored and yields 0","stream_construction_frequency_nonzero":"GVSP leader ticks converted to nanoseconds … (src/arvgvstream.c:480-482); …","stream_construction_frequency_zero":"the SDK substitutes its host reception wall-clock time … (src/arvgvstream.c:484); not camera time"},…,"timestamp_qualified":false,…}
 ```
 
 ### Test-only virtual integration-start clock
@@ -1134,6 +1238,9 @@ genuine frames, the original timestamps.
 
 ### `aravis_timestamp_contract` (13th SDK-enabled CTest entry)
 
+It has 17 scenarios: the 12 GIGE-MEL-010 scenarios plus five GIGE-MEL-010-R1
+regressions (P1-P5).
+
 The scenarios use the unchanged common provider through
 `make_api_manager(settings, decorated Fake backend)`, the upstream
 `getControl`/`getBuffer`, and registered `0xA5`-sentinel destinations. The
@@ -1144,7 +1251,7 @@ settings are `timestamp_domain = device` and **virtual** optics
 | --- | --- | --- |
 | O1 | Real SDK, native observation | Raw Fake values (`buffer == system`, inside the wall-clock window of the receive); descriptor timestamp stays invalid; ID/generation/ROI match; every pixel matches the oracle; four held leases starve the pool; one release requeues; the next plain receive returns the next consecutive ID; foreign stream refused; closed device refused |
 | O2 | Diagnostic routine | Bad ID/COUNT (0, 33)/deadline (0, 10001 ms)/empty output, and an existing output file: rejected with **zero** device opens; existing file untouched; unknown device: `not_found`, output removed |
-| O3 | Diagnostic routine, real SDK | 6-frame probe against the private Fake: no feature write, exactly Start/Stop, no live stream or buffer afterwards; 8 lines, each parsed with the vendored nlohmann/json; every required field present; `tick_frequency_hz` `null`; consecutive IDs; values inside the wall-clock window; **no ordering of values asserted** |
+| O3 | Diagnostic routine, real SDK | 6-frame probe against the private Fake: no feature write, exactly Start/Stop, no live stream or buffer afterwards; 8 lines (exactly 1 header, 6 frames, 1 summary), each parsed with the vendored nlohmann/json; schema version 2; every required field present; `diagnostic_tick_frequency_hz` `null` and no schema-1 `tick_frequency_hz`; `actual_stream_timestamp_path` `pinned_fake_fill_host_wall_clock` in header and frames; consecutive IDs; values inside the wall-clock window; **no ordering of values asserted** |
 | V0 | Test model | Checked arithmetic boundaries; an overflow becomes a receive error and the genuine frame is still released |
 | V1 | **Virtual clock**, real MEL callbacks | 12 published frames, each checked independently in the callback. Destination == original SDK bytes (row-by-row, source lease alive) == independent pinned-Fake pixel oracle. Header: width/height, 8 bits, 1 band, Mono, Staring, ROI offsets, integration time from the readback, `systemTime` == declared virtual value, frame ID == source frame ID, virtual FOV. Registered address and context; no extra destination; statistics agree with backend deliveries; source leases peak at 1 |
 | V2 | Virtual clock | All 4 destinations held: further genuine frames dropped (`dropped_no_buffer`), no callback, held bytes unchanged. Source leases still released (at most 1 outstanding). Dropping `shared_ptr` copies does not count as a release. One explicit `release()` resumes publication into exactly that slot (a second `release()` fails); other held slots keep their bytes |
@@ -1154,6 +1261,11 @@ settings are `timestamp_domain = device` and **virtual** optics
 | N3 | Terminal | Backward value, then (separately) a `clock_generation` change, at the 4th frame. 3 published, the 4th not written, `stream_failures == 1`, stream stopped, `enable()` reports `Fail`, no later frame. Only explicit `disable()`/`enable()` recovers, with a new generation and a fresh baseline |
 | N4 | Classification | SDK-arranged `AcquisitionStart` rejection: `enable()` `Fail` and no stream failure, distinct from N3. Deliberate disable: no failure |
 | C | Control | The same decorator **without** the clock: the same genuine frames are rejected; 0 callbacks |
+| P1 (R1) | Production serializer, synthetic `TimingContext` | Provenance table. A1 GigE diagnostic read 1 GHz and `UINT64_MAX`, A2 GigE 0: the value is kept exactly, `actual_stream_timestamp_path` is `"unverified"` in the header and every frame, both conditional SDK behaviors are cited (`:1613`, `:480-482`, `:484`), the GigE header text is identical apart from the number, and the reviewed definite-path wording is absent. A3 GigE with no read result: refused (`invalid_state`); no line, no fabricated absence. A4 Fake: `null` frequency and the pinned fill statement. A frequency for a Fake or other device is refused. `timestamp_qualified=false` and `descriptor_timestamp_valid=false` throughout |
+| P2 (R1) | Production encoder | B1 ASCII, B2 `Cámara – König`, B3 Japanese and Greek, B4 U+1F4F7 and U+10FFFF, B5 quote/backslash/controls/embedded NUL/DEL, the range boundaries and the empty string all decode with nlohmann/json to the **exact** original. No raw control byte is written. B6: 15 malformed inputs (stray, malformed 2nd/3rd/4th byte, truncated 2/3/4-byte, overlong `C0`/`C1`/`E0`/`F0`, surrogate, > U+10FFFF, `F5`, `FF`) are each refused with their reason. Through the full report: identity and device ID round-trip, and a malformed identity is refused naming `'header.identity.DeviceModelName'`. A malformed `DEVICE_ID` is refused before output or open |
+| P3 (R1) | Real SDK, Fake GenICam | `DeviceModelName` (StringReg `0x68`) arranged in the Fake device memory after the native open, then read by the production `read_timing_context()`. `Cámara – König 📷`: the SDK value and the parsed JSONL string compare equal. `K\xC3(nig`: the probe fails naming the field, Start/Stop ran, no live stream or buffer, the output is removed |
+| P4 (R1) | Production `time_probe()` | C1: an existing file (binary bytes, embedded NUL) is unchanged, with 0 opens. C2: argument errors give 0 opens and no file. C3: `open()` returns an Error, which is kept; the output is removed. C4: a scripted non-Aravis backend whose `open()` throws `std::runtime_error`: reported, bounded (< 2 s), output removed, no device cleanup invented; also a throw inside the real adapter's `open()` (`after_reservation`) with no native open, stream or command, and the reservation is released. C5: a deterministic throw through the test-only checkpoint seam at `opened`, `started` (stream live), `render` and `written` (header already in the file): output removed, 0 live streams or buffers, the expected Start/Stop log, and the device can be reopened |
+| P5 (R1) | Real SDK, decoded-facts seam | C6: after stream creation and start, every genuine buffer is marked incomplete, so the one 300 ms deadline expires. The first failure (`timeout`, "after 0 of 2 frames") is kept. The stream and pool are retired, the device is closed and can be reopened, and the output is removed. With an SDK-rejected `AcquisitionStop` (imposed RO), `cleanup_error` reports it separately and the primary error is not replaced |
 
 The scenario watchdog is 120 s, and an expiry exits with status 3, never a
 pass. All waits are bounded at 10 s. The CTest timeout is 600 s. The binary
@@ -1194,6 +1306,15 @@ none of these is established.
     zero tick frequency the SDK silently substitutes host time
     (`src/arvgvstream.c:484`). This must be fail-closed (invalid timestamps),
     never a fallback.
+13. Proof of the timestamp path **actually used by the qualified stream**
+    (GIGE-MEL-010-R1). The SDK stream silently ignores its own
+    stream-construction frequency read error (`src/arvgvstream.c:1613`). A
+    separate pre-stream read, including `time-probe`'s
+    `diagnostic_tick_frequency_hz`, is therefore not evidence of the path.
+    A qualified profile needs a mechanism that fixes or observes the value
+    the stream itself used, for example chunk timestamps with a
+    camera-documented frequency, or a stream-side value it can verify. Until
+    then, `actual_stream_timestamp_path` stays `"unverified"`.
 
 None of the following is evidence:
 

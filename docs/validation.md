@@ -1,5 +1,202 @@
 # Bootstrap validation record
 
+## GIGE-MEL-010-R1 review corrections (2026-11-01)
+
+**Starting point.** This is one ordinary corrective commit on
+`feature/gige-mel-010-timestamp-provenance` (PR #10). Before editing, the
+following were freshly fetched and agreed:
+
+| Item | Commit | Tree |
+| --- | --- | --- |
+| Local HEAD, remote branch and PR head (the reviewed head) | `c6d61efff6aac70a1d43cdaf43aaface05a96251` | `a592fea7e87eefae29292f48c9e0fee88eeeb032` |
+| Main (not advanced; PR base) | `214e4477709096fbdb2800ba824bd20c05172592` | `5f7e712998676e2d96a0e051287f3018a6ab7798` |
+
+The worktree and index were clean. The PR was open, not a draft, `MERGEABLE`
+/`CLEAN`, with auto-merge off. There was no intervening work.
+
+**Scope.** The following changed:
+
+- `src/backends/aravis/aravis_time_probe.cpp`;
+- the private `aravis_backend.hpp`: it declares the production serializer
+  `render_time_probe_report()`/`time_probe_json_string()`, the schema
+  version constant, and the test-only `time_probe_with_faults_for_testing()`
+  checkpoint seam;
+- `tests/aravis_timestamp_contract.cpp`;
+- `docs/aravis-integration.md` and this record.
+
+The following are unchanged:
+
+- `include/gige_mel/*` and `src/provider.cpp`;
+- `FrameTimestamp{}` in the production Aravis descriptor, and source-lease
+  ownership (`aravis_backend.cpp` is untouched);
+- the virtual-clock fixture (`tests/support/*`);
+- `tools/aravis_diagnostic.cpp`. It still calls only `time_probe()`, so the
+  fault seam is unreachable from the CLI;
+- factories and `getAPI_Manager()`;
+- CMake, the workflow, presets, sanitizer options and the two TSan
+  suppressions;
+- the SDK pin and provisioning, the manifests, the verifier and its 29
+  tests, and Python 3.9.
+
+No CTest target was added: there are still **13** SDK-enabled entries and
+**8** SDK-free.
+
+### Corrections
+
+| Finding | Correction |
+| --- | --- |
+| A. The GigE `sdk_buffer_timestamp_source` named a definite path ("SDK conversion of the GVSP leader timestamp …" or "… substitutes its host reception wall-clock time") from the diagnostic's own pre-stream frequency read | **Schema version 2.** `diagnostic_tick_frequency_hz` keeps the observed value, and `diagnostic_tick_frequency_read` says it is a separate read before stream creation, not proof of the value the SDK stream sampled at `src/arvgvstream.c:1613` (where the error is ignored). `actual_stream_timestamp_path` is `"unverified"` for GigE in the header and every frame. `sdk_stream_timestamp_paths` states both conditional SDK behaviors from the pinned source. The Fake statement (`pinned_fake_fill_host_wall_clock`) is kept, because it is established by source. A GigE context without a read result, or a frequency for a non-GigE device, is refused rather than rendered. |
+| B. Every byte ≥ 0x7F was written as `\u00XX`, so `Cámara – König` decoded as `CÃ¡mara â\u0080\u0093 KÃ¶nig` | A strict Unicode Table 3-7 validator and encoder. Valid UTF-8 is copied exactly. Only `"`, `\`, U+0000-U+001F (including NUL) and DEL are escaped. Malformed input is an `io_error` that names the field (for example `'header.identity.DeviceModelName'`), with offset and bytes. The output is removed, and nothing is substituted. A malformed `DEVICE_ID` is `invalid_argument` before any output or device I/O. |
+| C. `backend.open()` and the post-`try` rendering and writing ran outside the exception handler, so a throw left the `"wx"` output behind | `ExclusiveOutput` (RAII): it owns only a path this call created, and removes it on every non-committed exit, including unwinding. It closes exactly once, never throws, and never touches a file it failed to create. `NativeSession` (RAII): it owns the device and the stream from creation, and runs the established `stop()`, stream destruction and `close()` exactly once. One handler covers open through commit. The first failure is kept in `error`, and a close failure stays in `cleanup_error`. There is no second native stop and no `arv_shutdown()`. The start/stop/close order and the single deadline are unchanged. |
+
+> **Superseded current claims** (the GIGE-MEL-010 record below is kept
+> unchanged as history):
+>
+> - schema version 1 and its `tick_frequency_hz`/`tick_frequency_source`
+>   fields;
+> - "For GigE, `sdk_buffer_timestamp_source` also states whether the tick
+>   frequency read at probe time was zero" (it identified a path);
+> - "All strings are JSON-escaped (control bytes, DEL and bytes ≥ 0x80 as
+>   `\u00XX`)";
+> - O3's "`tick_frequency_hz` was `null`". It is now
+>   `diagnostic_tick_frequency_hz`, and that is still `null` for the Fake.
+
+### Before/after controls
+
+The controls are **source-level** for A and B and **fixture-level** for C.
+They are not a real-camera or physical GigE reproduction.
+
+**Reviewed production.** It was checked out in a disposable detached
+worktree, `/tmp/gm10r1/wt-reviewed`:
+
+- HEAD `c6d61ef…`, tree `a592fea7…`, 0 changed files;
+- `aravis_time_probe.cpp`: blob `ea39274d…`, SHA-256 `2aaac646…f56448`;
+- `aravis_backend.hpp`: blob `8ca76f5c…`.
+
+It was built SDK-enabled (GCC 14.2.0 Debug) into `/tmp/gm10r1/build-reviewed`,
+and its own `aravis_timestamp_contract` passed: 12 scenarios.
+
+**Control program.** One program, `/tmp/gm10r1/controls/control.cpp`, applies
+the same expectations to both versions:
+
+- `-DREVIEWED` includes the reviewed TU to reach its anonymous-namespace
+  `render()`/`quote()`, and links the reviewed adapter archive;
+- otherwise it uses the corrected public private-header functions and the
+  corrected archive.
+
+Both executables load `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0`
+(0.8.36) and glibc 2.41. No control file or JSONL is in the repository.
+
+| Control | Fixture | Reviewed `c6d61ef` | Corrected |
+| --- | --- | --- | --- |
+| A | GigE `TimingContext`, diagnostic read 1 000 000 000 Hz | **FAIL:** `sdk_buffer_timestamp_source` = "SDK conversion of the GVSP leader timestamp with the stream's tick frequency (src/arvgvstream.c:480-482) …"; no `actual_stream_timestamp_path` | PASS: "conditional on the tick frequency the SDK stream read during its own construction … unverified"; `actual_stream_timestamp_path` = `"unverified"` |
+| B | `Cámara – König` (18 bytes), decoded with nlohmann/json | **FAIL:** encoded `"C\u00c3\u00a1mara \u00e2\u0080\u0093 K\u00c3\u00b6nig"`, decoded `CÃ¡mara â KÃ¶nig` (25 bytes) | PASS: encoded `"Cámara – König"`; decoded exact (18 bytes) |
+| C | Non-Aravis backend whose `open()` throws `std::runtime_error`, via the production `time_probe()` | **FAIL:** the exception **escaped** `time_probe()`; output file **left behind** | PASS: returned "time probe failed: control: injected backend.open() exception; the output was removed"; file absent |
+
+The reviewed program exited 1 with 3 failures, and the corrected one exited 0.
+Each failure is the reviewed defect itself. Setup, headers and the SDK
+loaded identically in both builds.
+
+### Permanent regressions and counts
+
+`aravis_timestamp_contract` grows from 12 to **17** scenarios. The 12
+existing scenarios are unchanged except O3, which asserts schema version 2,
+exactly one header/6 frames/one summary, and the new Fake provenance fields.
+
+| Scenario | Covers |
+| --- | --- |
+| P1 | A1 (1 GHz and `UINT64_MAX`), A2 (0), A3 (no read result: refused), A4 (Fake; a Fake or other device with a frequency is refused). Production serializer, synthetic `TimingContext`. GigE headers are identical apart from the number |
+| P2 | B1-B5 plus range boundaries and the empty string: exact decode. B6: 15 malformed forms, each with its reason. Field naming through the full report. Malformed `DEVICE_ID` refused before I/O |
+| P3 | A real SDK identity (`DeviceModelName` written to Fake memory `0x68`): `Cámara – König 📷` is SDK value == parsed JSONL value. A malformed value fails with the field named, after cleanup, with the output removed |
+| P4 | C1 (existing bytes, including NUL, unchanged; 0 opens), C2, C3, C4 (scripted throwing `open()`; also a throw inside the adapter's `open()`, after which the reservation is released), C5 (checkpoint throws at `opened`/`started`/`render`/`written`) |
+| P5 | C6: post-start timeout keeps the first error; stream, pool and device retired; output removed; an SDK-rejected `AcquisitionStop` reported separately in `cleanup_error` |
+
+The C5 seam (`TimeProbeTestFaults::checkpoint`) is declared in the private
+`aravis_backend.hpp`:
+
+- It can only throw at named boundaries of the same production routine.
+- It cannot change native camera behavior.
+- The diagnostic does not call it: `tools/aravis_diagnostic.cpp` is
+  unchanged and calls only `time_probe()`.
+
+C6 uses the existing documented decoded-facts seam, which does not modify
+the SDK buffer, and an SDK-arranged imposed RO access mode.
+
+### Local results (executed)
+
+The environment is as in the GIGE-MEL-010 record:
+
+- Linux 6.12, GCC 14.2.0, Clang 19.1.7, CMake 3.31.6, Ninja, Python 3.13.5;
+- Aravis 0.8.36 at `/tmp/gm8/aravis-prefix`, uninstrumented;
+- `PKG_CONFIG_PATH` set to the prefix plus the sysroot GLib directory.
+
+The pinned citations were rechecked: `src/arvgvstream.c` and
+`src/arvfakecamera.c` from commit `97ff5e33…` are byte-identical (SHA-256
+`8ef52e1d…`, `eb63937a…`) to the checksum-verified archive.
+
+| Configuration | CTest | `aravis_timestamp_contract` |
+| --- | --- | --- |
+| GCC dev + Aravis | **13/13** | 17/17 |
+| GCC Release + Aravis | **13/13** | 17/17 |
+| Clang 19 + Aravis | **13/13** | 17/17 |
+| ASan/UBSan + Aravis (`detect_leaks=1:halt_on_error=1`, `halt_on_error=1:print_stacktrace=1`) | **13/13** | 17/17 |
+| TSan + Aravis (`halt_on_error=1`, the two unchanged whole-report suppressions) | **13/13** | 17/17 |
+| GCC dev, SDK-free | **8/8** | — |
+
+Other results:
+
+- Existing suites (dev): `aravis_adapter` 22/22, `aravis_stream_contract`
+  15/15, the negative `aravis_mel_embedding` probe PASS, provider 74/74.
+- Within `aravis_timestamp_contract`:
+  - V0-V3: positive virtual-clock MEL publication;
+  - N1-N4: negative admission;
+  - C: with the clock removed, the same genuine frames are rejected.
+
+  All of these pass unchanged.
+- Bounded repetition of the new paths:
+  - dev: P2, P3, P4 and P5 ×10 each;
+  - ASan/UBSan and TSan: P3, P4 and P5 ×5 each.
+
+  All passed.
+- Verifiers: `vendor_upstream.py --verify` (97 files), `verify_json.py` (2
+  files), and the verifier suite 29/29.
+- `verify_package_isolation.py`: "package isolation verified" for the dev,
+  Release and Clang SDK-enabled installs, with `PKG_CONFIG_PATH` unset. The
+  separate consumer configured, built and ran.
+- The SDK-free install has the same non-documentation file set as the
+  SDK-enabled install. Its consumer, configured with `PATH=/usr/bin:/bin` and
+  no `PKG_CONFIG_PATH`, passed.
+- With no SDK discoverable, `-DGIGE_MEL_BUILD_ARAVIS=ON` fails with
+  "requires exactly Aravis 0.8.36".
+- Diagnostic:
+  - `--help` exits 0;
+  - `time-probe` with COUNT 0 exits 2;
+  - production GigE-only `time-probe Fake_1 3 …` exits 1 ("not found"), and
+    the output is removed;
+  - an existing output exits 1 and is unchanged.
+- `git diff --check`: clean.
+
+The TSan result remains subject to the documented whole-report suppression
+blind spot for the uninstrumented SDK and GLib. It is not unrestricted race
+coverage.
+
+Hosted CI for this commit is recorded in the PR, not here.
+
+### Remaining limitations
+
+- No physical camera or GigE network was used.
+- The GigE provenance rows are exercised only through synthetic
+  `TimingContext` values passed to the production serializer. The
+  in-process Fake does not construct an `ArvGvStream`, and no lost-frequency
+  event was reproduced.
+- The stream's actual GigE path stays **unverified** by design. Fixing it
+  needs a camera timing profile (checklist item 13 in
+  [aravis-integration.md](aravis-integration.md#camera-timing-qualification-checklist)).
+- No integration-start, epoch, UTC, PTP, continuity or accuracy claim is
+  made. Every record keeps `timestamp_qualified=false`, and the production
+  descriptor stays `FrameTimestamp{}`.
+- Every item of the camera-timing qualification checklist remains open.
+
 ## GIGE-MEL-010 native timestamp provenance and virtual-clock MEL publication (2026-11-01)
 
 **Starting point.** The branch `feature/gige-mel-010-timestamp-provenance` was

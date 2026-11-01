@@ -13,6 +13,13 @@
 //     NOT hardware, camera or Aravis timestamp qualification.
 //  N. FAIL-CLOSED: the same genuine frames with unqualified or discontinuous
 //     timestamps are rejected or terminate exactly as the provider requires.
+//  P. GIGE-MEL-010-R1 DIAGNOSTIC REGRESSIONS: the production time-probe
+//     serializer with synthetic private TimingContext values (provenance
+//     wording, exact UTF-8), and the production time_probe() routine with
+//     the real Fake, a scripted non-Aravis backend fixture, or the narrow
+//     test-only checkpoint seam (output and native cleanup). The synthetic
+//     GigE contexts exercise rendering only: no GigE stream is constructed
+//     and no lost-frequency event is reproduced.
 //
 // Optics are VIRTUAL test values. The Fake fills buffers from the host wall
 // clock (pinned src/arvfakecamera.c:786); no Fake exposure timing is claimed.
@@ -595,11 +602,18 @@ void time_probe_fake() {
     CHECK(text.size() == r.output_bytes && !text.empty() && text.back() == '\n');
     const auto records = parse_jsonl(text);
     CHECK(records.size() == 8);
+    // Exactly one header, COUNT frame records and one summary, in order.
+    for (std::size_t i = 0; i < records.size(); ++i)
+        CHECK(records[i].at("record") == (i == 0 ? "header" : i + 1 == records.size() ? "summary" : "frame"));
     const auto& h = records.front();
-    CHECK(h.at("record") == "header" && h.at("schema") == "gige-mel.aravis-time-probe" && h.at("schema_version") == 1);
+    CHECK(h.at("record") == "header" && h.at("schema") == "gige-mel.aravis-time-probe" && h.at("schema_version") == 2);
     CHECK(h.at("device_id") == "Fake_1" && h.at("interface") == "fake" && h.at("native_device_type") == "ArvFakeDevice");
     CHECK(h.at("compiled_sdk_version") == "0.8.36" && h.at("runtime_sdk_version") == "0.8.36");
-    CHECK(h.at("tick_frequency_hz").is_null()); // no supported accessor for the Fake; never guessed
+    // R1 schema 2: no GigE frequency for the in-process Fake (never guessed);
+    // the superseded schema-1 key is gone; the Fake path is source-established.
+    CHECK(h.at("diagnostic_tick_frequency_hz").is_null() && !h.contains("tick_frequency_hz"));
+    CHECK(h.at("actual_stream_timestamp_path") == "pinned_fake_fill_host_wall_clock");
+    CHECK(h.at("sdk_stream_timestamp_paths").is_null());
     CHECK(contains(h.at("timing_origin").get<std::string>(), "wall clock"));
     CHECK(contains(h.at("sdk_buffer_timestamp_source").get<std::string>(), "src/arvfakecamera.c:786"));
     CHECK(h.at("timestamp_qualified") == false && !h.at("qualification_reason").get<std::string>().empty());
@@ -617,6 +631,7 @@ void time_probe_fake() {
             CHECK(f.contains(key));
         CHECK(f.at("record") == "frame" && f.at("index") == i - 1 && f.at("timestamp_qualified") == false);
         CHECK(f.at("descriptor_timestamp_valid") == false && f.at("interface") == "fake");
+        CHECK(f.at("actual_stream_timestamp_path") == "pinned_fake_fill_host_wall_clock");
         CHECK(f.at("width") == fake_default.width && f.at("height") == fake_default.height);
         CHECK(f.at("offset_x") == fake_default.offset_x && f.at("offset_y") == fake_default.offset_y);
         const auto id = f.at("native_frame_id").get<std::uint64_t>();
@@ -640,6 +655,429 @@ void time_probe_fake() {
     std::cout << "  time-probe header: " << text.substr(0, first) << '\n';
     std::cout << "  time-probe frame:  " << text.substr(first + 1, text.find('\n', first + 1) - first - 1) << '\n';
     std::remove(path.c_str());
+}
+
+// ===========================================================================
+// R. GIGE-MEL-010-R1 regressions. Every case calls the PRODUCTION serializer
+// (aravis::render_time_probe_report / time_probe_json_string) or the
+// production time_probe() routine; nothing here re-implements either.
+
+std::string read_file(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {(std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()};
+}
+
+// A synthetic, private report around a given timing context (no device).
+aravis::TimeProbeReport synthetic_report(aravis::TimingContext context, std::string device_id = "GV-Synthetic") {
+    aravis::TimeProbeReport r;
+    r.device_id = std::move(device_id);
+    r.compiled_sdk_version = "0.8.36";
+    r.runtime_sdk_version = "0.8.36";
+    r.context = std::move(context);
+    r.configuration = gen1;
+    aravis::TimeProbeFrame frame;
+    frame.native = {1, 7, gen1.width, gen1.height, gen1.offset_x, gen1.offset_y, 1000000000123ull, 1793501463400067000ull};
+    r.frames = {frame, frame};
+    r.statistics.delivered_frames = 2;
+    return r;
+}
+std::vector<Json> render_synthetic(const aravis::TimeProbeReport& r) {
+    const auto lines = aravis::render_time_probe_report(r, 10000ms, 2);
+    if (!lines) throw std::runtime_error("production renderer refused a valid report: " + lines.error().message);
+    std::string text;
+    for (const auto& line : lines.value()) text += line;
+    return parse_jsonl(text);
+}
+
+// P1. Rendered timing provenance, table-driven over synthetic contexts
+// (A1 GigE nonzero, A2 GigE zero, A3 GigE read unavailable, A4 Fake). The
+// diagnostic's pre-stream frequency is preserved as observed, but never
+// identifies the stream's internal conversion/fallback branch.
+void provenance_table() {
+    struct Case {
+        const char* name;
+        aravis::NativeInterface native;
+        const char* type;
+        std::optional<std::uint64_t> frequency;
+        bool renders;
+    };
+    constexpr auto big = std::numeric_limits<std::uint64_t>::max(); // preserved exactly, unconverted
+    const std::vector<Case> cases{
+        {"A1 GigE nonzero 1 GHz", aravis::NativeInterface::gige_vision, "ArvGvDevice", 1000000000ull, true},
+        {"A1 GigE nonzero max", aravis::NativeInterface::gige_vision, "ArvGvDevice", big, true},
+        {"A2 GigE zero", aravis::NativeInterface::gige_vision, "ArvGvDevice", 0ull, true},
+        {"A3 GigE read unavailable", aravis::NativeInterface::gige_vision, "ArvGvDevice", std::nullopt, false},
+        {"A4 Fake", aravis::NativeInterface::fake, "ArvFakeDevice", std::nullopt, true},
+        {"A4 Fake with a frequency", aravis::NativeInterface::fake, "ArvFakeDevice", 1000000000ull, false},
+        {"other with a frequency", aravis::NativeInterface::other, "ArvUv3Device", 1ull, false},
+    };
+    std::optional<Json> gige_reference; // GigE headers must not depend on the observed value
+    for (const auto& c : cases) {
+        aravis::TimingContext context;
+        context.native_interface = c.native;
+        context.native_device_type = c.type;
+        context.identity = {{"DeviceVendorName", "Synthetic"}};
+        context.tick_frequency_hz = c.frequency;
+        const auto report = synthetic_report(context);
+        const auto lines = aravis::render_time_probe_report(report, 10000ms, 2);
+        if (!c.renders) {
+            // A3: a missing GigE read result is never rendered as "absent"
+            // (read_timing_context already returns the read error), and a
+            // non-GigE frequency is never reported. No line is produced.
+            if (lines) throw std::runtime_error(std::string(c.name) + ": rendered an inconsistent timing context");
+            CHECK(lines.error().code == backend::ErrorCode::invalid_state);
+            CHECK(contains(lines.error().message, c.native == aravis::NativeInterface::gige_vision
+                                                       ? "never reported as an absent frequency"
+                                                       : "only for an ArvGvDevice"));
+            std::cout << "  " << c.name << ": refused (" << lines.error().message.substr(0, 70) << "...)\n";
+            continue;
+        }
+        const auto records = render_synthetic(report);
+        CHECK(records.size() == 4);
+        const auto& h = records.front();
+        CHECK(h.at("schema_version") == 2 && h.at("timestamp_qualified") == false && !h.contains("tick_frequency_hz"));
+        for (const auto& record : records) CHECK(record.at("timestamp_qualified") == false);
+        for (std::size_t i = 1; i <= 2; ++i) {
+            CHECK(records[i].at("descriptor_timestamp_valid") == false);
+            CHECK(records[i].at("sdk_buffer_timestamp_ns").get<std::uint64_t>() == 1000000000123ull); // unconverted
+            CHECK(records[i].at("sdk_system_timestamp_ns").get<std::uint64_t>() == 1793501463400067000ull);
+            CHECK(records[i].at("actual_stream_timestamp_path") == h.at("actual_stream_timestamp_path"));
+        }
+        const auto basis = h.at("actual_stream_timestamp_path_basis").get<std::string>();
+        const auto source = h.at("sdk_buffer_timestamp_source").get<std::string>();
+        const auto read = h.at("diagnostic_tick_frequency_read").get<std::string>();
+        if (c.native == aravis::NativeInterface::gige_vision) {
+            // The observed value is preserved exactly (A1 and A2 alike) ...
+            CHECK(h.at("diagnostic_tick_frequency_hz").get<std::uint64_t>() == *c.frequency);
+            CHECK(contains(read, "before stream creation") && contains(read, "NOT the value the SDK stream sampled") &&
+                  contains(read, "not proof"));
+            // ... and the actual stream path stays unverified whatever it is.
+            CHECK(h.at("actual_stream_timestamp_path") == "unverified");
+            CHECK(contains(basis, "not established by this diagnostic") && contains(source, "unverified"));
+            // Both conditional SDK behaviors, from the pinned source.
+            const auto& paths = h.at("sdk_stream_timestamp_paths");
+            const auto origin = paths.at("stream_construction_frequency_source").get<std::string>();
+            const auto nonzero = paths.at("stream_construction_frequency_nonzero").get<std::string>();
+            const auto zero = paths.at("stream_construction_frequency_zero").get<std::string>();
+            CHECK(contains(origin, "src/arvgvstream.c:1613") && contains(origin, "error is ignored"));
+            CHECK(contains(nonzero, "leader ticks converted") && contains(nonzero, "src/arvgvstream.c:480-482"));
+            CHECK(contains(nonzero, "proves no integration start, epoch, UTC, PTP, continuity or accuracy"));
+            CHECK(contains(zero, "host reception wall-clock time") && contains(zero, "src/arvgvstream.c:484"));
+            auto comparable = h;
+            comparable.erase("diagnostic_tick_frequency_hz");
+            if (!gige_reference) gige_reference = comparable;
+            CHECK(comparable == *gige_reference); // A1 and A2 differ only in the number itself
+            // The superseded reviewed claims of a definite path are gone.
+            CHECK(!contains(h.dump(), "SDK conversion of the GVSP leader timestamp with the stream's"));
+            CHECK(!contains(h.dump(), "probe-time tick frequency is 0"));
+        } else {
+            CHECK(h.at("diagnostic_tick_frequency_hz").is_null() && contains(read, "not an ArvGvDevice"));
+            CHECK(h.at("actual_stream_timestamp_path") == "pinned_fake_fill_host_wall_clock");
+            CHECK(contains(source, "src/arvfakecamera.c:786") && contains(basis, "src/arvfakestream.c:93"));
+            CHECK(contains(basis, "no GigE stream is constructed") && h.at("sdk_stream_timestamp_paths").is_null());
+        }
+        std::cout << "  " << c.name << ": diagnostic_tick_frequency_hz=" << h.at("diagnostic_tick_frequency_hz").dump()
+                  << ", actual_stream_timestamp_path=" << h.at("actual_stream_timestamp_path").dump() << '\n';
+    }
+    CHECK(gige_reference.has_value());
+}
+
+// P2. Exact UTF-8 through the production encoder: decoding the produced JSON
+// with nlohmann/json returns the original string (B1-B5); malformed input is
+// an explicit error, never mojibake or U+FFFD (B6).
+const std::vector<std::string>& valid_utf8() {
+    static const std::vector<std::string> valid{
+        "Aravis Fake 0.8.36",                                                               // B1 ASCII
+        "C\xC3\xA1mara \xE2\x80\x93 K\xC3\xB6nig",                                          // B2 "Cámara – König"
+        "\xE3\x82\xAB\xE3\x83\xA1\xE3\x83\xA9 \xCE\x9A\xCE\xAC\xCE\xBC\xCE\xB5\xCF\x81\xCE\xB1", // B3 "カメラ Κάμερα"
+        "Cam \xF0\x9F\x93\xB7 \xF4\x8F\xBF\xBF",                                            // B4 U+1F4F7, U+10FFFF
+        std::string("q\"b\\s/ \n\r\t\b\f \x01\x1f\x7f nul:") + '\0' + "end",               // B5 escapes, NUL, DEL
+        "\xC2\x80\xDF\xBF\xE0\xA0\x80\xED\x9F\xBF\xEE\x80\x80\xEF\xBF\xBF\xF0\x90\x80\x80", // range boundaries
+        "",
+    };
+    return valid;
+}
+
+void utf8_identity() {
+    const auto& valid = valid_utf8();
+    for (const auto& text : valid) {
+        const auto encoded = aravis::time_probe_json_string(text);
+        if (!encoded) throw std::runtime_error("valid UTF-8 refused: " + encoded.error().message);
+        const auto decoded = Json::parse(encoded.value());
+        CHECK(decoded.is_string() && decoded.get<std::string>() == text); // exact semantic equality
+        for (const char c : encoded.value()) CHECK(static_cast<unsigned char>(c) >= 0x20 && c != 0x7f); // no raw controls
+    }
+    std::cout << "  B2 decoded: " << Json::parse(aravis::time_probe_json_string(valid[1]).value()).get<std::string>()
+              << " (exact); B3: " << valid[2] << "; B4: " << valid[3] << '\n';
+    struct Bad {
+        const char* name;
+        std::string bytes;
+        const char* reason;
+    };
+    const std::vector<Bad> invalid{
+        {"stray continuation", "K\x80nig", "continuation byte without a lead byte"},
+        {"malformed continuation", "C\xC3(mara", "invalid continuation byte"},
+        {"malformed third byte", "\xE2\x80(", "invalid continuation byte"},
+        {"malformed fourth byte", "\xF0\x9F\x93(", "invalid continuation byte"},
+        {"truncated 2-byte", "C\xC3", "truncated sequence"},
+        {"truncated 3-byte", "\xE2\x80", "truncated sequence"},
+        {"truncated 4-byte", "x\xF0\x9F\x93", "truncated sequence"},
+        {"overlong C0", "\xC0\xAF", "overlong encoding"},
+        {"overlong C1", "\xC1\xBF", "overlong encoding"},
+        {"overlong E0", "\xE0\x80\xAF", "overlong encoding"},
+        {"overlong F0", "\xF0\x80\x80\xAF", "overlong encoding"},
+        {"surrogate", "\xED\xA0\x80", "UTF-16 surrogate code point"},
+        {"above U+10FFFF", "\xF4\x90\x80\x80", "code point above U+10FFFF"},
+        {"F5 lead", "\xF5\x80\x80\x80", "never occurs in UTF-8"},
+        {"FF byte", "\xFF", "never occurs in UTF-8"},
+    };
+    for (const auto& bad : invalid) {
+        const auto encoded = aravis::time_probe_json_string(bad.bytes);
+        if (encoded) throw std::runtime_error(std::string("malformed UTF-8 accepted: ") + bad.name);
+        CHECK(contains(encoded.error().message, "not well-formed UTF-8") && contains(encoded.error().message, bad.reason));
+    }
+    // Through the full production report: identity and device ID round-trip
+    // exactly; a malformed identity value names its field and yields no line.
+    aravis::TimingContext context;
+    context.native_interface = aravis::NativeInterface::gige_vision;
+    context.native_device_type = "ArvGvDevice";
+    context.tick_frequency_hz = 125000000ull;
+    for (const auto& text : valid) {
+        context.identity = {{"DeviceVendorName", text}, {"DeviceModelName", valid[2]}};
+        const auto records = render_synthetic(synthetic_report(context, valid[1]));
+        CHECK(records.front().at("identity").at("DeviceVendorName").get<std::string>() == text);
+        CHECK(records.front().at("identity").at("DeviceModelName").get<std::string>() == valid[2]);
+        CHECK(records.front().at("device_id").get<std::string>() == valid[1] && records[1].at("device_id") == valid[1]);
+    }
+    context.identity = {{"DeviceVendorName", "ok"}, {"DeviceModelName", "C\xC3(mara"}};
+    const auto refused = aravis::render_time_probe_report(synthetic_report(context), 10000ms, 2);
+    CHECK(!refused && contains(refused.error().message, "'header.identity.DeviceModelName'"));
+    CHECK(contains(refused.error().message, "never substituted"));
+    // A malformed DEVICE_ID argument is refused before output or device I/O.
+    Observer seen;
+    auto camera = aravis_fake::make_backend(seen.hooks());
+    const auto path = temp_path("gige-mel-time-probe-utf8-id");
+    std::remove(path.c_str());
+    const auto o = aravis::time_probe(*camera, "Fake_\xC3", 1, path);
+    CHECK(!o.ok() && o.error && o.error->code == backend::ErrorCode::invalid_argument && !exists(path));
+    CHECK(seen.opens.load() == 0);
+}
+
+// P3. A REAL SDK identity value arranged through the private Fake/GenICam
+// setup: DeviceModelName is a StringReg in the Fake device memory (pinned
+// src/arv-fake-camera.xml:46-52: 0x68, 32 bytes; the register cache is
+// disabled by default, src/arvgc.c:493), so the production
+// read_timing_context() reads the arranged bytes through the SDK. Valid
+// multibyte UTF-8 reaches the JSONL file exactly; malformed bytes fail the
+// probe naming the field, after native cleanup, with the output removed.
+void utf8_identity_through_sdk() {
+    const std::string model = "C\xC3\xA1mara \xE2\x80\x93 K\xC3\xB6nig \xF0\x9F\x93\xB7"; // 23 bytes < 32
+    const std::string broken = "K\xC3(nig";
+    for (const bool valid : {true, false}) {
+        const std::string& arranged = valid ? model : broken;
+        Observer seen;
+        aravis::TestHooks hooks = seen.hooks();
+        hooks.after_native_open = [&](ArvDevice* d) {
+            seen.opens.fetch_add(1);
+            char bytes[32] = {};
+            std::copy(arranged.begin(), arranged.end(), bytes);
+            CHECK(arv_fake_camera_write_memory(arv_fake_device_get_fake_camera(ARV_FAKE_DEVICE(d)), 0x68, sizeof bytes, bytes));
+        };
+        auto camera = aravis_fake::make_backend(hooks);
+        const auto path = temp_path(valid ? "gige-mel-time-probe-utf8-sdk" : "gige-mel-time-probe-bad-utf8-sdk");
+        std::remove(path.c_str());
+        const auto outcome = aravis::time_probe(*camera, aravis_fake::device_id, 2, path);
+        CHECK(seen.opens.load() == 1 && seen.live_streams() == 0 && seen.live_buffers() == 0);
+        CHECK((seen.command_log() == std::vector<std::string>{"AcquisitionStart", "AcquisitionStop"}));
+        if (valid) {
+            if (!outcome.ok())
+                throw std::runtime_error("UTF-8 probe failed: " + (outcome.error ? outcome.error->message : std::string()));
+            // The SDK identity and the parsed JSON string compare equal.
+            const auto& identity = outcome.report->context.identity;
+            const auto found = std::find_if(identity.begin(), identity.end(),
+                                            [](const auto& p) { return p.first == "DeviceModelName"; });
+            CHECK(found != identity.end() && found->second == model);
+            const auto records = parse_jsonl(read_file(path));
+            CHECK(records.size() == 4 && records.front().at("identity").at("DeviceModelName").get<std::string>() == model);
+            std::cout << "  SDK DeviceModelName round-trip: " << records.front().at("identity").at("DeviceModelName").get<std::string>()
+                      << '\n';
+            std::remove(path.c_str());
+        } else {
+            CHECK(!outcome.ok() && !outcome.report && outcome.error && !outcome.cleanup_error);
+            CHECK(contains(outcome.error->message, "'header.identity.DeviceModelName'"));
+            CHECK(contains(outcome.error->message, "not well-formed UTF-8"));
+            CHECK(contains(outcome.error->message, "output was removed"));
+            CHECK(!exists(path)); // no mojibake, no replacement identity, no file
+            std::cout << "  SDK malformed DeviceModelName: " << outcome.error->message.substr(0, 96) << "...\n";
+        }
+    }
+}
+
+// Private backend fixture (NOT the Aravis adapter, no native SDK object): its
+// open() either throws a controlled std::runtime_error or returns an Error.
+class ScriptedBackend final : public backend::ICameraBackend {
+public:
+    explicit ScriptedBackend(bool throws) : throws_(throws) {}
+    std::string_view id() const noexcept override { return "scripted-test-backend"; }
+    backend::Result<std::vector<backend::DeviceInfo>> enumerate() override { return std::vector<backend::DeviceInfo>{}; }
+    backend::Result<std::shared_ptr<backend::ICameraDevice>> open(std::string_view) override {
+        opens.fetch_add(1);
+        if (throws_) throw std::runtime_error("injected backend.open() failure");
+        return backend::Error{backend::ErrorCode::busy, "injected open error"};
+    }
+    std::atomic<int> opens{0};
+
+private:
+    bool throws_;
+};
+
+// Logically closed: the exact-ID reservation was released, so a fresh
+// adapter can open the Fake again.
+void require_reopenable() {
+    Observer again;
+    auto reopen = aravis_fake::make_backend(again.hooks());
+    auto device = reopen->open(aravis_fake::device_id);
+    CHECK(device && device.value()->close());
+}
+
+// P4. Exclusive output ownership and exception-safe cleanup (C1-C5).
+void output_cleanup() {
+    const auto path = temp_path("gige-mel-time-probe-cleanup");
+    std::remove(path.c_str());
+    // C1. Existing output: refused before open; original bytes unchanged.
+    {
+        const std::string original = std::string("existing report \xE2\x80\x94 keep\n\x01\x02") + '\0' + "tail";
+        { std::ofstream(path, std::ios::binary) << original; }
+        ScriptedBackend thrower(true);
+        const auto o = aravis::time_probe(thrower, "GV-1", 2, path);
+        CHECK(!o.ok() && o.error->code == backend::ErrorCode::io_error && contains(o.error->message, "no device I/O"));
+        CHECK(thrower.opens.load() == 0 && read_file(path) == original);
+        std::remove(path.c_str());
+    }
+    // C2. Argument errors: no open and no output (O2 covers the full set).
+    {
+        ScriptedBackend thrower(true);
+        CHECK(aravis::time_probe(thrower, "GV-1", 0, path).error->code == backend::ErrorCode::invalid_argument);
+        CHECK(aravis::time_probe(thrower, "", 2, path).error->code == backend::ErrorCode::invalid_argument);
+        CHECK(aravis::time_probe(thrower, "GV-1", 2, path, 0ms).error->code == backend::ErrorCode::invalid_argument);
+        CHECK(thrower.opens.load() == 0 && !exists(path));
+    }
+    // C3. open() returns an Error: that error, output removed.
+    {
+        ScriptedBackend refusing(false);
+        const auto o = aravis::time_probe(refusing, "GV-1", 2, path);
+        CHECK(!o.ok() && o.error->code == backend::ErrorCode::busy && o.error->message == "injected open error");
+        CHECK(refusing.opens.load() == 1 && !exists(path) && !o.cleanup_error);
+    }
+    // C4. open() throws: reported, bounded, output removed, no device cleanup invented.
+    {
+        ScriptedBackend thrower(true);
+        const auto begin = std::chrono::steady_clock::now();
+        const auto o = aravis::time_probe(thrower, "GV-1", 2, path);
+        CHECK(std::chrono::steady_clock::now() - begin < 2s);
+        CHECK(!o.ok() && !o.report && o.error && o.error->code == backend::ErrorCode::io_error);
+        CHECK(contains(o.error->message, "injected backend.open() failure") && contains(o.error->message, "output was removed"));
+        CHECK(!contains(o.error->message, "device was stopped and closed") && !o.cleanup_error);
+        CHECK(thrower.opens.load() == 1 && !exists(path));
+    }
+    // C4 inside the real adapter's open() (TestHooks::after_reservation):
+    // no native open, stream or command; the reservation is released.
+    {
+        Observer seen;
+        aravis::TestHooks hooks = seen.hooks();
+        hooks.after_reservation = [](std::string_view) { throw std::runtime_error("injected inside Aravis open"); };
+        auto camera = aravis_fake::make_backend(hooks);
+        const auto o = aravis::time_probe(*camera, aravis_fake::device_id, 2, path);
+        CHECK(!o.ok() && contains(o.error->message, "injected inside Aravis open") && !exists(path));
+        CHECK(seen.opens.load() == 0 && seen.streams_created.load() == 0 && seen.command_log().empty());
+        require_reopenable();
+    }
+    // C5. A deterministic throw at each production boundary of the REAL probe
+    // against the Fake: the stream and device are retired (before rendering,
+    // or during unwinding), the output is removed, the error is reported.
+    struct Stage {
+        const char* name;
+        std::vector<std::string> commands;
+        bool unwound_native; // native cleanup happened in the exception path
+    };
+    const std::vector<Stage> stages{
+        {"opened", {}, true},
+        {"started", {"AcquisitionStart", "AcquisitionStop"}, true},
+        {"render", {"AcquisitionStart", "AcquisitionStop"}, false},  // already finished before serialization
+        {"written", {"AcquisitionStart", "AcquisitionStop"}, false}, // a partial file existed at the throw
+    };
+    for (const auto& stage : stages) {
+        Observer seen;
+        auto camera = aravis_fake::make_backend(seen.hooks());
+        bool reached = false, file_at_throw = false;
+        int live_at_throw = -1;
+        aravis::TimeProbeTestFaults faults;
+        faults.checkpoint = [&](std::string_view at) {
+            if (at != stage.name) return;
+            reached = true;
+            file_at_throw = exists(path);
+            live_at_throw = seen.live_streams();
+            throw std::runtime_error(std::string("injected at ") + stage.name);
+        };
+        const auto o = aravis::time_probe_with_faults_for_testing(*camera, aravis_fake::device_id, 3, path, 10000ms, faults);
+        CHECK(reached && file_at_throw); // the exclusive output existed when the exception started
+        CHECK(!o.ok() && !o.report && o.error && o.error->code == backend::ErrorCode::io_error && !o.cleanup_error);
+        CHECK(contains(o.error->message, std::string("injected at ") + stage.name));
+        CHECK(contains(o.error->message, "device was stopped and closed") && contains(o.error->message, "output was removed"));
+        CHECK(live_at_throw == (std::string_view(stage.name) == "started" ? 1 : 0));
+        CHECK(!exists(path) && seen.live_streams() == 0 && seen.live_buffers() == 0);
+        CHECK(seen.command_log() == stage.commands);
+        require_reopenable();
+        std::cout << "  C5 throw at '" << stage.name << "': output removed; native cleanup "
+                  << (stage.unwound_native ? "during unwinding" : "before serialization") << "; commands "
+                  << stage.commands.size() << '\n';
+    }
+}
+
+// P5. C6: operational failure AFTER native stream creation and start, with
+// and without a separately arranged cleanup failure. Every popped REAL
+// buffer is marked incomplete through the documented decoded-facts seam (the
+// SDK buffer is untouched), so the one receive deadline expires; in the
+// second run the SDK itself also rejects AcquisitionStop (imposed RO access).
+void operational_failure_cleanup() {
+    for (const bool stop_fails : {false, true}) {
+        Observer seen;
+        ArvDomNode* stop_access = nullptr;
+        aravis::TestHooks hooks = seen.hooks();
+        hooks.after_native_open = [&](ArvDevice* d) {
+            seen.opens.fetch_add(1);
+            stop_access = impose_access(d, "AcquisitionStop", "RW");
+        };
+        hooks.decoded_facts = [](gige_mel::backend::aravis_profile::NativeFrameFacts& f) {
+            f.status = gige_mel::backend::aravis_profile::NativeStatus::incomplete;
+        };
+        if (stop_fails)
+            seen.on_command = [&](std::string_view c, ArvDevice*) {
+                if (c == "AcquisitionStop") set_access(stop_access, "RO");
+            };
+        auto camera = aravis_fake::make_backend(hooks);
+        const auto path = temp_path("gige-mel-time-probe-operational");
+        std::remove(path.c_str());
+        const auto begin = std::chrono::steady_clock::now();
+        const auto o = aravis::time_probe(*camera, aravis_fake::device_id, 2, path, 300ms);
+        const auto elapsed = std::chrono::steady_clock::now() - begin;
+        CHECK(elapsed >= 300ms && elapsed < 5s); // the ONE overall deadline bounds it
+        CHECK(!o.ok() && !o.report && o.error && o.error->code == backend::ErrorCode::timeout);
+        CHECK(contains(o.error->message, "(after 0 of 2 frames)")); // the first failure, preserved
+        CHECK(seen.streams_created.load() == 1 && seen.live_streams() == 0 && seen.live_buffers() == 0);
+        CHECK(!exists(path));
+        const auto log = seen.command_log();
+        CHECK(log.size() >= 2 && log[0] == "AcquisitionStart" && log[1] == "AcquisitionStop");
+        if (stop_fails) {
+            CHECK(o.cleanup_error && contains(o.cleanup_error->message, "AcquisitionStop"));
+            CHECK(!contains(o.error->message, "AcquisitionStop")); // not replaced by the cleanup failure
+        } else {
+            CHECK(!o.cleanup_error && log.size() == 2);
+        }
+        require_reopenable();
+        std::cout << "  C6 stop " << (stop_fails ? "rejected by the SDK" : "accepted") << ": error=" << o.error->message.substr(0, 48)
+                  << "...; cleanup_error=" << (o.cleanup_error ? o.cleanup_error->message.substr(0, 60) + "..." : "none") << '\n';
+    }
 }
 
 // ===========================================================================
@@ -1158,6 +1596,11 @@ int main(int argc, char** argv) {
         {"O1 native SDK timestamp observation (read-only, unqualified)", native_observation},
         {"O2 time-probe argument validation before device I/O", time_probe_arguments},
         {"O3 time-probe against the private Fake interface (JSONL)", time_probe_fake},
+        {"P1 R1 rendered timing provenance (A1-A4, production formatter)", provenance_table},
+        {"P2 R1 exact UTF-8 and malformed-input policy (B1-B6, production encoder)", utf8_identity},
+        {"P3 R1 SDK identity UTF-8 through the Fake GenICam (time_probe)", utf8_identity_through_sdk},
+        {"P4 R1 exclusive output and exception cleanup (C1-C5)", output_cleanup},
+        {"P5 R1 operational failure after stream start; separate cleanup error (C6)", operational_failure_cleanup},
         {"V0 virtual clock model and checked arithmetic", virtual_clock_model},
         {"V1 positive MEL Image publication of genuine SDK pixels (virtual time)", positive_publication},
         {"V2 backpressure, held buffers and explicit release", backpressure_and_release},
