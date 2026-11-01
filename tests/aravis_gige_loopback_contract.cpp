@@ -742,6 +742,272 @@ void cancellation() {
     sim.finish();
 }
 
+// A second SDK signal subscriber proves that the heartbeat really emitted the
+// event. The closure owns its observation; no borrowed test-stack user data.
+// This observer does not set the adapter's terminal state.
+struct LossSignal {
+    // TEST observer only: registration happens after heartbeat creation for
+    // production-factory scenarios. Make its user-data publication visible to
+    // TSan without adding SDK suppressions or changing the production callback.
+    inline static std::mutex publication_mutex;
+    std::atomic<std::int64_t> at_ns{0};
+    std::atomic<int> count{0};
+    std::atomic<bool> hold{false}, release{false}; // controlled close/signal overlap, test only
+    static std::int64_t now_ns() {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+    }
+    static void notified(ArvDevice*, gpointer data) noexcept {
+        std::shared_ptr<LossSignal> pinned;
+        { std::lock_guard lock(publication_mutex); pinned = *static_cast<std::shared_ptr<LossSignal>*>(data); }
+        auto& signal = *pinned;
+        signal.at_ns.store(now_ns());
+        signal.count.fetch_add(1);
+        // TEST observer only: keep the SDK emission in flight while close
+        // disconnects the production handler and reaches device finalization.
+        const auto deadline = Clock::now() + 10s;
+        while (signal.hold && !signal.release && Clock::now() < deadline) std::this_thread::yield();
+    }
+    static void destroyed(gpointer data, GClosure*) noexcept {
+        std::lock_guard lock(publication_mutex);
+        delete static_cast<std::shared_ptr<LossSignal>*>(data);
+    }
+};
+std::shared_ptr<LossSignal> observe_loss(backend::ICameraDevice& device) {
+    auto signal = std::make_shared<LossSignal>();
+    native(device, [&](ArvDevice* d) {
+        std::lock_guard lock(LossSignal::publication_mutex);
+        g_signal_connect_data(d, "control-lost", G_CALLBACK(LossSignal::notified),
+                              new std::shared_ptr<LossSignal>(signal), LossSignal::destroyed, G_CONNECT_DEFAULT);
+    });
+    return signal;
+}
+template <class T> void require_control_loss(const T& result) {
+    CHECK(!result && result.error().code == backend::ErrorCode::disconnected);
+    CHECK(contains(result.error().message, "Aravis reported camera control lost"));
+}
+
+// Q1. The primary control uses make_backend(), not an injected client flag.
+// Pool exhaustion plus a recorded starvation episode proves the receiver has
+// completed empty native waits, rather than merely having launched a thread.
+void control_loss_active() {
+    lb::Simulator sim;
+    auto camera = aravis::make_backend();
+    (void)sim.discover(*camera);
+    auto device = open_configured(sim, *camera);
+    auto signal = observe_loss(*device);
+    auto stream = std::move(device->create_stream()).value();
+    auto second_wrapper = std::move(device->create_stream()).value();
+    CHECK(stream->start(120));
+    std::vector<backend::FrameLease> held;
+    for (std::size_t i = 0; i < gige_mel::backend::aravis_profile::pool_buffers; ++i)
+        held.push_back(receive_ok(*stream));
+    for (const auto& f : held) check_frame(f, oracle, 120);
+    const auto saved = copy_bytes(held.front());
+    const auto descriptor = held.front().descriptor();
+    std::optional<backend::Error> error;
+    std::atomic<bool> done{false};
+    std::int64_t returned_ns = 0;
+    std::thread receiver([&] {
+        auto result = stream->receive(60s);
+        if (!result) error = result.error();
+        returned_ns = LossSignal::now_ns();
+        done.store(true);
+    });
+    {
+        ReceiverCleanup cleanup{*stream, receiver}; // cancel BEFORE joining, including assertion failures
+        wait_until([&] { return stream->statistics().pool_starvation_events > 0; }, 5s, "empty native wait");
+        CHECK(!done && sim.control_privilege() != 0 && sim.acquisition_status() == 1);
+        const auto revoked_ns = LossSignal::now_ns();
+        sim.revoke_control();
+        CHECK(sim.control_privilege() == 0); // the heartbeat reads this very register over GVCP
+        wait_until([&] { return signal->count.load() == 1; }, 10s, "actual SDK control-lost signal");
+        std::cout << "  SDK control-lost emitted after server CCP readback zero; heartbeat detection "
+                  << (signal->at_ns - revoked_ns) / 1000000 << " ms" << std::endl;
+        wait_until([&] { return done.load(); }, 1s, "terminal receive after signal");
+        CHECK(error && error->code == backend::ErrorCode::disconnected);
+        CHECK(contains(error->message, "Aravis reported camera control lost"));
+        CHECK(returned_ns - signal->at_ns.load() < 500000000); // event handling, NOT heartbeat detection delay
+        CHECK(stream->statistics().timeout_count == 0);
+        std::cout << "  actual control-lost: heartbeat detection " << (signal->at_ns - revoked_ns) / 1000000
+                  << " ms, receive after signal " << (returned_ns - signal->at_ns) / 1000000 << " ms\n";
+    }
+    // A successful native read still works; it must NOT heal the terminal latch.
+    CHECK(native_integer(*device, "Width") == oracle.width);
+    const auto registers_before = sim.read_register(reg_width);
+    require_control_loss(device->apply(second));
+    CHECK(sim.read_register(reg_width) == registers_before);
+    require_control_loss(device->configuration());
+    require_control_loss(device->create_stream());
+    require_control_loss(stream->start(121));
+    require_control_loss(second_wrapper->start(122));
+    require_control_loss(stream->receive(1ms));
+    require_control_loss(device->close());
+    CHECK(device->close()); // idempotent, no more SDK I/O
+    stream.reset(); second_wrapper.reset(); device.reset(); camera.reset();
+    CHECK(copy_bytes(held.front()) == saved && pixels_match(held.front()));
+    CHECK(held.front().descriptor().native_frame_id == descriptor.native_frame_id);
+    sim.reset_after_control_loss(); // explicit SERVER action, not automatic adapter recovery
+    camera = aravis::make_backend();
+    device = open_configured(sim, *camera);
+    CHECK(device->configuration());
+    stream = std::move(device->create_stream()).value();
+    CHECK(stream->start(123));
+    { auto f = receive_ok(*stream); check_frame(f, oracle, 123);
+      CHECK(f.descriptor().stream_generation != descriptor.stream_generation); }
+    std::thread release([leases = std::move(held)]() mutable { leases.clear(); });
+    release.join();
+    stream->stop(); CHECK(device->close());
+    stream.reset(); device.reset(); camera.reset();
+    sim.finish();
+}
+
+// Q2. Observation-only seams count native resources and writes. No signal is
+// fabricated. The old source lease survives all owners and frees exactly once.
+void control_loss_lifetime() {
+    lb::Simulator sim;
+    Observer seen;
+    auto hooks = seen.hooks();
+    std::atomic<int> writes{0};
+    hooks.before_write = [&](std::string_view, ArvDevice*) { ++writes; };
+    auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, hooks);
+    (void)sim.discover(*camera);
+    auto device = open_configured(sim, *camera);
+    auto signal = observe_loss(*device);
+    auto stream = std::move(device->create_stream()).value();
+    auto other = std::move(device->create_stream()).value();
+    CHECK(stream->start(130));
+    auto frame = receive_ok(*stream);
+    const auto saved = copy_bytes(frame);
+    sim.revoke_control();
+    wait_until([&] { return signal->count.load() == 1; }, 10s, "SDK signal");
+    const auto writes_before = writes.load();
+    const auto created_before = seen.streams_created.load();
+    require_control_loss(device->apply(second));
+    require_control_loss(other->start(131));
+    require_control_loss(stream->receive(0ms));
+    CHECK(writes == writes_before && seen.streams_created == created_before);
+    stream->stop(); stream->stop(); // no AcquisitionStop command after loss
+    CHECK((seen.command_log() == std::vector<std::string>{"AcquisitionStart"}));
+    CHECK(seen.live_streams() == 0 && seen.live_buffers() == 1);
+    require_control_loss(device->close());
+    CHECK(seen.live_devices() == 0 && seen.streams.last < seen.devices.last);
+    stream.reset(); other.reset(); device.reset(); camera.reset();
+    CHECK(copy_bytes(frame) == saved && pixels_match(frame));
+    const int freed = seen.buffers.count;
+    std::thread([lease = std::move(frame)]() mutable { auto drop = std::move(lease); }).join();
+    CHECK(seen.buffers.count == freed + 1 && seen.live_buffers() == 0);
+    sim.reset_after_control_loss(); sim.finish();
+}
+
+// Q3. An ACTUAL heartbeat emission overlaps close. Holding only the test
+// subscriber in-flight makes native stream retirement and the device join
+// observable without changing the production callback or adding a worker.
+void control_loss_close_overlap() {
+    lb::Simulator sim;
+    Observer seen;
+    auto camera = seen.backend();
+    (void)sim.discover(*camera);
+    for (int i = 0; i < 3; ++i) {
+        auto device = open_configured(sim, *camera);
+        auto signal = observe_loss(*device);
+        signal->hold = true;
+        auto stream = std::move(device->create_stream()).value();
+        CHECK(stream->start(140 + static_cast<std::uint64_t>(i)));
+        { auto f = receive_ok(*stream); CHECK(pixels_match(f)); }
+        sim.revoke_control();
+        wait_until([&] { return signal->count.load() == 1; }, 10s, "in-flight SDK emission");
+        std::atomic<bool> closed{false};
+        std::optional<backend::Error> error;
+        const auto began = Clock::now();
+        std::thread closer([&] { auto result = device->close(); if (!result) error = result.error(); closed = true; });
+        // Always release the test signal BEFORE joining, including failure.
+        const bool retired = eventually([&] { return seen.live_streams() == 0; }, 5s);
+        const bool joined_early = closed.load();
+        signal->release = true;
+        closer.join();
+        CHECK(retired && !joined_early && closed && Clock::now() - began < 5s);
+        CHECK(error && contains(error->message, "Aravis reported camera control lost"));
+        CHECK(seen.live_devices() == 0 && seen.live_buffers() == 0);
+        CHECK(device->close());
+        stream.reset(); device.reset();
+        sim.reset_after_control_loss();
+        // A fresh logical device cannot inherit the old signal/latch.
+        auto fresh = open_configured(sim, *camera);
+        auto next = std::move(fresh->create_stream()).value();
+        CHECK(next->start(150 + static_cast<std::uint64_t>(i)));
+        { auto f = receive_ok(*next); CHECK(pixels_match(f)); }
+        next->stop(); CHECK(fresh->close());
+        CHECK(signal->count == 1);
+    }
+    sim.finish();
+}
+
+// Q5. A real popped frame is paused in decoded-facts observation (no edited
+// facts), then a real heartbeat signal arrives before frame admission. No
+// complete frame, malformed frame or timeout may escape instead of the error.
+void control_loss_admission() {
+    lb::Simulator sim;
+    std::atomic<bool> decoded{false}, resume{false};
+    auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, [&] {
+        aravis::TestHooks h;
+        h.decoded_facts = [&](gige_mel::backend::aravis_profile::NativeFrameFacts&) {
+            decoded = true;
+            const auto end = Clock::now() + 10s;
+            while (!resume && Clock::now() < end) std::this_thread::yield();
+        };
+        return h;
+    }());
+    (void)sim.discover(*camera);
+    auto device = open_configured(sim, *camera);
+    auto signal = observe_loss(*device);
+    auto stream = std::move(device->create_stream()).value();
+    CHECK(stream->start(160));
+    std::optional<backend::Error> error;
+    std::thread receiver([&] { auto r = stream->receive(60s); if (!r) error = r.error(); });
+    {
+        ReceiverCleanup cleanup{*stream, receiver};
+        // This guard runs before ReceiverCleanup on assertion failure.
+        struct Resume { std::atomic<bool>& flag; ~Resume() { flag = true; } } guard{resume};
+        wait_until([&] { return decoded.load(); }, 5s, "real popped frame decode");
+        sim.revoke_control();
+        wait_until([&] { return signal->count.load() == 1; }, 10s, "SDK signal before lease commit");
+        resume = true;
+    }
+    CHECK(error && contains(error->message, "Aravis reported camera control lost"));
+    CHECK(error->code == backend::ErrorCode::disconnected);
+    CHECK(stream->statistics().delivered_frames == 0 && stream->statistics().timeout_count == 0);
+    require_control_loss(device->close());
+    sim.reset_after_control_loss(); sim.finish();
+}
+
+// Q6. The native heartbeat exists before profile validation or DeviceCore.
+// A loss in that interval must not be missed or returned as a healthy open.
+void control_loss_open() {
+    lb::Simulator sim;
+    Observer seen;
+    auto signal = std::make_shared<LossSignal>();
+    auto signal_data = std::make_unique<std::shared_ptr<LossSignal>>(signal); // before heartbeat thread exists
+    auto hooks = seen.hooks();
+    const auto opened = hooks.after_native_open;
+    hooks.after_native_open = [&](ArvDevice* d) {
+        opened(d);
+        g_signal_connect_data(d, "control-lost", G_CALLBACK(LossSignal::notified),
+                              signal_data.release(), LossSignal::destroyed, G_CONNECT_DEFAULT);
+        sim.revoke_control();
+        wait_until([&] { return signal->count.load() == 1; }, 10s, "SDK event during open");
+    };
+    auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, hooks);
+    (void)sim.discover(*camera);
+    require_control_loss(camera->open(device_id));
+    CHECK(seen.devices.count == 1 && seen.live_devices() == 0 && seen.streams_created == 0);
+    CHECK(sim.control_privilege() == 0);
+    // Failed-open cleanup released the reservation after native finalization.
+    auto fresh_camera = aravis::make_backend();
+    auto fresh = open_configured(sim, *fresh_camera);
+    CHECK(fresh->close());
+    sim.finish();
+}
+
 std::string temp_path(const char* stem, const char* extension) {
     const char* dir = std::getenv("TMPDIR");
     return std::string(dir && *dir ? dir : "/tmp") + "/" + stem + "-" + std::to_string(::getpid()) + extension;
@@ -1188,6 +1454,58 @@ void negative_publication() {
     sim.finish();
 }
 
+// Q4. The unchanged MEL worker already treats a terminal backend error as a
+// stream failure. Positive network publication requires ONLY the existing
+// test virtual clock; the production timestamp remains FrameTimestamp{}.
+void control_loss_provider() {
+    lb::Simulator sim;
+    (void)sim.discover(*aravis::make_backend());
+    {
+        Session s(true);
+        const vc::Model model{5000s, 40ms, 9};
+        s.clock->set_model(model);
+        s.configure(sim, 15001, oracle);
+        const std::size_t bytes = std::size_t{oracle.width} * oracle.height;
+        for (int i = 0; i < 4; ++i) s.add_buffer(bytes, 1501 + i);
+        auto signal = observe_loss(*s.inner());
+        CHECK(s.image->enable() == ir::Return::Success);
+        s.listener->wait_count(4);
+        const auto held = s.listener->all();
+        for (const auto& d : held) {
+            CHECK(d.registered && d.matches_sdk && d.matches_oracle && d.source_lease_held);
+            CHECK(d.source && unqualified(d.source->original.timestamp));
+            CHECK(d.header.getWidth() == oracle.width && d.header.getHeight() == oracle.height);
+            CHECK(d.header.getBitsPerPixel() == 8 && d.header.getNumBands() == 1);
+            CHECK(d.header.getColumnOffset() == oracle.offset_x && d.header.getRowOffset() == oracle.offset_y);
+            CHECK(d.header.getIntegrationTime() == oracle.exposure);
+            CHECK(d.header.getFrameID() == d.source->original.native_frame_id);
+            CHECK(d.header.getSystemTime() == vc::nominal(model, d.source->sequence)->value);
+        }
+        sim.revoke_control();
+        wait_until([&] { return signal->count.load() == 1; }, 10s, "provider SDK signal");
+        wait_until([&] {
+            const auto stats = s.stats();
+            return stats.stream_failures == 1 && contains(stats.last_error, "Aravis reported camera control lost");
+        }, 2s, "MEL terminal stream failure and diagnostic");
+        CHECK(s.image->enable() == ir::Return::Fail); // faulted ownership, no implicit new stream
+        auto refused = s.image->send(camera_command(15002, second));
+        CHECK(refused.wait_for(bound) == std::future_status::ready);
+        CHECK(!refused.get()); // command refused while faulted
+        for (const auto& d : held) CHECK(region(d.address, bytes) == d.bytes);
+        // Release one destination after failure: it must NOT invite publication.
+        CHECK(held.front().buffer->release() == ir::Return::Success);
+        CHECK(s.image->disable() == ir::Return::Success); // drains the worker/callbacks
+        CHECK(s.listener->count() == held.size());
+        for (const auto& d : held) CHECK(region(d.address, bytes) == d.bytes);
+        CHECK(s.stats().stream_failures == 1 && s.stats().rejected_frames == 0);
+        CHECK(s.ledger->wait_outstanding(0, bound));
+        require_control_loss(s.inner()->configuration());
+        require_control_loss(s.inner()->close());
+    }
+    sim.reset_after_control_loss();
+    sim.finish();
+}
+
 // ===========================================================================
 // L. SIMULATED packet loss: a fresh simulator with the pinned construct
 // property gvsp-lost-ratio (0.0: normal delivery; 1.0: the simulator drops
@@ -1203,6 +1521,7 @@ void simulated_loss(double ratio) {
     auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, hooks);
     (void)sim.discover(*camera); // GVCP is unaffected by the GVSP loss ratio
     auto device = open_configured(sim, *camera);
+    auto signal = observe_loss(*device);
     auto stream = std::move(device->create_stream()).value();
     CHECK(stream->start(90));
     CHECK(sim.acquisition_status() == 1 && sim.stream_port() != 0);
@@ -1248,6 +1567,8 @@ void simulated_loss(double ratio) {
                   << "cancel in " << std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - begin).count()
                   << " ms; pool stayed at 4 buffers\n";
     }
+    CHECK(signal->count == 0 && sim.control_privilege() != 0);
+    CHECK(device->configuration()); // packet loss alone never latches terminal failure
     stream->stop();
     CHECK(sim.acquisition_status() == 0);
     CHECK(device->close());
@@ -1462,6 +1783,12 @@ int main(int argc, char** argv) {
         {"M1 positive MEL publication of network pixels (TEST-ONLY virtual time)", positive_publication},
         {"M2 negative control: production timestamps rejected", negative_publication},
         {"L  SIMULATED GVSP packet loss (gvsp-lost-ratio 0.0 / 1.0)", packet_loss},
+        {"Q1 confirmed control loss: blocked receive, sticky refusal and explicit recovery", control_loss_active},
+        {"Q2 confirmed control loss: no writes/streams, exact source lease cleanup", control_loss_lifetime},
+        {"Q3 confirmed control loss: concurrent close and actual SDK emission", control_loss_close_overlap},
+        {"Q4 confirmed control loss: MEL publication failure and destination ownership", control_loss_provider},
+        {"Q5 confirmed control loss: popped frame refused at admission", control_loss_admission},
+        {"Q6 confirmed control loss: validation-time open refusal and cleanup", control_loss_open},
         // Not a transport scenario: the R1 socket-audit controls.
         {"S  socket audit: documented wildcard discovery listener; unrelated wildcard rejected", socket_audit_controls},
     };

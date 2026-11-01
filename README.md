@@ -214,6 +214,12 @@ all MEL channel code.
    production GigE backend against the SDK's own network camera simulator
    (`ArvGvFakeCamera`) on IPv4 loopback: real discovery, GVCP control and GVSP
    image transport over UDP, but simulated, not a physical camera or NIC.
+   GIGE-MEL-012 propagates the SDK's `ArvDevice::control-lost` heartbeat signal
+   into sticky terminal backend failure: bounded receive interruption, no fresh
+   configuration/acquisition, safe source leases and explicit close/reopen.
+   Simulator privilege-revocation tests are **not physical unplug detection**;
+   ordinary GVSP starvation still times out. See the
+   [control-loss contract](docs/aravis-integration.md#confirmed-camera-control-loss-gige-mel-012).
    The client restricts GigE discovery and normal GVCP/GVSP traffic to
    loopback. However, pinned Aravis 0.8.36's network simulator also creates a
    global GVCP discovery listener bound to 255.255.255.255:3956. On Linux that

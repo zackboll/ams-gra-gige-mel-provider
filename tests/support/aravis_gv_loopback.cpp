@@ -498,6 +498,18 @@ std::vector<backend::DeviceInfo> Simulator::discover(backend::ICameraBackend& ca
          (bind_state ? std::strerror(bind_state) : "FREE (simulator socket missing)") + ". Not skipped.");
 }
 
+void Simulator::revoke_control() {
+    if (!simulator_ || control_privilege() == 0) fail("revoke_control(): no controlling client");
+    arv_fake_camera_set_control_channel_privilege(arv_gv_fake_camera_get_fake_camera(simulator_), 0);
+    if (control_privilege() != 0) fail("revoke_control(): CCP did not read back zero");
+}
+
+void Simulator::reset_after_control_loss() {
+    if (!simulator_ || control_privilege() != 0) fail("reset_after_control_loss(): client must be closed first");
+    if (!arv_fake_camera_write_register(arv_gv_fake_camera_get_fake_camera(simulator_), fake_acquisition, 0))
+        fail("reset_after_control_loss(): acquisition register write failed");
+}
+
 void Simulator::finish() {
     if (finished_) return;
     if (!simulator_) fail("finish() without a simulator");

@@ -30,6 +30,7 @@ This inventory uses the annotations in the pinned IR MEL commit `8d9224519f12b44
 | Real Aravis integration-start timestamp | **Not qualified**; checklist gate open |
 | Production Aravis-backed MEL Image publication | **Not enabled** |
 | Simulated GigE transport (loopback `ArvGvFakeCamera`: discovery, GVCP, GVSP) | Exercised (GIGE-MEL-011); simulator only |
+| Confirmed Aravis camera-control loss (`ArvDevice::control-lost`) | Terminal backend failure, blocked configuration/start, safe leases/close and explicit reopen exercised with real simulator privilege revocation (GIGE-MEL-012); existing MEL stream-failure path, no new MEL surface; **not physical unplug detection** |
 | Network isolation of the loopback test | **Not established**: the simulator's wildcard 255.255.255.255:3956 discovery listener is a documented test-only exception (GIGE-MEL-011-R1); owner acceptance pending |
 | Physical-camera / NIC qualification | **Not performed** |
 

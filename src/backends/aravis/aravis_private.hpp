@@ -80,7 +80,11 @@ std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource sourc
 // the device's operation lock, e.g. to arrange native state or attach a GObject
 // weak reference. Returns false (without calling fn) after logical close or
 // for a device not created by this adapter. fn must not retain the pointer
-// beyond its call except through GObject weak references.
+// beyond its call except through GObject weak references. In particular, a
+// retained GigE reference across close would defeat the adapter's exclusive
+// final-reference/heartbeat-emission retirement handshake. The Fake-only
+// failed-command tests retain a temporary reference for post-close readback;
+// Fake has no heartbeat thread and is outside that GigE handshake.
 bool with_native_device_for_testing(ICameraDevice& device, const std::function<void(ArvDevice*)>& fn);
 
 } // namespace gige_mel::backend::aravis

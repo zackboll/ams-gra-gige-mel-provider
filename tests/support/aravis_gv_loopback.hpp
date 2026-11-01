@@ -195,6 +195,13 @@ public:
     std::size_t genicam_xml_bytes() const;
     std::string genicam_xml_sha256() const;   // of the XML the simulator serves
     void write_test_register(std::uint32_t value); // TestRegister (0x1F0), server memory
+    // Explicit SERVER-side privilege revocation, not a network outage. Uses
+    // the pinned public Fake-camera API; never injects a client-side signal.
+    void revoke_control();
+    // Server-side housekeeping AFTER the failed client has closed. The client
+    // cannot assert AcquisitionStop after loss; reset the simulated acquisition
+    // register explicitly before recovery/checked simulator destruction.
+    void reset_after_control_loss();
 
     // Bounded discovery through the given backend's ordinary enumerate()
     // (the production GigE path). Retries until expected_device_id appears or

@@ -15,6 +15,12 @@ provider rejects under the rules below; no Aravis MEL profile is supported.
 GIGE-MEL-010 only observes raw SDK timestamps. Its positive Aravis-pixel MEL
 publication uses a test-only virtual clock outside the provider and the
 adapter, so this profile and the timestamp admission rules are unchanged.
+GIGE-MEL-012 translates a confirmed Aravis `control-lost` signal into terminal
+backend failure through the existing worker's `stream_failures`/diagnostic path;
+the test-only virtual clock establishes positive MEL publication before loss.
+It changes no timestamp admission rule or MEL surface and makes no physical
+disconnection or full-conformance claim. See the
+[control-loss contract](aravis-integration.md#confirmed-camera-control-loss-gige-mel-012).
 `getAPI_Manager(instance)` creates an independent manager. `getControl` reuses
 the live Control for that manager; a mismatched instance, foreign manager, or
 null manager is rejected. `getBuffer` creates an uninitialized buffer associated
