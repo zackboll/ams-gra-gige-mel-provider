@@ -23,6 +23,20 @@ GIGE-MEL-010 adds two things:
 
 See [Native timestamp provenance (GIGE-MEL-010)](#native-timestamp-provenance-gige-mel-010).
 
+GIGE-MEL-011 runs the **unchanged production** `make_backend()` (Aravis's GigE
+Vision interface) against the pinned SDK's own network camera simulator,
+`ArvGvFakeCamera`, on IPv4 loopback. That exercises real GigE discovery, GVCP
+control and GVSP image transfer over UDP. It is simulated network transport,
+not physical-camera, NIC or timing qualification. See
+[Loopback GigE Vision transport (GIGE-MEL-011)](#loopback-gige-vision-transport-gige-mel-011).
+
+| Evidence | What it is | What it is not |
+| --- | --- | --- |
+| In-process Aravis Fake (`ArvFakeInterface`/`ArvFakeStream`) | Completed software tests (GIGE-MEL-008 to -010) | No GVCP, no GVSP, no sockets |
+| Loopback `ArvGvFakeCamera` (GIGE-MEL-011) | Simulated network camera; actual GigE Vision discovery, GVCP control and GVSP image transport over UDP on 127.0.0.1 | No physical NIC, switch or camera qualification |
+| Physical GigE camera | **Not yet qualified** | — |
+| Timestamps | Raw SDK values observed; production descriptors remain invalid (`FrameTimestamp{}`); virtual time used only by tests | No integration-start, PTP or UTC claim |
+
 > **Superseded status (GIGE-MEL-008 text below).** Passages written for
 > GIGE-MEL-008 that say `create_stream()` returns `unsupported`, that Image
 > `enable()` fails, or that acquisition is pending describe that milestone.
@@ -77,9 +91,10 @@ ctest --test-dir build/aravis-dev --output-on-failure
 ```
 
 With the option ON, a missing or different SDK is a clear configuration error.
-The SDK-enabled build adds five CTest entries to the eight default ones (13 in
-total; four before GIGE-MEL-010, three before GIGE-MEL-009). All of these
-targets are internal and are not installed or exported:
+The SDK-enabled build adds six CTest entries to the eight default ones (14 in
+total; five before GIGE-MEL-011, four before GIGE-MEL-010, three before
+GIGE-MEL-009). All of these targets are internal and are not installed or
+exported:
 
 | Target | Purpose |
 | --- | --- |
@@ -89,6 +104,7 @@ targets are internal and are not installed or exported:
 | `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration and negative timestamp-admission probe |
 | `aravis_stream_contract_tests` → CTest `aravis_stream_contract` | GIGE-MEL-009 acquisition contract against the real SDK Fake stream |
 | `aravis_timestamp_contract_tests` → CTest `aravis_timestamp_contract` | GIGE-MEL-010: native timestamp observation, the time-probe routine against the Fake, and positive/negative MEL publication through the **test-only** virtual clock (`tests/support/aravis_virtual_clock.*`) |
+| `aravis_gige_loopback_contract_tests` → CTest `aravis_gige_loopback_contract` | GIGE-MEL-011: the production GigE backend against the SDK's `ArvGvFakeCamera` on 127.0.0.1 (real discovery, GVCP, GVSP); test-only fixture `tests/support/aravis_gv_loopback.*`. Needs IPv4 loopback with UDP 3956 free; never skipped |
 | `gige_mel_aravis_diagnostic` → CTest `aravis_diagnostic_help` | Diagnostic tool (`--help` performs no device I/O) |
 
 ```sh
@@ -193,6 +209,11 @@ in-process Fake interface (`arv_fake_interface_get_instance()`, device ID
 Both paths use the same adapter implementation. Every feature read and write
 still runs through Aravis's GenICam implementation of the Fake camera. No
 project camera mock replaces it.
+
+GIGE-MEL-011 adds a third test-only arrangement that does **not** change the
+client: the loopback test uses the production `make_backend()` itself, and the
+private fixture only starts the SDK's network simulator and restricts GigE
+discovery to the loopback interface for that test process (see below).
 
 Neither path changes process-wide interface enable flags or calls
 `arv_shutdown()`. Factory construction performs no discovery, open or
@@ -885,6 +906,10 @@ never uses a project-generated frame.
 **Limits.** The Fake stream is in-process. It does not exercise GVSP packets,
 resend, packet loss, socket buffers, controller privilege, the GigE finalizer's
 register write, disconnection, real exposure timing or throughput.
+GIGE-MEL-011 exercises GVSP packets, controller privilege, the GigE finalizer's
+stream-channel write and simulated loss against the SDK's loopback simulator;
+resend, physical loss, disconnection, exposure timing and throughput remain
+unqualified.
 
 ### SDK versus project sanitizer coverage
 
@@ -927,6 +952,42 @@ the GIGE-MEL-009 and GIGE-MEL-009-R1 records in
 checked" overstated this. Project code is instrumented, but reports that
 involve these frames are not delivered.
 
+**GIGE-MEL-011 (loopback executable only).** The three earlier executables and
+`tests/support/tsan_uninstrumented_sdk.cpp` are unchanged. The new
+`aravis_gige_loopback_contract_tests` links its own
+`tests/support/tsan_gige_loopback_sdk.cpp` instead. It carries the same two
+patterns plus `called_from_lib:` entries for `libaravis-0.8.so.0`,
+`libglib-2.0.so.0`, `libgio-2.0.so.0` and `libgobject-2.0.so.0`. The GigE path
+adds two SDK threads (the `ArvGvDevice` heartbeat and the `ArvGvStream`
+receiver). With only the two existing patterns, one full run of this
+executable produced **68** reports (`halt_on_error=0`). Each had an
+intercepted libc call made from inside those uninstrumented libraries on at
+least one side:
+
+- 20 are `recv`/`poll` on the GVCP socket buffer under `io_data->mutex`, a
+  GMutex. They are SDK-internal on both sides.
+- 35 are `eventfd`/`write`/`close` on GCancellable descriptors during SDK
+  finalization. They are SDK-internal on both sides.
+- 13 are the **SDK buffer-handoff boundary**. The `ArvGvStream` receiver's
+  `memcpy` of GVSP payload into the pool buffer is reported against a
+  **project** read of the leased bytes after `arv_stream_timeout_pop_buffer()`:
+  the test's pixel checks, `write_pgm`, and the provider's destination copy.
+  This is the boundary the two GIGE-MEL-009 patterns already cover for the
+  Fake stream. On GigE the writer frame is `memcpy`, so those patterns do not
+  match.
+
+`called_from_lib` makes TSan ignore the accesses and synchronization of
+intercepted calls made from those libraries. It does not suppress reports by
+stack frame. Its blind spot is **wider** than the two patterns, and it applies
+to this executable only. No race in which one side is such an SDK-internal
+libc access is reported, including the SDK writing a buffer the project
+reads. A green TSan result for this executable is therefore not race coverage
+of the buffer-handoff boundary. That boundary is asserted functionally
+instead: held-lease bytes stay unchanged after stop, while held, and across
+reopen. An intentional project-only race still halts with this file linked.
+The full report analysis is in
+[validation](validation.md#gige-mel-011-loopback-gige-vision-transport-2026-11-02).
+
 ## Native timestamp provenance (GIGE-MEL-010)
 
 GIGE-MEL-010 **observes** the SDK's timestamps and exercises positive MEL Image
@@ -941,7 +1002,8 @@ qualifies no camera timestamp. Every production Aravis frame still carries
 | Positive Aravis-pixel MEL publication under virtual test time | **Test-qualified** (`aravis_timestamp_contract`, test-only clock) |
 | Real Aravis integration-start timestamp | **Not qualified** |
 | Production Aravis-backed MEL Image publication | **Not enabled** |
-| Physical-camera / GVSP transport qualification | **Not performed** |
+| Physical-camera qualification | **Not performed** |
+| Simulated GVCP/GVSP transport (loopback `ArvGvFakeCamera`) | **Exercised** in GIGE-MEL-011 (`aravis_gige_loopback_contract`) |
 
 ### What the pinned SDK actually reports
 
@@ -1328,19 +1390,121 @@ None of the following is evidence:
 No generic conversion based only on `arv_buffer_get_timestamp()` and the
 current exposure is implemented, and none may be.
 
+## Loopback GigE Vision transport (GIGE-MEL-011)
+
+### Simulator and fixture
+
+The server is the pinned SDK's network camera simulator, `ArvGvFakeCamera`
+(`src/arvgvfakecamera.c`, public API `arv_gv_fake_camera_new()`,
+`arv_gv_fake_camera_is_running()` and `arv_gv_fake_camera_get_fake_camera()`).
+It runs in the test process on its own thread, bound to `127.0.0.1`. This is
+the same object the upstream `tests/fakegv.c` uses, created the same way:
+`arv_gv_fake_camera_new("127.0.0.1", "GVTest")`. It answers GVCP on UDP
+127.0.0.1:3956 and sends GVSP datagrams to whatever stream destination the
+client programs. The upstream `arv-fake-gv-camera` program is neither built nor
+used, and the SDK, its provisioning and its version are unchanged. The
+provisioned build has packet sockets disabled, so the client receives GVSP on
+an ordinary UDP socket. No root, `CAP_NET_RAW`, VM or dedicated NIC is needed.
+
+The **client** is the unchanged production `aravis::make_backend()`. It is not
+`ArvFakeInterface` and not the private Fake backend. A few scenarios need to
+observe native objects such as the stream type, pool size or finalization
+order. Those use `make_backend_for_interface()` with the **identical** interface
+source (`{"GigEVision", arv_gv_interface_get_instance}`) and observation-only
+hooks.
+
+`tests/support/aravis_gv_loopback.*` (test-only, uninstalled) does the
+following:
+
+- It finds the up IPv4 loopback interface carrying 127.0.0.1 (`lo`).
+- It requires UDP 127.0.0.1:3956 to be **free** before start. A busy port is an
+  immediate failure with the `bind` error, never a skip.
+- It restricts GigE discovery to that interface for the test process through
+  the public `arv_gv_interface_set_discovery_interface_name()` (0.8.34+).
+  Discovery broadcasts therefore never leave loopback, and no physical camera
+  can be discovered. The previous value is restored afterwards. The production
+  adapter's discovery policy is unchanged.
+- It checks the following after start:
+  - `is_running`;
+  - an `ArvFakeCamera` underneath;
+  - the GVCP port now held by the simulator;
+  - the bootstrap identity in server memory (IP 127.0.0.1, vendor `Aravis`,
+    model `Fake`, serial `GVTest`);
+  - no controller and no acquisition yet.
+- `finish()` checks the shutdown order. It requires that the client has
+  released GVCP control and acquisition. It then drops the simulator, whose
+  finalizer joins its thread and closes its sockets. It checks finalization
+  through a GObject weak reference, proves UDP 3956 is free again, and
+  restores the discovery interface. The destructor is a non-throwing backstop
+  for failure paths.
+- Discovery waits are bounded at 10 s. Each attempt is a 1 s SDK poll. Expiry
+  reports the interface, what was found, `is_running` and the port state.
+- After every scenario, `/proc/self/fd` joined with `/proc/net/udp` proves that
+  every UDP socket the process owns is bound to 127.0.0.1, or to
+  255.255.255.255 (the simulator's global-discovery socket).
+
+`arv_shutdown()` is never called. The test runs under CTest
+`RESOURCE_LOCK gige_gvcp_loopback_3956`, because port 3956 is fixed.
+
+### Identity, SDK and provenance
+
+| Item | Observed |
+| --- | --- |
+| Discovery interface | `lo` (127.0.0.1) |
+| Discovered device ID (exact, from discovery) | `Aravis-Fake-GVTest` |
+| Display string | `Aravis Fake serial GVTest (GigEVision 127.0.0.1)` |
+| Device address | 127.0.0.1:3956 (`arv_gv_device_get_device_address`) |
+| Native device / stream types | `ArvGvDevice` / `ArvGvStream` |
+| SDK | 0.8.36 runtime and compiled; loaded from the provisioned `libaravis-0.8.so.0` (`dladdr`, printed by the test) |
+| Adapter | `gige_mel_aravis` is a static archive linked into the test executable (also printed). `ldd` cannot show the adapter revision; build/link provenance is the commit and build directory recorded in [validation](validation.md) |
+
+### Scenarios (`aravis_gige_loopback_contract`, 14th SDK-enabled CTest entry)
+
+| Group | Behavior |
+| --- | --- |
+| A | Discovery through `make_backend()->enumerate()` returns exactly one device: the simulator. The opened device is `ArvGvDevice`, not `ArvFakeDevice`, and is GVCP controller (the server's CCP register is nonzero). Identity features are read over GVCP. A nonce written into **server** memory is read back by the client twice, so the reads are not cached. A competing open from the same or another backend is `busy`. SDK aliases (`Aravis-GVTest`, `GVTest`, `127.0.0.1`) and an absent ID are `not_found`. Close releases control on the server, and a reopen succeeds |
+| B | The initial configuration is read over GVCP (the pinned defaults 512×512@(0,0), 25 Hz, 10 ms). Capabilities are the actual bounds (sensor 2048×2048, increments 1). 64×48@(8,4), 25 Hz, 10 ms is applied through the existing transaction and proved by client readback **and** the simulator's registers: width/height/offsets, `ExposureTimeAbs` 10 000 µs, frame period 40 000 µs, `GainRaw` 0, `PixelFormat` Mono8, `TriggerMode` Off, Continuous, free-running. There are no hidden trigger or format changes. An out-of-range request is refused before any write. While acquiring, `apply()` is `invalid_state` and the server registers are unchanged. After stop, 80×40@(16,12), 10 Hz, 100 ms is applied and delivered (oracle scale 2.0) |
+| C | `create_stream()` does no native work. `start()` creates one `ArvGvStream` and four pool buffers, and programs the server's SCDA0/SCP0 to 127.0.0.1 and a UDP port **owned by this process**. Eight frames are received: complete Mono8, 64×48, stride 64, 3 072 bytes, configuration and stream generations, native frame IDs (the simulator's 16-bit counter starts at 65 401), and **every pixel** equal to `(x + y + id) % 255`. The SDK's own counters show the frames were reassembled from GVSP datagrams: at packet size 1 400, 40 packets for 8 frames (leader, 3 payload, trailer), 8 completed buffers, 0 failures, 0 missing packets. Stop closes the stream channel (SCP0 0) and the UDP socket |
+| D1 | `AcquisitionStart`/`Stop` are observed on the **server's** acquisition register, independently of frame arrival. A held lease's bytes are unchanged after stop while the simulator keeps running. The restart lease rule holds: restart is refused while a lease is held. The native stream is finalized before the native device (weak-reference ordinals), and the device before the reservation is released, after which another backend reopens. A reopen while an old lease is held, and that lease's release on another thread, free its buffer and never requeue it into the new `ArvGvStream` (the pool stays at 4). An explicit stop/restart produces a new stream generation |
+| D2 | All four pool buffers are leased, and receive is observed inside native timed pops while GVSP keeps arriving. `request_stop`, `stop`, an exception unwind and `close` each return within 1 s (observed: 4 ms), with `stopped`/`disconnected` and no timeout. The server shows the acquisition stopped. Held leases are still valid. A fresh open acquires again |
+| E1 | The production `capture_one()` over GigE. An independent check confirms the exact `P5\n64 48\n255\n` header, 3 085 bytes, every pixel against the oracle for the reported native frame ID, and stream/device retirement. The device can be reopened |
+| E2 | The production `time_probe()` over GigE. An existing output file is refused with no device I/O (no controller seen by the server). Six frames produce exactly 1 header, 6 frames and 1 summary, parsed with the vendored nlohmann/json: schema version 2, `interface` `gige_vision`, `native_device_type` `ArvGvDevice`, SDK identity, and `GenICamXmlBytes`/`GenICamXmlSha256` equal to the XML the **simulator** serves. `diagnostic_tick_frequency_hz` is 1 000 000 000 (equal to the server's bootstrap registers) with its stated source. Raw unsigned SDK buffer/system timestamps equal the routine's report. Frame IDs and generations are correct. `timestamp_qualified=false` everywhere, `descriptor_timestamp_valid=false`, and `actual_stream_timestamp_path` is `"unverified"` |
+| M1 | The **test-only** virtual-clock decorator wraps `make_backend()` and feeds the unchanged provider (`make_api_manager`, `Control`, `ImageChannel`, registered sentinel buffers, `onImage`). In each callback, every destination byte equals the original SDK lease bytes **and** the oracle. The header has geometry, ROI, integration time 10 ms, source native frame ID, and `systemTime` equal to the declared virtual value. Address and context are registered. With all four destinations held, further network frames are dropped and held bytes are never overwritten. An explicit `Buffer::release()` resumes into exactly that slot. `disable()` stops acquisition on the server, and there is no stale publication |
+| M2 | The same decorator as a pure pass-through. Genuine GVSP frames reach the provider with `FrameTimestamp{}` and are rejected (`rejected_frames` ≥ 6, "timestamp contract"). There are no callbacks or stream failures, and the destinations keep their sentinel bytes |
+| L | **Simulated** loss through the pinned construct property `gvsp-lost-ratio`, set on a fresh simulator before its thread exists. At 0.0, frames are delivered normally. At 1.0 the simulator drops every outgoing GVSP packet before `sendto`: 0 packets and 0 frames reach the client, three `receive(400 ms)` calls each return `timeout` within the bound, the pool stays at 4 buffers, a blocked receive is cancelled promptly, and stop/close release everything. Through the MEL provider, even with the virtual clock, nothing is published or rejected and destinations are unchanged |
+
+No exact count of lost packets or resend events is asserted. The pinned GigE
+device disables resend because the simulator does not advertise it. A timeout
+under simulated loss says nothing about physical disconnection, and the test
+asserts nothing of the kind. This is not a switch or NIC loss test.
+
+### What loopback does and does not show
+
+The simulator's GVSP leader timestamp comes from the Fake's host wall clock
+(`arv_fake_camera_fill_buffer`, pinned `src/arvfakecamera.c:786`). It is **not**
+integration start, and the diagnostic still reports the GigE stream path as
+`"unverified"`. Loopback has no physical NIC, MTU or switch, no real packet
+loss or reordering, no real heartbeat timeout and no camera firmware, so it
+says nothing about throughput or timing. The pixels are synthetic. A positive
+virtual-clock callback proves the network-image publication path, not camera
+timing. Production Aravis-backed MEL Image publication is still not enabled.
+
 ## Qualification boundaries
 
 The evidence covers the project adapter and tests, executed against the real
-Aravis 0.8.36 library and its in-process Fake camera. It does **not** establish:
+Aravis 0.8.36 library, its in-process Fake camera and (GIGE-MEL-011) its
+loopback network simulator `ArvGvFakeCamera`. It does **not** establish:
 
 - generic GenICam or GigE Vision compatibility;
 - behavior on any physical camera or firmware;
-- GVCP/GVSP network behavior, controller privilege, heartbeat or packet
-  behavior;
+- GVCP/GVSP behavior on a physical NIC or switch, real packet loss, jumbo
+  frames, multiple interfaces, firewalls or real heartbeat timeouts. Loopback
+  exercises the SDK's own simulator only; its controller privilege and
+  heartbeat are the simulator's implementation;
 - thread safety of Aravis itself;
-- camera timing, timestamps, PTP/UTC, transport (GVSP) acquisition,
-  disconnection recovery or hardware performance. GIGE-MEL-009 source
-  acquisition is exercised only with the SDK's in-process Fake stream;
+- camera timing, timestamps, PTP/UTC, disconnection recovery or hardware
+  performance. Source acquisition is exercised with the SDK's in-process Fake
+  stream and with GVSP from the loopback simulator, not with a camera;
 - any Aravis integration-start timestamp. GIGE-MEL-010 observes raw SDK
   values. Its positive MEL publication uses a **test-only virtual clock** and
   is not hardware timestamp qualification (see

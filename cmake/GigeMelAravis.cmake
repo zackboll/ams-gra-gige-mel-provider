@@ -73,6 +73,24 @@ if(BUILD_TESTING)
     gige_mel_build_options Threads::Threads)
   add_test(NAME aravis_timestamp_contract COMMAND aravis_timestamp_contract_tests)
 
+  # GIGE-MEL-011: the UNCHANGED production GigE backend (aravis::make_backend)
+  # against the pinned SDK's in-process network camera simulator
+  # ArvGvFakeCamera on 127.0.0.1: real GigE discovery, GVCP control and GVSP
+  # over loopback UDP. The simulator fixture is test-only (tests/support) and
+  # so is the virtual clock. Needs IPv4 loopback with UDP 3956 free; never
+  # skipped. Its TSan suppressions are separate (tsan_gige_loopback_sdk.cpp).
+  add_executable(aravis_gige_loopback_contract_tests tests/aravis_gige_loopback_contract.cpp
+    tests/support/aravis_gv_loopback.cpp tests/support/aravis_virtual_clock.cpp
+    tests/support/tsan_gige_loopback_sdk.cpp)
+  target_include_directories(aravis_gige_loopback_contract_tests SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
+  target_link_libraries(aravis_gige_loopback_contract_tests PRIVATE gige_mel_provider gige_mel_aravis_test_support
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME aravis_gige_loopback_contract COMMAND aravis_gige_loopback_contract_tests)
+  # Uses the fixed GVCP port 3956 on loopback: never run concurrently with
+  # another process that binds it (ctest -j).
+  set_tests_properties(aravis_gige_loopback_contract PROPERTIES TIMEOUT 600 RESOURCE_LOCK gige_gvcp_loopback_3956)
+
   # --help must succeed without device I/O (no network discovery is started).
   add_test(NAME aravis_diagnostic_help COMMAND gige_mel_aravis_diagnostic --help)
   set_tests_properties(aravis_adapter aravis_mel_embedding aravis_stream_contract aravis_diagnostic_help
