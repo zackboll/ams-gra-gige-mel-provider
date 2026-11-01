@@ -1,5 +1,475 @@
 # Bootstrap validation record
 
+## GIGE-MEL-011-R1 simulator wildcard discovery listener (2026-11-02)
+
+**Disposition.** This is one ordinary corrective commit on
+`feature/gige-mel-011-gvsp-loopback` (PR #11). It resolves the single
+remaining independent-review finding: the pinned network simulator binds a
+global discovery socket to 255.255.255.255:3956. That socket is effectively
+wildcard on Linux, but the earlier socket check permitted it and the earlier
+record described the test environment as loopback-only. **The exposure is
+documented and audited, not removed.** Network isolation is not established.
+The test-only exception awaits the repository owner's acceptance.
+
+**Starting point (verified before editing).**
+
+| Item | Value |
+| --- | --- |
+| Reviewed head = local = `origin/feature/gige-mel-011-gvsp-loopback` = PR #11 head | `abc63deb71e1bce9147e903d1259634200d842e2` |
+| Reviewed tree | `ddbe66492d67aca8431ba90fa18ba30695ed5a32` |
+| `origin/main` (not advanced) | `e3e1b44b2ff7234c0758e090f645230df79c0645` |
+| PR #11 | open, non-draft, unmerged, auto-merge off; push and pull_request runs on `abc63deb` green |
+| Working tree | clean (isolated worktree) |
+
+The branch had not advanced, so there was nothing to reconcile.
+
+**Scope.** These files changed:
+
+- `tests/support/aravis_gv_loopback.{hpp,cpp}` and
+  `tests/aravis_gige_loopback_contract.cpp` (test-only, uninstalled);
+- `README.md`, `docs/aravis-integration.md`, `docs/architecture.md`,
+  `docs/mel-surface-roadmap.md` and this record, in the network-isolation
+  passages only.
+
+These are unchanged: `src/`, `include/`, the production backend and
+`src/provider.cpp`, leases and the acquisition/recovery state machine,
+production timestamps, the test-only virtual clock, the SDK pin and
+provisioning, the factories, both TSan suppression files, sanitizer settings,
+the workflow, CMake/CTest wiring, the installed package and the Python
+verifier and its tests.
+
+### Superseded statements
+
+These earlier GIGE-MEL-011 statements are **superseded**. The historical text
+below is kept unchanged:
+
+- "Throughout, every UDP socket the process owned was on 127.0.0.1 or
+  255.255.255.255" (GIGE-MEL-011 "Real GVSP"). This was a true observation,
+  but it was presented as loopback evidence. The 255.255.255.255 socket is
+  wildcard-bound.
+- "Discovery broadcasts therefore never leave loopback" (integration guide,
+  fixture header). This is true of the **client's** discovery only.
+- The socket check `require_loopback_only_sockets()` (PR description: "every
+  socket the process owns is on loopback"). It accepted **any** socket on
+  255.255.255.255, regardless of owner, port or options. It has been replaced.
+- "TSan: … the loopback-only suppression file" (heading below). The file is
+  specific to the loopback **executable**. The phrase does not describe
+  network confinement. The TSan decision and its limitation are unchanged.
+
+### Pinned SDK behavior (verified)
+
+The pinned `src/arvgvfakecamera.c` was downloaded from GitHub at commit
+`97ff5e330919d7a44b871df4eda669feeafdf342`. It is byte-identical (SHA-256
+`2a7366a77e15…40ef8de37`) to the file in the checksum-verified tarball
+(`246deaa0…51bf`). In `arv_gv_fake_camera_start()`, lines 516-537 create:
+
+| Socket | Pinned lines | Bound to | Observed options |
+| --- | --- | --- | --- |
+| A. GVCP | 518-520 | 127.0.0.1:3956 | no `SO_REUSEADDR`/`SO_REUSEPORT`, no device |
+| B. GVSP output | 516-517 | 127.0.0.1:kernel-assigned (e.g. 43201) | no reuse, no device |
+| C. Global discovery | 522-526 | **255.255.255.255:3956** | `SO_REUSEADDR=1`, `SO_REUSEPORT=1` (GIO `g_socket_bind(…, allow_reuse=TRUE)`), **no `SO_BINDTODEVICE`** |
+| D. Subnet discovery | 530-536 | — | **not created**: `lo`'s `ifu_broadaddr` is 127.0.0.1, which equals the GVCP address (`src/arvnetwork.c:380-381`) |
+
+`arv_gv_fake_camera_stop()` (lines 571-591) joins the simulator thread, then
+closes A, C and B.
+
+**Linux semantics.** ip(7) on this host says: "INADDR_BROADCAST
+(255.255.255.255) has the same effect on bind(2) as INADDR_ANY for historical
+reasons." Kernel v6.12 `inet_bind()` stores the bound address as the receive
+address, and `__udp_is_mcast_sock()` checks a device only if
+`SO_BINDTODEVICE` is set. The following were executed locally with
+out-of-repository probes:
+
+- `/proc/net/udp` shows `FFFFFFFF:…` and `getsockname()` returns
+  255.255.255.255, **not** 0.0.0.0;
+- without reuse, 255.255.255.255:P conflicts with 0.0.0.0:P and with
+  255.255.255.255:P, but not with 127.0.0.1:P;
+- the socket received a limited broadcast sent from 127.0.0.1 via `lo`;
+- the pinned simulator answered a GVCP READREG sent from 127.0.0.1 to
+  255.255.255.255:3956. The reply came from 127.0.0.1:3956 with value
+  127.0.0.1, so C is a live control endpoint;
+- it did **not** answer a unicast to the host's own non-loopback address.
+
+No datagram was sent to or from an external interface or another host. The
+host firewall could not be read without root, and none is relied on.
+
+**Distinctions.**
+
+- *Intended outgoing traffic is loopback.* The client's discovery sockets
+  are bound to 127.0.0.1, and `ip route get 255.255.255.255 from 127.0.0.1`
+  gives `dev lo`. GVCP and GVSP use 127.0.0.1 only.
+- *The binding scope is wildcard.* C is bound on all interfaces of the
+  network namespace for each simulator's lifetime.
+- *Unsolicited non-loopback reception is possible.* A GVCP datagram addressed
+  to 255.255.255.255:3956 that reaches this host on any interface can be
+  delivered to C. The simulator would answer it.
+
+### Audit and control results
+
+The audit contract is described in
+[Socket audit](aravis-integration.md#socket-audit-contract-gige-mel-011-r1).
+The following are from the executed GCC dev run; inodes and ephemeral ports
+vary per run.
+
+- **After simulator start (A):** 3 UDP sockets owned:
+  - loopback-bound 2: `127.0.0.1:3956` and `127.0.0.1:43201`, both
+    `SO_REUSEADDR=0 SO_REUSEPORT=0`;
+  - documented global-discovery listener 1 (expected 1):
+    `255.255.255.255:3956 (inode 106881310, fd 5, UDP datagram,
+    SO_REUSEADDR=1, SO_REUSEPORT=1, SO_BINDTODEVICE=none)`;
+  - unexpected 0.
+
+  The exception was observed and attributed to `src/arvgvfakecamera.c:522-526`
+  and ip(7). `lo` broadcast is 127.0.0.1, so there is no subnet-discovery
+  socket. The listener is never counted as loopback.
+- **During GVCP/GVSP acquisition (C):** 5 sockets owned. Loopback-bound 4:
+  simulator GVCP and GVSP output, the client's GVCP socket and the client's
+  GVSP socket (the SCP0 port). Listener 1, unexpected 0.
+- **After client close (A):** only the simulator's 2 loopback sockets plus
+  the listener remain.
+- **After simulator destruction (every `finish()`, every case):** 0 UDP
+  sockets, listener 0 (expected 0), unexpected 0, and the recorded inodes are
+  gone. `bind(127.0.0.1:3956)` and a no-reuse `bind(255.255.255.255:3956)` both
+  succeed. The discovery interface is restored and read back.
+
+**Negative controls (case S, executed).** With the simulator running, each of
+the following was bound in this process in turn:
+
+- `0.0.0.0:43818` (no reuse);
+- `255.255.255.255:48706` (reuse);
+- a lookalike `255.255.255.255:3956` with the simulator's exact options.
+
+Each time the audit reported `unexpected 1 [<that socket>]` and still showed
+`documented simulator global-discovery listener 1 [255.255.255.255:3956
+(inode …, fd 5 …)]`, giving `FAIL`, and the checked form threw. After each
+socket was closed the normal audit passed again. Seven forged variants of
+the listener (0.0.0.0, port 3957, a different inode, no `SO_REUSEPORT`,
+`SO_BINDTODEVICE=lo`, non-UDP, IPv6), as well as the real listener with no
+live simulator, all classified as `unexpected`. No datagram was sent.
+
+**Mutation controls (out-of-repository builds with the exact dev
+compile/link commands; the repository and build trees were not modified).**
+
+- *Blanket rule:* any 255.255.255.255 socket counted as the exception.
+  Case S fails: `classify_udp_socket(listener, nullptr) ==
+  SocketClass::unexpected`.
+- *Reviewed `abc63deb` rule:* 127.0.0.1 or 255.255.255.255 counted as
+  loopback. Case S fails at simulator start: "the global-discovery socket does
+  not classify as the documented exception".
+
+**External-holder control.** A separate socket held 255.255.255.255:3956
+(reuse) in another process. Scenario A then failed **before** starting the
+simulator: "UDP 255.255.255.255:3956 cannot be bound before the simulator
+starts: Address already in use …". After the holder was released, A passed.
+This shows that the start and release probes are namespace-wide.
+
+**Functional regression and sanitizers (executed, sequentially, after a full
+rebuild of every tree).**
+
+| Build | SDK-free CTest | SDK-enabled CTest | `aravis_gige_loopback_contract` |
+| --- | --- | --- | --- |
+| GCC dev | **8/8** | **14/14** | 10/10 transport + S, 42.6 s |
+| GCC Release | **8/8** | **14/14** | 10/10 + S |
+| Clang 19 dev | **8/8** | **14/14** | 10/10 + S |
+| ASan/UBSan (`detect_leaks=1:halt_on_error=1`, UBSan `halt_on_error=1`) | **8/8** | **14/14** | 10/10 + S, no report |
+| TSan (`halt_on_error=1`, the unchanged committed suppression files) | **8/8** | **14/14** | 10/10 + S, no report |
+
+No GLib/Aravis warning or critical was printed. The executable aborts on
+any. The ten transport groups and their evidence are unchanged: real GVCP
+configuration, real GVSP pixels and native frame IDs, lease ownership,
+cancellation and restart, `capture_one()`/`time_probe()`, positive
+virtual-clock MEL publication, negative production-timestamp admission, and
+simulated packet loss. CTest totals are unchanged: SDK-free **8**,
+SDK-enabled **14**. S runs inside the existing CTest entry.
+
+**Bounded repetition.** The full loopback executable ran 3× (GCC dev) and
+2× (TSan) after the matrix. Every run passed 10 transport scenarios + S, and
+every listener was identified and released.
+
+**Other checks (executed):**
+
+- `vendor_upstream.py --verify` (97 files) and `verify_json.py` (2 files),
+  both offline;
+- all 29 package-isolation verifier tests;
+- the real `verify_package_isolation.py` on fresh dev, Release and Clang
+  SDK-enabled installs: all six checks `ok`, ending "package isolation
+  verified", including the separately built consumer;
+- the SDK-free installed consumers (dev, Release, Clang) pass, and the
+  SDK-free and SDK-enabled install file sets are identical;
+- `gige_mel_aravis_diagnostic --help` in all five SDK builds;
+- `git diff --check`.
+
+### Remaining limitations
+
+- **The exposure is not removed.** While a simulator is alive, about 45 s per
+  full run, a wildcard GVCP listener on 255.255.255.255:3956 exists. It
+  answers GVCP discovery and register/memory commands that reach it, and
+  accepts writes while no controller holds CCP.
+- Nothing shows the simulator was **unreachable** through another interface
+  while it ran. The cleanup checks show release only.
+- No `SO_BINDTODEVICE`, network namespace, firewall rule or VM is
+  implemented or validated. The host firewall was not read. **GitHub-hosted
+  runners are not claimed to isolate the listener.** Their isolation was not
+  verified.
+- Remote delivery was not tested: no datagram was sent from another host or
+  received on an external interface.
+- The audit covers sockets owned by **this** process. The namespace-wide
+  bind probes cover only port 3956 on 0.0.0.0/255.255.255.255.
+- **Owner acceptance of this test-only network exception is pending.**
+- The TSan limitation of GIGE-MEL-011 (`called_from_lib` blind spot at the
+  GigE buffer-handoff boundary) is unchanged and still applies.
+
+## GIGE-MEL-011 loopback GigE Vision transport (2026-11-02)
+
+> **R1 note.** This historical record is kept unchanged. Its statements that
+> the sockets were "on 127.0.0.1 or 255.255.255.255" and that discovery is
+> loopback-only describe the client and the intended traffic. They are **not**
+> network-isolation evidence, and are superseded by
+> [GIGE-MEL-011-R1](#gige-mel-011-r1-simulator-wildcard-discovery-listener-2026-11-02).
+> The transport, sanitizer and TSan results below remain valid.
+
+**Starting point.** `origin/main` was freshly fetched and verified before
+work began. It had not advanced from the task's expected revision. The work
+was done in a clean, isolated worktree on branch
+`feature/gige-mel-011-gvsp-loopback`.
+
+| Item | Commit | Tree |
+| --- | --- | --- |
+| `origin/main` (includes merged PR #10) | `e3e1b44b2ff7234c0758e090f645230df79c0645` | `0077427592fcd87f822af166edfd0a50754b51a3` |
+
+**Scope.** These files were added, all test-only and uninstalled:
+
+- `tests/aravis_gige_loopback_contract.cpp`;
+- `tests/support/aravis_gv_loopback.{hpp,cpp}`;
+- `tests/support/tsan_gige_loopback_sdk.cpp`.
+
+These were changed:
+
+- `cmake/GigeMelAravis.cmake`, which adds one test target and the CTest entry
+  `aravis_gige_loopback_contract` (TIMEOUT 600,
+  `RESOURCE_LOCK gige_gvcp_loopback_3956`);
+- the documentation.
+
+These are unchanged:
+
+- `include/gige_mel/*`, `src/provider.cpp` and every file under `src/`;
+- the production `FrameTimestamp{}`, common timestamp admission, the Aravis
+  acquisition/recovery state machine (GIGE-MEL-009-R1) and lease ownership;
+- `tools/aravis_diagnostic.cpp`, the factories and `getAPI_Manager()`;
+- `tests/support/aravis_virtual_clock.*` and `aravis_fake_support.*`, both
+  reused unchanged;
+- `tests/support/tsan_uninstrumented_sdk.cpp` and its two patterns, used by the
+  three earlier executables;
+- the workflow, presets and `TSAN_OPTIONS`;
+- the SDK pin, provisioning, manifests, verifier and its 29 tests, and
+  Python 3.9.
+
+No genuine network-path defect was reproduced, so no production code changed.
+
+**Counts.** SDK-free CTest: **8** (unchanged). SDK-enabled CTest: **14** (13
+before).
+
+### Pinned sources
+
+`src/arvgvfakecamera.{c,h}`, `src/arvgvinterface.c`, `tests/fakegv.c`,
+`src/arvgvstream.c`, `src/arvgvdevice.c`, `src/arvfakecamera.c` and
+`src/arvnetwork.c` in the working extraction are byte-identical to a fresh
+extraction of the checksum-verified archive (SHA-256 `246deaa0…51bf`, release
+commit `97ff5e33…`). For example, `arvgvfakecamera.c` is `2a7366a7…`,
+`arvgvinterface.c` `37463c8f…` and `fakegv.c` `912cc10a…`.
+
+### Environment (executed locally)
+
+- Linux 6.12, glibc 2.41, GCC 14.2.0, Clang 19.1.7, CMake 3.31.6, Ninja,
+  Python 3.13.5.
+- Aravis 0.8.36 at `/tmp/gm8/aravis-prefix`, uninstrumented, built by
+  `scripts/provision_aravis.sh` with packet sockets disabled.
+- System GLib 2.84.4.
+- `lo` = 127.0.0.1/8. Ordinary user; no capabilities.
+- Every SDK-enabled binary resolves `libaravis-0.8.so.0` to
+  `/tmp/gm8/aravis-prefix/lib/libaravis-0.8.so.0` (`ldd` and the test's own
+  `dladdr` print).
+- The adapter is the static `gige_mel_aravis` archive of this commit, linked
+  into each test binary of the listed build directory. `ldd` does not show it.
+
+### Results
+
+| Configuration | SDK-free CTest | SDK-enabled CTest | `aravis_gige_loopback_contract` |
+| --- | --- | --- | --- |
+| GCC dev | **8/8** | **14/14** | 10/10 scenarios, 42.5 s |
+| GCC Release | **8/8** | **14/14** | 10/10 |
+| Clang 19 dev | **8/8** | **14/14** | 10/10 |
+| ASan/UBSan (`detect_leaks=1:halt_on_error=1`, UBSan `halt_on_error=1`) | **8/8** | **14/14** | 10/10, no report |
+| TSan (`halt_on_error=1`) | **8/8** | **14/14** | 10/10, with the suppression caveat below |
+
+The SDK-enabled suite takes about 65 s in each configuration. The loopback
+test is about 43 s of that; most of it is bounded 1 s SDK discovery polls and
+real 25 Hz frame periods. This fits within the 25-minute hosted job timeout.
+
+The following were also executed:
+
+- `vendor_upstream.py --verify` (97 files) and `verify_json.py` (2 files),
+  both offline;
+- all 29 package-isolation verifier tests;
+- `git diff --check`.
+
+The real package-isolation verifier ran on fresh SDK-enabled installs of the
+dev, Release and Clang builds, with `PKG_CONFIG_PATH` unset. Each install
+passed all six checks and printed "package isolation verified":
+
+- `adapter-sdk`: `aravis_adapter_tests` loads the pinned SDK;
+- `provider-deps`: 6 dependencies, none from Aravis/GLib;
+- `installed-names`: 157 installed paths;
+- `installed-text`: 97 files;
+- `installed-symbols`: 2 binaries;
+- `consumer`: the separately built consumer.
+
+The SDK-free install's separately built consumer also passed for the same
+three builds. The installed file list is identical, path for path, to the
+earlier `/tmp/gm8/inst-ar` SDK-enabled install: no loopback, simulator or test
+file is installed. `gige_mel_aravis_diagnostic --help` passed in every build.
+
+### Network evidence (from the executed GCC dev run)
+
+- **Simulator.** `arv_gv_fake_camera_new("127.0.0.1", "GVTest")` started
+  (`is_running`) with an `ArvFakeCamera` underneath. UDP 127.0.0.1:3956 was
+  free before start and `EADDRINUSE` after it.
+- **Discovery.** Restricted to `lo`, exactly one device was found:
+  `Aravis-Fake-GVTest`, "Aravis Fake serial GVTest (GigEVision 127.0.0.1)".
+  Device address 127.0.0.1:3956; native types `ArvGvDevice`/`ArvGvStream`.
+- **Real GVCP.** The server's CCP was nonzero while the client was open and 0
+  after close. A server-memory nonce (`0xC0FFEE01`, then `…02`) was read back
+  through the client's `TestRegister` feature. Configuration writes appeared in
+  the server's registers. The acquisition register went 0 → 1 → 0 on
+  `AcquisitionStart`/`Stop`.
+- **Real GVSP.** The client programmed SCDA0 to 127.0.0.1 and SCP0 to a port
+  owned by this process (for example 46871); the server's packet size was 1 400.
+  Eight frames arrived as 40 received GVSP packets in 8 completed SDK buffers
+  (leader, 3 payload, trailer each), with 0 failures and 0 missing packets.
+  Every one of the 3 072 pixels per frame matched `(x + y + id) % 255`. Native
+  IDs started at 65 401, the pinned initial counter. After stop, SCP0 was 0 and
+  the client's UDP socket was closed. Throughout, every UDP socket the process
+  owned was on 127.0.0.1 or 255.255.255.255.
+- **Lifetime.** `request_stop`, `stop`, an exception unwind and `close` each
+  returned a blocked network receive in 4 ms. The stream was finalized before
+  the device. A held lease's bytes stayed unchanged after stop and close. An
+  old lease released during a new run freed its buffer and did not requeue
+  it (the pool stayed at 4).
+- **Diagnostics.** `capture_one()` wrote `P5\n64 48\n255\n` plus 3 072 bytes,
+  3 085 in total, with every pixel matching. One `time_probe()` frame line, as
+  executed:
+
+  ```text
+  {"record":"frame","index":0,"device_id":"Aravis-Fake-GVTest","interface":"gige_vision",…,
+   "stream_generation":13,"native_frame_id":65401,"width":64,"height":48,"offset_x":8,"offset_y":4,
+   "sdk_buffer_timestamp_ns":1793556764265116000,"sdk_system_timestamp_ns":1793556764265195000,
+   "actual_stream_timestamp_path":"unverified","descriptor_timestamp_valid":false,"timestamp_qualified":false,…}
+  ```
+
+  The header had `diagnostic_tick_frequency_hz` 1 000 000 000, equal to the
+  server's bootstrap registers. That still does not prove the stream's own
+  read. The GenICam XML SHA-256 and size equalled those the simulator serves.
+  The buffer timestamp is a conversion of the simulator's host-wall-clock
+  leader value. It is **not** integration start.
+- **MEL.** With the test-only clock, 5 network frames (IDs 65401…65409) were
+  published. Each destination equalled the SDK lease bytes and the oracle, and
+  `systemTime` was the declared virtual value (5 000 000 000 000 ns, …). Four
+  frames were dropped while all four destinations were held, and held bytes
+  were unchanged. Without the clock (control), 6 genuine GVSP frames were
+  rejected with "timestamp contract", with 0 callbacks and sentinel
+  destinations unchanged.
+- **Simulated loss.** At `gvsp-lost-ratio` 0.0: 4 frames from 20 packets. At
+  1.0: 0 packets and 0 frames received, 3 bounded 400 ms timeouts, a prompt
+  cancel, and the pool held at 4 buffers. Through the provider, nothing was
+  published and destinations were unchanged.
+- **Failure diagnostics (control).** With 127.0.0.1:3956 held by another
+  socket, the test failed **immediately** with "UDP 127.0.0.1:3956 (GVCP) cannot
+  be bound before the simulator starts: Address already in use …. Not
+  skipped." It did not skip and did not fall back to the in-process Fake.
+
+### Focused repeats
+
+Each focused scenario ran three times with `FILTER 3`, in one process per
+filter, after the matrix:
+
+| Build | A | C | D1 | D2 | M1 | M2 | L |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GCC dev | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 (+3) | 3/3 | 3/3 |
+| TSan (`halt_on_error=1`, committed suppression file) | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 (+3) | 3/3 | 3/3 |
+
+The substring filter `"L "` also matches "M1 … MEL publication", so M1 ran
+three further times inside the L process. That gives 6 passes in that log and
+6 M1 runs in total.
+
+### TSan: investigation and the loopback-only suppression file
+
+**Reproduction.** The same TSan objects were relinked locally into a control
+binary that used the existing `tsan_uninstrumented_sdk.cpp`, with only the two
+patterns, instead of the new file. One full run with `halt_on_error=0` passed
+all 10 scenarios functionally but printed **68** reports (`rc=66`). Each one
+was classified by its two access stacks:
+
+| Count | Side 1 | Side 2 | Meaning |
+| --- | --- | --- | --- |
+| 20 | `recv`/`poll` from `libgio`/`libaravis` (`_send_cmd_and_receive_ack`), heartbeat thread | the same calls on the caller's GVCP feature I/O | `ArvGvDevice` GVCP buffer and poll fd, both under `io_data->mutex` (pinned `src/arvgvdevice.c:138-180`). SDK-internal on both sides |
+| 35 | `write`/`close` from `libglib`, reached from the project's `unique_ptr::reset` of the last SDK reference (`retire_locked()`/`close()`) | `eventfd` from `libglib` on the heartbeat/receiver thread | GCancellable descriptors during SDK finalization (`g_cancellable_cancel` versus `make_pollfd`/`release_fd`), serialized by GCancellable's GMutex and `g_thread_join`. SDK-internal on both sides |
+| 13 | **project** read of leased bytes after `arv_stream_timeout_pop_buffer()`: test `pixels_match`/`inspect`, production `write_pgm`, and the provider's destination `memcpy` | `memcpy` from `libaravis` `_loop` on the `arv_gv_stream` thread (pinned `src/arvgvstream.c:577`) | **The SDK buffer-handoff boundary.** The buffer reaches the caller through `GAsyncQueue` (a GMutex) only after completion, and the SDK ignores packets for a completed frame. This is the same boundary the two GIGE-MEL-009 patterns cover for the Fake stream; on GigE the writer is `memcpy`, so they do not match |
+
+On Linux a GMutex is an inline futex that TSan cannot see. No report has a
+project access on **both** sides. These reports were investigated, not
+discovered defects. They do not prove that the SDK boundary is race-free.
+
+**Decision.** The shared file and its two patterns are unchanged for the
+three earlier executables. The loopback executable alone links
+`tests/support/tsan_gige_loopback_sdk.cpp`. It keeps the same two patterns
+and adds `called_from_lib:` for `libaravis-0.8.so.0`, `libglib-2.0.so.0`,
+`libgio-2.0.so.0` and `libgobject-2.0.so.0`. This is not a whole-report `race:`
+pattern. TSan ignores the memory accesses and synchronization of intercepted
+calls made from those four libraries.
+
+**What it costs (stated as a limitation).** For this executable, no race in
+which one side is such an SDK-internal libc access is reported, including the
+SDK writing a buffer the project reads (group 3). That blind spot is
+**wider** than the two existing patterns. A green TSan run of
+`aravis_gige_loopback_contract` is therefore not race coverage of the GigE
+buffer-handoff boundary, and it is not instrumented-SDK coverage. That
+boundary is asserted functionally instead: held-lease bytes are unchanged
+after stop, while held and across reopen; every pixel is checked; and a
+retired buffer is never requeued.
+
+**Controls (executed).**
+
+- An intentional project-only data race, linked with
+  `tsan_gige_loopback_sdk.cpp`, still halted with `halt_on_error=1` (`rc=66`).
+- The probe of the same GigE cycle with the two existing patterns
+  reproducibly gave 6 reports in each of 3 runs; with the four
+  `called_from_lib` entries added it gave 0 in each of 3 runs.
+
+**Executed result.** With the committed suppression file and
+`TSAN_OPTIONS=halt_on_error=1`, the full TSan SDK-enabled suite passed 14/14,
+including the loopback test. It passed again after the final comment-only
+rebuild.
+
+### What this does not establish
+
+- No physical camera, firmware, NIC, switch, MTU/jumbo frame, firewall,
+  multi-interface host or real packet loss/reordering is qualified. The pixels
+  are the simulator's synthetic ramp.
+- The controller privilege, heartbeat and stream-channel behavior observed
+  are the pinned simulator's own implementation.
+- Packet resend is not exercised: the simulator advertises no resend
+  capability, and scenario C asserts this. No exact lost-packet or
+  resend-event count is claimed.
+- A timeout under simulated loss is not evidence of disconnection.
+- No exposure timing, integration start, PTP or UTC is established. The GVSP
+  leader timestamp derives from the simulator's host wall clock. The
+  diagnostic reports the GigE path as `"unverified"`. Production descriptors
+  stay `FrameTimestamp{}`.
+- Positive MEL publication used the **test-only** virtual clock. Production
+  Aravis-backed MEL Image publication is still not enabled.
+- Hosted CI results are recorded in the PR, not here. Local execution does not
+  imply a GitHub Actions result.
+
 ## GIGE-MEL-010-R1 review corrections (2026-11-01)
 
 **Starting point.** This is one ordinary corrective commit on
