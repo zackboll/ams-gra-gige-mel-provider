@@ -28,6 +28,7 @@ message(STATUS "Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION} (internal camera-con
 add_library(gige_mel_aravis STATIC
   src/backends/aravis/aravis_backend.cpp
   src/backends/aravis/aravis_capture.cpp
+  src/backends/aravis/aravis_time_probe.cpp
   src/backends/aravis/camera_profile.cpp)
 target_include_directories(gige_mel_aravis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/aravis)
 target_link_libraries(gige_mel_aravis PUBLIC gige_mel_backend PkgConfig::GIGE_MEL_ARAVIS
@@ -60,8 +61,21 @@ if(BUILD_TESTING)
     Threads::Threads)
   add_test(NAME aravis_stream_contract COMMAND aravis_stream_contract_tests)
 
+  # GIGE-MEL-010: native timestamp observation, the shared time-probe routine
+  # against the private Fake, and positive/negative MEL publication through a
+  # TEST-ONLY virtual integration-start clock (tests/support only; never
+  # linked into the adapter library, provider or diagnostic).
+  add_executable(aravis_timestamp_contract_tests tests/aravis_timestamp_contract.cpp
+    tests/support/aravis_virtual_clock.cpp tests/support/tsan_uninstrumented_sdk.cpp)
+  target_include_directories(aravis_timestamp_contract_tests SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
+  target_link_libraries(aravis_timestamp_contract_tests PRIVATE gige_mel_provider gige_mel_aravis_test_support
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME aravis_timestamp_contract COMMAND aravis_timestamp_contract_tests)
+
   # --help must succeed without device I/O (no network discovery is started).
   add_test(NAME aravis_diagnostic_help COMMAND gige_mel_aravis_diagnostic --help)
   set_tests_properties(aravis_adapter aravis_mel_embedding aravis_stream_contract aravis_diagnostic_help
     PROPERTIES TIMEOUT 120)
+  set_tests_properties(aravis_timestamp_contract PROPERTIES TIMEOUT 600)
 endif()

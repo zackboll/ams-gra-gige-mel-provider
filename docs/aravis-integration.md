@@ -1,4 +1,4 @@
-# Optional Aravis adapter: camera control (GIGE-MEL-008) and source acquisition (GIGE-MEL-009)
+# Optional Aravis adapter: camera control (GIGE-MEL-008), source acquisition (GIGE-MEL-009) and timestamp provenance (GIGE-MEL-010)
 
 This is the project's first integration with a real camera SDK. It is an
 **internal, optional, uninstalled** adapter built on the existing
@@ -10,9 +10,18 @@ objects, cancellation, and a direct-capture diagnostic. See
 [Source acquisition (GIGE-MEL-009)](#source-acquisition-gige-mel-009).
 
 Every frame carries the default, **invalid** `FrameTimestamp{}`, so the common
-MEL provider rejects it: there is no successful Aravis MEL Image publication.
+MEL provider rejects it: there is no production Aravis MEL Image publication.
 The adapter is not an installed or selectable image backend, and it does not
 qualify any physical camera.
+
+GIGE-MEL-010 adds two things:
+
+- **Read-only observation** of the raw SDK timestamps.
+- A **test-only virtual-clock** fixture. With it, the same genuine SDK pixels
+  reach real MEL Image callbacks. This is test qualification of the
+  publication path, not timestamp qualification.
+
+See [Native timestamp provenance (GIGE-MEL-010)](#native-timestamp-provenance-gige-mel-010).
 
 > **Superseded status (GIGE-MEL-008 text below).** Passages written for
 > GIGE-MEL-008 that say `create_stream()` returns `unsupported`, that Image
@@ -68,17 +77,18 @@ ctest --test-dir build/aravis-dev --output-on-failure
 ```
 
 With the option ON, a missing or different SDK is a clear configuration error.
-The SDK-enabled build adds four CTest entries (three before GIGE-MEL-009) to
-the eight default ones. All of these targets are internal and are not
-installed or exported:
+The SDK-enabled build adds five CTest entries to the eight default ones (13 in
+total; four before GIGE-MEL-010, three before GIGE-MEL-009). All of these
+targets are internal and are not installed or exported:
 
 | Target | Purpose |
 | --- | --- |
-| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics (`aravis_backend.cpp`), SDK-free profile translation and frame validation (`camera_profile.cpp`), and the shared capture routine (`aravis_capture.cpp`) |
+| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics (`aravis_backend.cpp`), SDK-free profile translation and frame validation (`camera_profile.cpp`), and the shared capture (`aravis_capture.cpp`) and time-probe (`aravis_time_probe.cpp`) routines |
 | `gige_mel_aravis_test_support` | `tests/support/aravis_fake_support.*`: test-only Fake interface selection |
 | `aravis_adapter_tests` → CTest `aravis_adapter` | Direct adapter scenarios against the real SDK |
 | `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration and negative timestamp-admission probe |
 | `aravis_stream_contract_tests` → CTest `aravis_stream_contract` | GIGE-MEL-009 acquisition contract against the real SDK Fake stream |
+| `aravis_timestamp_contract_tests` → CTest `aravis_timestamp_contract` | GIGE-MEL-010: native timestamp observation, the time-probe routine against the Fake, and positive/negative MEL publication through the **test-only** virtual clock (`tests/support/aravis_virtual_clock.*`) |
 | `gige_mel_aravis_diagnostic` → CTest `aravis_diagnostic_help` | Diagnostic tool (`--help` performs no device I/O) |
 
 ```sh
@@ -87,6 +97,7 @@ build/aravis-dev/gige_mel_aravis_diagnostic list              # GigE discovery (
 build/aravis-dev/gige_mel_aravis_diagnostic inspect DEVICE_ID  # read-only
 build/aravis-dev/gige_mel_aravis_diagnostic apply DEVICE_ID W H X Y RATE_HZ EXPOSURE_NS
 build/aravis-dev/gige_mel_aravis_diagnostic capture DEVICE_ID OUTPUT.pgm   # one frame (GIGE-MEL-009)
+build/aravis-dev/gige_mel_aravis_diagnostic time-probe DEVICE_ID COUNT OUTPUT.jsonl  # raw SDK timestamps (GIGE-MEL-010)
 ```
 
 `inspect` prints the loaded SDK version, identity strings, native values and
@@ -802,7 +813,10 @@ adapter does not do any of the following:
 - subtract exposure from a receive time;
 - infer UTC or PTP from a number.
 
-`backend.hpp` is unchanged. Raw SDK timestamps are neither exposed nor printed.
+`backend.hpp` is unchanged. *(GIGE-MEL-010: raw SDK timestamps are now
+observable through the private adapter function
+`receive_with_native_timestamps()` and the `time-probe` diagnostic. They are
+still never placed in `FrameDescriptor::timestamp`.)*
 
 The common provider accepts only valid integration-start timestamps in its
 declared domain. It therefore **correctly rejects** every Aravis frame. Its
@@ -885,8 +899,11 @@ by Aravis's `GAsyncQueue` buffer handoff, is an inline futex rather than
 correctly locked handoffs (`g_queue_pop_tail`, `arv_buffer_set_n_parts`) as
 races.
 
-The two SDK-driving test executables link
-`tests/support/tsan_uninstrumented_sdk.cpp`. Its
+The SDK-driving test executables link
+`tests/support/tsan_uninstrumented_sdk.cpp`. Two did at GIGE-MEL-009; since
+GIGE-MEL-010 there are three, with `aravis_timestamp_contract_tests` added.
+The same file and the same two patterns are used, so the reporting blind spot
+below now also applies to that executable. Its
 `__tsan_default_suppressions()` lists exactly those two patterns:
 `race:g_queue_pop_tail` and `race:arv_buffer_set_n_parts`. `TSAN_OPTIONS`,
 presets and CI lanes are unchanged.
@@ -910,6 +927,407 @@ the GIGE-MEL-009 and GIGE-MEL-009-R1 records in
 checked" overstated this. Project code is instrumented, but reports that
 involve these frames are not delivered.
 
+## Native timestamp provenance (GIGE-MEL-010)
+
+GIGE-MEL-010 **observes** the SDK's timestamps and exercises positive MEL Image
+publication of genuine Aravis pixels under a **test-only virtual clock**. It
+qualifies no camera timestamp. Every production Aravis frame still carries
+`FrameTimestamp{}`, and `src/provider.cpp` is unchanged.
+
+| Milestone | Status |
+| --- | --- |
+| Native Mono8 source acquisition | Implemented, Fake-tested (GIGE-MEL-009) |
+| Raw SDK timestamp observation | **Implemented** (read-only adapter path and `time-probe`) |
+| Positive Aravis-pixel MEL publication under virtual test time | **Test-qualified** (`aravis_timestamp_contract`, test-only clock) |
+| Real Aravis integration-start timestamp | **Not qualified** |
+| Production Aravis-backed MEL Image publication | **Not enabled** |
+| Physical-camera / GVSP transport qualification | **Not performed** |
+
+### What the pinned SDK actually reports
+
+The citations below are to the pinned release commit
+`97ff5e330919d7a44b871df4eda669feeafdf342`. All nine cited files in the
+checksum-verified release archive were compared with that commit and have
+identical Git blob IDs.
+
+| Source | Behavior (source-backed) |
+| --- | --- |
+| `src/arvbuffer.c:379-398` | `arv_buffer_get_timestamp()` returns `priv->timestamp_ns` as `guint64`. The documentation calls it the "camera timestamp", but adds that "not all devices provide reliable timestamp". It names no event (exposure start or end, readout, transmission). |
+| `src/arvbuffer.c:401-417` | `arv_buffer_set_timestamp()` lets any caller overwrite the value. The adapter never calls it. |
+| `src/arvbuffer.c:420-437` | `arv_buffer_get_system_timestamp()` is "the system timestamp for when the frame was received". It is a reception time, not integration start. |
+| `src/arvfakecamera.c:755`, `:786-787` | The Fake fill sets `timestamp_ns = g_get_real_time() * 1000`, then sets `system_timestamp_ns` to that same value. This is the host **wall clock** (`CLOCK_REALTIME`), sampled while filling the buffer. It is not steady, not camera time, and not exposure start. |
+| `src/arvfakecamera.c:214-236`, `:242-247` | Fake frame pacing sleeps toward the next wall-clock multiple of the frame period. No exposure is simulated in time. The exposure value only scales the pixel ramp. |
+| `src/arvfakestream.c:85-101` | The Fake stream thread waits, pops an input buffer, fills it with `arv_fake_camera_fill_buffer()` and pushes it to the output queue. No GVSP is involved. |
+| `src/arvfakeinterface.c:78`, `src/arvfakedevice.c:202` | Each open of the Fake interface creates a new `ArvFakeCamera` with default registers. |
+| `src/arvfakecamera.c:1074-1075` | The Fake *camera object* advertises a 1 GHz tick frequency in its GVBS registers. That value is used only by the separate `arv-fake-gv-camera` GigE simulator. The in-process `ArvFakeDevice` is not an `ArvGvDevice`, so the supported accessor below is not available for it. |
+| `src/arvgvstream.c:458` | GigE: `system_timestamp_ns = g_get_real_time() * 1000LL` when the leader packet is processed. This is host wall-clock reception time. |
+| `src/arvgvstream.c:466`, `src/arvgvspprivate.h:389-401` | GigE: the 64-bit raw tick value is read from the GVSP **leader** (`timestamp_high`/`timestamp_low`). |
+| `src/arvgvstream.c:480-484` (also `:489-493`, `:522-528`) | GigE: if the stream's tick frequency is non-zero, the SDK converts with `arv_gvsp_timestamp_to_ns()`. **Otherwise it substitutes the host reception wall-clock time.** Unknown payload types always use the host time. |
+| `src/arvgvspprivate.h:576-591` | The conversion is unchecked `guint64` arithmetic: `ts / f * 1e9 + (ts % f) * 1e9 / f`. It returns 0 when the frequency is below 1. |
+| `src/arvgvstream.c:1613`, `:1640` | The tick frequency is read **once**, at stream construction, through `arv_gv_device_get_timestamp_tick_frequency()`. A read error is ignored, giving 0 and therefore the host fallback. |
+| `src/arvgvdevice.c:565-591`, `src/arvgvcpprivate.h:116-117` | That accessor reads GVBS bootstrap registers `0x093C`/`0x0940`, the timestamp tick frequency high and low words. |
+| `src/arvgvsp.c:68-87`, `src/arvgvfakecamera.c:352-354` | The SDK's own GigE *simulator* writes `arv_buffer_get_timestamp()` of its Fake-filled buffer into the leader. Even that simulated "camera" timestamp is therefore host wall-clock time. |
+
+**What these facts do and do not prove.** A non-zero frequency makes a numeric
+conversion possible. It does **not** prove any of the following:
+
+- that the leader timestamp marks integration start (GigE Vision does not
+  require a specific event);
+- what the epoch is, whether it is UTC, or that PTP is synchronized;
+- that the clock is continuous across reset, reconnection or restart;
+- that the value is physically accurate.
+
+A frequency of zero means the "camera" timestamp is really host reception
+time. Provenance claims come from the source above, never from comparing two
+observed numbers. Equal values on the Fake are *consistent with* lines
+786-787, but they are not the evidence.
+
+### Read-only observation path
+
+`aravis::receive_with_native_timestamps(stream, timeout)` (in
+`aravis_backend.hpp`) is **exactly** `IFrameStream::receive()`. The deadline,
+validation, pool accounting, lease owner and queue/release order are all the
+same. It also returns a `NativeTimestampObservation` for the buffer behind the
+returned lease:
+
+- the SDK frame ID, stream generation, and image region (width, height,
+  offset X/Y);
+- `arv_buffer_get_timestamp()` and `arv_buffer_get_system_timestamp()`,
+  copied as unconverted `uint64_t`. No signed-nanosecond conversion is done,
+  so no overflow can occur.
+
+Design constraints:
+
+- The observation is read on the **receiving thread**, never on the SDK
+  receiver thread. It is read after the production validator accepted the
+  buffer and before ownership moves to the lease.
+- It uses four constant-time public getters, and only when requested.
+- No callback, hook, global state or allocation is involved. The values
+  travel only in the call's return value.
+- It does not use `TestHooks`, so it cannot be confused with the test-only
+  fault seams. The decoded-facts seam cannot alter the observation, which is
+  read from the SDK buffer directly.
+- `FrameDescriptor::timestamp` is assigned `FrameTimestamp{}` before
+  observation and is never derived from it.
+- Discovery settings, interface enable flags and SDK-global callbacks are not
+  touched.
+
+`aravis::read_timing_context(device)` reads the following, without writing
+anything:
+
+- the native device's GObject type (`ArvGvDevice`, `ArvFakeDevice`);
+- the implemented identity features (`DeviceVendorName`, `DeviceModelName`,
+  `DeviceSerialNumber`, `DeviceVersion`, `DeviceFirmwareVersion`,
+  `DeviceManufacturerInfo`, `DeviceID`);
+- the byte size and SHA-256 of the GenICam XML the SDK loaded
+  (`arv_device_get_genicam_xml()`);
+- **only for an `ArvGvDevice`**, the tick frequency through the supported
+  accessor above.
+
+A failed query is an error, never treated as absence. The frequency is this
+diagnostic's own pre-stream read, not the value the SDK stream samples during
+its construction (GIGE-MEL-010-R1; see
+[the `time-probe` provenance fields](#diagnostic-tick-frequency-observation-versus-the-streams-own-read)).
+No frequency is ever
+derived from frame intervals.
+
+### `time-probe` diagnostic command
+
+```sh
+build/aravis-dev/gige_mel_aravis_diagnostic time-probe DEVICE_ID COUNT OUTPUT.jsonl
+```
+
+- **Interface:** the production GigE Vision interface only, with exact device
+  ID selection and no Fake fallback.
+- **Validation before any device I/O:**
+  - `COUNT` must be a decimal integer in **[1, 32]**;
+  - `DEVICE_ID` and `OUTPUT.jsonl` must be non-empty;
+  - `OUTPUT.jsonl` is created **exclusively**: an existing file is never
+    overwritten, and the command fails before opening the device.
+- **Bounds:** one overall receive deadline of **10 s** for all frames, which
+  is also the maximum the routine accepts. Each JSONL line is at most 4096
+  bytes, so the file holds at most 34 lines.
+- **Read-only:**
+  - it uses the current supported configuration and writes no feature;
+  - it changes no trigger, PTP, network or packet setting;
+  - it issues only `AcquisitionStart`/`AcquisitionStop`;
+  - each lease is released immediately.
+
+  Constructing a GigE stream still runs the SDK's own transport setup, which
+  this project does not control (`src/arvgvstream.c:1616-1620`, `:1670-1673`).
+  These are the stream destination address and port and, only when the
+  device reports none, a default packet size. This is the same set-up
+  `capture` already performs.
+- **Cleanup on every path (GIGE-MEL-010-R1).** Two RAII guards own the
+  resources as soon as each one exists:
+  - The **output guard** owns only a pathname that this call created with
+    `fopen("wx")`. It closes the descriptor exactly once. It removes the path
+    on every ordinary error return and during exception unwinding, until the
+    complete report has been written, flushed and closed. When exclusive
+    creation fails, the guard owns nothing, so an existing file is never
+    removed or changed.
+  - The **native session** owns the opened device and, once created, its
+    stream. It runs the established cleanup exactly once: `stop()`
+    (noexcept; retires the native stream and pool), destruction of the stream
+    wrapper, then `close()`. There is no second native stop and no
+    `arv_shutdown()`.
+
+  The JSONL report is still rendered and written only **after** a clean stop
+  and close. Error reporting:
+  - The first failure goes in `error`. An exception escaping `open()`,
+    acquisition, rendering or writing is caught and reported there as
+    "time probe failed: …". After an open, the message adds "the device was
+    stopped and closed". In all cases it ends "the output was removed".
+  - A stop or close failure is reported separately in `cleanup_error`. It
+    never replaces the first failure.
+  - When `open()` itself fails or throws, no device cleanup is invented.
+  - An allocation failure while composing a message may leave that message
+    incomplete. The guards still release the device and remove the output.
+- **Exit status:** 0 on success, 1 on any operational, output or cleanup
+  failure, 2 on usage errors.
+- **Shared code:** the logic is `aravis::time_probe()`
+  (`aravis_time_probe.cpp`). Tests call the same routine with the private
+  Fake backend; production interface selection is untouched.
+
+The output contract is schema `gige-mel.aravis-time-probe`, **version 2**
+(GIGE-MEL-010-R1). Version 1 is superseded. Its `tick_frequency_hz`,
+`tick_frequency_source` and GigE `sdk_buffer_timestamp_source` wording could
+be read as proof of the stream's timestamp path, so the meaning changed and
+the version was incremented.
+
+| Line | Fields |
+| --- | --- |
+| 1 `header` | `device_id`, `interface` (`gige_vision`/`fake`/`other`), `native_device_type`, `compiled_sdk_version`, `runtime_sdk_version`, `identity` (implemented features plus GenICam XML size and SHA-256), `diagnostic_tick_frequency_hz` and `diagnostic_tick_frequency_read`, `actual_stream_timestamp_path` and `actual_stream_timestamp_path_basis`, `sdk_stream_timestamp_paths`, `sdk_buffer_timestamp_source`, `sdk_system_timestamp_source`, `timing_origin`, `configuration`, `requested_frames`, `receive_deadline_ms`, `timestamp_units`, `timestamp_qualified: false`, `qualification_reason` |
+| 2 … COUNT+1 `frame` | `index`, `device_id`, `interface`, both SDK versions, `stream_generation`, `native_frame_id`, `width`, `height`, `offset_x`, `offset_y`, `sdk_buffer_timestamp_ns`, `sdk_system_timestamp_ns` (unsigned, unconverted), `actual_stream_timestamp_path`, `descriptor_timestamp_valid: false`, `timestamp_qualified: false`, `qualification_reason` |
+| last `summary` | `frames`, the stream statistics, `timestamp_qualified: false` |
+
+#### Diagnostic tick-frequency observation versus the stream's own read
+
+The pinned SDK reads the GigE tick frequency twice, independently:
+
+1. **This diagnostic** reads it once with
+   `arv_gv_device_get_timestamp_tick_frequency()` (GVBS `0x093C`/`0x0940`)
+   in `read_timing_context()`, **before** any stream exists. A read error
+   makes the probe fail. It is never reported as an absent frequency.
+2. **The SDK stream** reads it again during its own construction
+   (`src/arvgvstream.c:1613`, `arv_gv_device_get_timestamp_tick_frequency
+   (priv->gv_device, NULL)`) and stores that value for its receiver thread
+   (`:1640`). Here the error is **ignored**, so a failed read silently
+   becomes 0. This value is not exposed to the adapter.
+
+Only the second value selects the GigE timestamp branch
+(`src/arvgvstream.c:480-484`, also `:489-493`, `:522-528`):
+
+- **Non-zero:** the GVSP leader ticks are converted to nanoseconds by
+  `arv_gvsp_timestamp_to_ns()`.
+- **Zero:** the SDK substitutes its host reception wall-clock time.
+
+The two reads are separate register transactions at different times. They
+can return different values, or one can fail while the other succeeds. For
+example, the diagnostic reads 1 000 000 000 Hz, the stream's read fails, and
+the stream silently uses host reception time. The reverse can also happen.
+The diagnostic therefore reports:
+
+| Field | GigE (`ArvGvDevice`) | Fake (`ArvFakeDevice`) |
+| --- | --- | --- |
+| `diagnostic_tick_frequency_hz` | The diagnostic's observed value, exact and unsigned (including 0) | `null`: not an `ArvGvDevice`, so no supported accessor; never guessed |
+| `diagnostic_tick_frequency_read` | "separate read … before stream creation; NOT the value the SDK stream sampled during its own construction … not proof of the stream's timestamp path" | "not read: the in-process Fake device is not an ArvGvDevice" |
+| `actual_stream_timestamp_path` | **`"unverified"`** in the header and every frame record | `"pinned_fake_fill_host_wall_clock"` |
+| `actual_stream_timestamp_path_basis` | "not established by this diagnostic …" | Pinned source: `src/arvfakestream.c:93`, `src/arvfakecamera.c:786-787`; no GigE stream is constructed |
+| `sdk_stream_timestamp_paths` | Object with `stream_construction_frequency_source`, `stream_construction_frequency_nonzero` and `stream_construction_frequency_zero`: the conditional SDK behavior above, with citations | `null` |
+| `sdk_buffer_timestamp_source` | "conditional on the tick frequency the SDK stream read during its own construction … which branch this stream took is unverified" | "pinned SDK Fake fill: g_get_real_time() * 1000 (src/arvfakecamera.c:786)" |
+
+The GigE wording is the same text whatever the observed frequency is. The
+number is the only difference. No path is ever inferred from the diagnostic
+sample, from equal or unequal observed timestamps, from frame intervals, or
+from plausible-looking magnitudes. A successful conversion would still not
+prove integration start, a clock epoch, UTC, PTP synchronization,
+continuity or accuracy. The serializer refuses an inconsistent context: a
+GigE context without its read result, or a frequency for a device that is
+not an `ArvGvDevice`.
+
+The Fake statement is source-established, because the in-process Fake stream
+has exactly one fill path. Nothing here exercises GigE stream construction or
+a physical lost-frequency event. The GigE rows are tested only with synthetic
+private `TimingContext` values passed through the production serializer.
+
+#### Exact UTF-8 strings
+
+Every string, including identity values, the device ID and object keys, is
+written as exact UTF-8 by the production encoder
+`time_probe_json_string()`:
+
+- **Well-formed UTF-8** (Unicode Table 3-7) is copied byte for byte. Only
+  the characters JSON requires are escaped: `\"`, `\\`, `\b \f \n \r \t`,
+  and `\u00XX` for the other U+0000-U+001F (including an embedded NUL) and
+  DEL. Decoding the JSON returns the original string exactly, for example
+  `Cámara – König`, `カメラ Κάμερα` or `📷`.
+  Superseded: version 1 wrote each byte ≥ 0x80 as `\u00XX`, which decoded
+  `Cámara – König` as the mojibake `CÃ¡mara â\u0080\u0093 KÃ¶nig`.
+- **Malformed UTF-8 is an error and is never repaired.** This covers a
+  stray or missing continuation byte, an overlong form (`C0`/`C1`, `E0 80`–`9F`,
+  `F0 80`–`8F`), a UTF-16 surrogate (`ED A0`–`BF`), a code point above
+  U+10FFFF (`F4 90`+), bytes `F5`–`FF`, and a truncated final sequence.
+  - The probe fails with an `io_error` that names the field, for example
+    `'header.identity.DeviceModelName'`, and gives the byte offset and bytes.
+  - Native cleanup has already run, and the output file is removed.
+  - No U+FFFD, byte escape or replacement identity is ever written, so a
+    report cannot silently misidentify a camera.
+  - A malformed `DEVICE_ID` argument is refused as `invalid_argument`
+    before any output or device I/O.
+
+The `timing_origin` field depends on the device:
+
+- **Fake:** "pinned Aravis 0.8.36 private Fake device: both SDK timestamps are
+  the host wall clock (g_get_real_time) sampled when the SDK fills the buffer;
+  not camera time, not exposure start, not host-monotonic".
+- **GigE:** "unverified … without a camera-specific timing profile".
+
+Fake output (abridged, schema version 2, from an `aravis_timestamp_contract`
+run; reports are not committed, and no physical camera was used):
+
+```text
+{"record":"header","schema":"gige-mel.aravis-time-probe","schema_version":2,"device_id":"Fake_1","interface":"fake","native_device_type":"ArvFakeDevice",…,"diagnostic_tick_frequency_hz":null,"diagnostic_tick_frequency_read":"not read: the in-process Fake device is not an ArvGvDevice","actual_stream_timestamp_path":"pinned_fake_fill_host_wall_clock",…,"sdk_stream_timestamp_paths":null,"sdk_buffer_timestamp_source":"pinned SDK Fake fill: g_get_real_time() * 1000 (src/arvfakecamera.c:786)",…,"timestamp_qualified":false,…}
+{"record":"frame","index":0,"device_id":"Fake_1","interface":"fake",…,"stream_generation":2,"native_frame_id":65401,"width":512,"height":512,"offset_x":0,"offset_y":0,"sdk_buffer_timestamp_ns":1793507721560068000,"sdk_system_timestamp_ns":1793507721560068000,"actual_stream_timestamp_path":"pinned_fake_fill_host_wall_clock","descriptor_timestamp_valid":false,"timestamp_qualified":false,…}
+```
+
+A synthetic GigE header (abridged; production serializer, synthetic
+`TimingContext` with a 1 GHz diagnostic read; no camera):
+
+```text
+{"record":"header",…,"interface":"gige_vision","native_device_type":"ArvGvDevice",…,"diagnostic_tick_frequency_hz":1000000000,"diagnostic_tick_frequency_read":"separate read by this diagnostic … before stream creation; NOT the value the SDK stream sampled during its own construction, which may differ or fail; not proof of the stream's timestamp path","actual_stream_timestamp_path":"unverified","actual_stream_timestamp_path_basis":"not established by this diagnostic: …","sdk_stream_timestamp_paths":{"stream_construction_frequency_source":"… (src/arvgvstream.c:1613, stored at :1640); a read error is ignored and yields 0","stream_construction_frequency_nonzero":"GVSP leader ticks converted to nanoseconds … (src/arvgvstream.c:480-482); …","stream_construction_frequency_zero":"the SDK substitutes its host reception wall-clock time … (src/arvgvstream.c:484); not camera time"},…,"timestamp_qualified":false,…}
+```
+
+### Test-only virtual integration-start clock
+
+`tests/support/aravis_virtual_clock.*` is a decorator around the **real**
+Aravis Fake backend. It is linked only into `aravis_timestamp_contract_tests`.
+It is not part of `gige_mel_aravis`, the provider or the diagnostic, and no
+environment variable or setting enables it.
+
+What it does:
+
+- It forwards every backend, device and stream call unchanged.
+- It obtains each frame from the adapter's own `IFrameStream::receive()` and
+  copies the descriptor unchanged **except the timestamp**. The timestamp is
+  set from a declared **test model**:
+
+  ```text
+  domain = device, event = integration_start, valid = true,
+  clock_generation = fixed per run,
+  value = virtual_epoch + sequence * virtual_frame_period   (checked; overflow -> receive error)
+  ```
+
+  `sequence` counts the decorated stream's received frames since `start()`.
+
+What it never does:
+
+- read or write the SDK buffer timestamp;
+- subtract exposure from anything;
+- relabel completion time;
+- modify pixels, frame IDs, geometry or generations.
+
+**Ownership.** The decorated `FrameLease` exposes the original span and holds
+the **original** lease inside a shared `SourceHold` owner. The SDK buffer is
+requeued or freed exactly once, by the adapter's own `LeasedBuffer`, after the
+provider drops the decorated lease. This is never while its bytes are visible
+to the provider.
+
+A pass-through mode (no clock) is the control: the same decorator, the same
+genuine frames, the original timestamps.
+
+### `aravis_timestamp_contract` (13th SDK-enabled CTest entry)
+
+It has 17 scenarios: the 12 GIGE-MEL-010 scenarios plus five GIGE-MEL-010-R1
+regressions (P1-P5).
+
+The scenarios use the unchanged common provider through
+`make_api_manager(settings, decorated Fake backend)`, the upstream
+`getControl`/`getBuffer`, and registered `0xA5`-sentinel destinations. The
+settings are `timestamp_domain = device` and **virtual** optics
+(0.0002/0.0003 rad/px).
+
+| Group | Evidence kind | Behavior |
+| --- | --- | --- |
+| O1 | Real SDK, native observation | Raw Fake values (`buffer == system`, inside the wall-clock window of the receive); descriptor timestamp stays invalid; ID/generation/ROI match; every pixel matches the oracle; four held leases starve the pool; one release requeues; the next plain receive returns the next consecutive ID; foreign stream refused; closed device refused |
+| O2 | Diagnostic routine | Bad ID/COUNT (0, 33)/deadline (0, 10001 ms)/empty output, and an existing output file: rejected with **zero** device opens; existing file untouched; unknown device: `not_found`, output removed |
+| O3 | Diagnostic routine, real SDK | 6-frame probe against the private Fake: no feature write, exactly Start/Stop, no live stream or buffer afterwards; 8 lines (exactly 1 header, 6 frames, 1 summary), each parsed with the vendored nlohmann/json; schema version 2; every required field present; `diagnostic_tick_frequency_hz` `null` and no schema-1 `tick_frequency_hz`; `actual_stream_timestamp_path` `pinned_fake_fill_host_wall_clock` in header and frames; consecutive IDs; values inside the wall-clock window; **no ordering of values asserted** |
+| V0 | Test model | Checked arithmetic boundaries; an overflow becomes a receive error and the genuine frame is still released |
+| V1 | **Virtual clock**, real MEL callbacks | 12 published frames, each checked independently in the callback. Destination == original SDK bytes (row-by-row, source lease alive) == independent pinned-Fake pixel oracle. Header: width/height, 8 bits, 1 band, Mono, Staring, ROI offsets, integration time from the readback, `systemTime` == declared virtual value, frame ID == source frame ID, virtual FOV. Registered address and context; no extra destination; statistics agree with backend deliveries; source leases peak at 1 |
+| V2 | Virtual clock | All 4 destinations held: further genuine frames dropped (`dropped_no_buffer`), no callback, held bytes unchanged. Source leases still released (at most 1 outstanding). Dropping `shared_ptr` copies does not count as a release. One explicit `release()` resumes publication into exactly that slot (a second `release()` fails); other held slots keep their bytes |
+| V3 | Virtual clock | `disable()` drains; Fake acquisition register 0; no late frame or callback. Reconfigure while disabled with SDK readback. Restart refused while destinations are held. After release and re-registration, a new stream generation publishes 80×40@(16,12) at 100 ms, verified against oracle scale 2.0 and a new virtual model. Old destinations unchanged; no stale frame |
+| N1 | Fail-closed | Default `FrameTimestamp{}`, `valid=false`, domain `host_monotonic`/`utc`, event `reception`/`unspecified`: each rejected per frame. No callback, destination still the sentinel, no stream or callback failure, channel still enabled |
+| N2 | Fail-closed | Two rejected initial frames (generation 99 and one hour ahead, or exactly `FrameTimestamp{}`), then declared frames: published, no discontinuity. A rejected frame does not set the stream's clock baseline |
+| N3 | Terminal | Backward value, then (separately) a `clock_generation` change, at the 4th frame. 3 published, the 4th not written, `stream_failures == 1`, stream stopped, `enable()` reports `Fail`, no later frame. Only explicit `disable()`/`enable()` recovers, with a new generation and a fresh baseline |
+| N4 | Classification | SDK-arranged `AcquisitionStart` rejection: `enable()` `Fail` and no stream failure, distinct from N3. Deliberate disable: no failure |
+| C | Control | The same decorator **without** the clock: the same genuine frames are rejected; 0 callbacks |
+| P1 (R1) | Production serializer, synthetic `TimingContext` | Provenance table. A1 GigE diagnostic read 1 GHz and `UINT64_MAX`, A2 GigE 0: the value is kept exactly, `actual_stream_timestamp_path` is `"unverified"` in the header and every frame, both conditional SDK behaviors are cited (`:1613`, `:480-482`, `:484`), the GigE header text is identical apart from the number, and the reviewed definite-path wording is absent. A3 GigE with no read result: refused (`invalid_state`); no line, no fabricated absence. A4 Fake: `null` frequency and the pinned fill statement. A frequency for a Fake or other device is refused. `timestamp_qualified=false` and `descriptor_timestamp_valid=false` throughout |
+| P2 (R1) | Production encoder | B1 ASCII, B2 `Cámara – König`, B3 Japanese and Greek, B4 U+1F4F7 and U+10FFFF, B5 quote/backslash/controls/embedded NUL/DEL, the range boundaries and the empty string all decode with nlohmann/json to the **exact** original. No raw control byte is written. B6: 15 malformed inputs (stray, malformed 2nd/3rd/4th byte, truncated 2/3/4-byte, overlong `C0`/`C1`/`E0`/`F0`, surrogate, > U+10FFFF, `F5`, `FF`) are each refused with their reason. Through the full report: identity and device ID round-trip, and a malformed identity is refused naming `'header.identity.DeviceModelName'`. A malformed `DEVICE_ID` is refused before output or open |
+| P3 (R1) | Real SDK, Fake GenICam | `DeviceModelName` (StringReg `0x68`) arranged in the Fake device memory after the native open, then read by the production `read_timing_context()`. `Cámara – König 📷`: the SDK value and the parsed JSONL string compare equal. `K\xC3(nig`: the probe fails naming the field, Start/Stop ran, no live stream or buffer, the output is removed |
+| P4 (R1) | Production `time_probe()` | C1: an existing file (binary bytes, embedded NUL) is unchanged, with 0 opens. C2: argument errors give 0 opens and no file. C3: `open()` returns an Error, which is kept; the output is removed. C4: a scripted non-Aravis backend whose `open()` throws `std::runtime_error`: reported, bounded (< 2 s), output removed, no device cleanup invented; also a throw inside the real adapter's `open()` (`after_reservation`) with no native open, stream or command, and the reservation is released. C5: a deterministic throw through the test-only checkpoint seam at `opened`, `started` (stream live), `render` and `written` (header already in the file): output removed, 0 live streams or buffers, the expected Start/Stop log, and the device can be reopened |
+| P5 (R1) | Real SDK, decoded-facts seam | C6: after stream creation and start, every genuine buffer is marked incomplete, so the one 300 ms deadline expires. The first failure (`timeout`, "after 0 of 2 frames") is kept. The stream and pool are retired, the device is closed and can be reopened, and the output is removed. With an SDK-rejected `AcquisitionStop` (imposed RO), `cleanup_error` reports it separately and the primary error is not replaced |
+
+The scenario watchdog is 120 s, and an expiry exits with status 3, never a
+pass. All waits are bounded at 10 s. The CTest timeout is 600 s. The binary
+accepts `FILTER [REPEAT]` for focused repetitions.
+
+The negative `aravis_mel_embedding` probe is unchanged and still passes. It
+exercises the production adapter without any decorator.
+
+### Camera-timing qualification checklist
+
+Before an Aravis camera profile may produce a **valid** `FrameTimestamp`, every
+item below must be established for the **selected physical camera**. Each
+item needs retained evidence. The gate is **open**: no camera is selected and
+none of these is established.
+
+1. Camera manufacturer, model, serial, firmware and GenICam XML identity
+   (`time-probe` records the XML size and SHA-256).
+2. The SDK version and the actual loaded library: the path and the
+   runtime/compiled version.
+3. The native timestamp field (GVSP leader, chunk `ChunkTimestamp`, or event
+   data) and the camera's documented acquisition event for it.
+4. Proof that the event denotes **start of sensor integration**: not frame
+   end, readout, trigger or transmission.
+5. Tick frequency, units and checked conversion rules. The SDK conversion
+   (`src/arvgvspprivate.h:576-591`) is unchecked and is not a qualification.
+6. Clock origin and epoch, and whether the domain is device-local,
+   host-monotonic or synchronized UTC.
+7. PTP synchronization and lock-status evidence, where relevant.
+8. Timestamp behavior at frame-ID wrap, stream restart, camera reset, exposure
+   change and network reconnection.
+9. The continuity/discontinuity policy and the rules for changing
+   `clock_generation`.
+10. A hardware observation or vendor-backed qualification relating the
+    timestamp event to actual exposure start.
+11. The maximum supported uncertainty, and its implications for the intended
+    MEL consumer.
+12. Behavior when any required fact becomes unavailable. For example, with a
+    zero tick frequency the SDK silently substitutes host time
+    (`src/arvgvstream.c:484`). This must be fail-closed (invalid timestamps),
+    never a fallback.
+13. Proof of the timestamp path **actually used by the qualified stream**
+    (GIGE-MEL-010-R1). The SDK stream silently ignores its own
+    stream-construction frequency read error (`src/arvgvstream.c:1613`). A
+    separate pre-stream read, including `time-probe`'s
+    `diagnostic_tick_frequency_hz`, is therefore not evidence of the path.
+    A qualified profile needs a mechanism that fixes or observes the value
+    the stream itself used, for example chunk timestamps with a
+    camera-documented frequency, or a stream-side value it can verify. Until
+    then, `actual_stream_timestamp_path` stays `"unverified"`.
+
+None of the following is evidence:
+
+- A monotonic series of timestamps does **not** prove integration-start
+  semantics.
+- A successful raw timestamp sample does **not** establish a valid clock
+  domain.
+- A host reception timestamp is **not** the start of exposure.
+- A virtual-clock pass is **not** hardware timestamp qualification.
+
+No generic conversion based only on `arv_buffer_get_timestamp()` and the
+current exposure is implemented, and none may be.
+
 ## Qualification boundaries
 
 The evidence covers the project adapter and tests, executed against the real
@@ -922,7 +1340,11 @@ Aravis 0.8.36 library and its in-process Fake camera. It does **not** establish:
 - thread safety of Aravis itself;
 - camera timing, timestamps, PTP/UTC, transport (GVSP) acquisition,
   disconnection recovery or hardware performance. GIGE-MEL-009 source
-  acquisition is exercised only with the SDK's in-process Fake stream.
+  acquisition is exercised only with the SDK's in-process Fake stream;
+- any Aravis integration-start timestamp. GIGE-MEL-010 observes raw SDK
+  values. Its positive MEL publication uses a **test-only virtual clock** and
+  is not hardware timestamp qualification (see
+  [Native timestamp provenance](#native-timestamp-provenance-gige-mel-010)).
 
 The first physical-camera qualification and a second real SDK implementation
 remain pending. Sanitizer jobs instrument the project's code only, not the

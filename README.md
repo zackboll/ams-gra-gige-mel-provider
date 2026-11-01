@@ -123,13 +123,13 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `src/factories.cpp` | Exact MEL export symbols and backend selection |
 | `src/provider.cpp` | MEL objects, shared runtime, channels, registered buffers, and image publication |
 | `src/backends/synthetic.cpp` | Working reference backend with bounded ownership |
-| `src/backends/aravis/` | Optional internal Aravis 0.8.36 adapter (`GIGE_MEL_BUILD_ARAVIS`): camera control and bounded Mono8 source acquisition with unqualified timestamps; never installed |
-| `tools/aravis_diagnostic.cpp` | Optional, uninstalled Aravis GigE list/inspect/apply/capture diagnostic |
+| `src/backends/aravis/` | Optional internal Aravis 0.8.36 adapter (`GIGE_MEL_BUILD_ARAVIS`): camera control, bounded Mono8 source acquisition with unqualified timestamps, and read-only raw SDK timestamp observation; never installed |
+| `tools/aravis_diagnostic.cpp` | Optional, uninstalled Aravis GigE list/inspect/apply/capture/time-probe diagnostic |
 | `examples/capture.cpp` | Standalone MEL consumer that dynamically loads the provider |
 | `tests/backend_tests.cpp` | Synthetic-specific backend lifetime, cancellation, validation, and pool contracts |
 | `tests/provider_backend_contract_tests.cpp` | Shared MEL-provider portability scenarios run against the synthetic backend and an independent test-only backend |
-| `tests/support/` | Test-only contract-fixture camera backend and Aravis Fake-interface selection; never installed or selectable by the exported factories |
-| `tests/aravis_*.cpp` | Optional real-SDK adapter and acquisition-contract tests, and the private MEL configuration/negative timestamp-admission embedding probe |
+| `tests/support/` | Test-only contract-fixture camera backend, Aravis Fake-interface selection and the test-only Aravis virtual integration-start clock; never installed or selectable by the exported factories |
+| `tests/aravis_*.cpp` | Optional real-SDK adapter, acquisition- and timestamp-contract tests, and the private MEL configuration/negative timestamp-admission embedding probe |
 | `tests/provider_tests.cpp` | MEL semantics, host memory, metadata, reentry, and shutdown regressions |
 | `tests/loader_tests.cpp` | Native ABI/export and image-delivery test with no provider link dependency |
 | `tests/install_consumer/` | Separate `find_package` client for install/export validation |
@@ -207,9 +207,12 @@ all MEL channel code.
    ([Aravis integration](docs/aravis-integration.md)) with camera control and
    bounded Mono8 source acquisition, exercised with the SDK's Fake device. Its
    frames carry no qualified timestamp, so the common provider rejects them
-   (no Aravis MEL Image publication). Time mapping and physical-camera
-   qualification are pending, and it is not selectable through the exported
-   factories. eBUS, vendor SDKs and GenTL consumers remain
+   (no production Aravis MEL Image publication). GIGE-MEL-010 observes the raw
+   SDK timestamps (`time-probe`). It test-qualifies MEL publication of genuine
+   Aravis pixels only under a **test-only virtual clock**, which is not
+   timestamp or hardware qualification. Time mapping and physical-camera
+   qualification are pending, and the adapter is not selectable through the
+   exported factories. eBUS, vendor SDKs and GenTL consumers remain
    candidates for the second implementation.
 2. Implement `ICameraBackend`, `ICameraDevice`, and `IFrameStream` in an optional
    target. Keep SDK types private. Reuse the normal registered-host copy path.
@@ -230,7 +233,7 @@ The detailed guide is [backend authoring](docs/backend-authoring.md).
 | --- | --- | --- |
 | P0 | Maintain and extend this bootstrap's foundation | Native factory loading, deterministic frames, explicit release, stop/restart, and failure-path tests remain green |
 | P1 | Agree and implement the operational MEL profile | Resolve required C2, Image, Health, navigation/LOS, and stack/task obligations; no fabricated metadata |
-| P2 | First real GigE backend (Aravis control and Fake-exercised source acquisition done; time mapping, MEL publication and hardware qualification pending) | One pinned SDK/camera profile delivers correct frames and controls through the common provider |
+| P2 | First real GigE backend (Aravis control, Fake-exercised source acquisition and raw timestamp observation done; virtual-clock MEL publication test-qualified; real time mapping, production MEL publication and hardware qualification pending) | One pinned SDK/camera profile delivers correct frames and controls through the common provider |
 | P3 | Second real backend | The same MEL client and applicable contract tests run with a different implementation |
 | P4 | Richer camera and transport capabilities | Add formats, trigger/PTP/chunks/calibration/diagnostics and optional direct buffers only with defined mappings and qualified lifetime contracts |
 | P5 | Mission-specific channels | Implement actual tasking/tracking/stack products with real data sources and state transitions |

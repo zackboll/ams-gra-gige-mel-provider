@@ -185,7 +185,12 @@ resolves it, plus a fresh read-only acquisition preflight
 (`aravis_stream_contract`). It is
 **not yet a supported adapter**: timestamps are deliberately invalid (no time
 mapping), so the common provider rejects its frames; disconnection handling, a
-portability `BackendCase` and any hardware qualification are pending. See
+portability `BackendCase` and any hardware qualification are pending.
+GIGE-MEL-010 (`aravis_timestamp_contract`) observes the raw SDK timestamps. It
+also records the evidence a camera profile needs before it may return a valid
+`FrameTimestamp`, in the
+[camera-timing qualification checklist](aravis-integration.md#camera-timing-qualification-checklist).
+Its virtual-clock MEL publication is a test fixture, not a time mapping. See
 [Aravis integration](aravis-integration.md).
 
 ## Adapter acceptance checklist

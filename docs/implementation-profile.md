@@ -12,6 +12,9 @@ Aravis camera-control foundation ([Aravis integration](aravis-integration.md))
 is not a factory selection and does not change this profile. Its GIGE-MEL-009
 source acquisition returns frames with an invalid `FrameTimestamp{}`, which the
 provider rejects under the rules below; no Aravis MEL profile is supported.
+GIGE-MEL-010 only observes raw SDK timestamps. Its positive Aravis-pixel MEL
+publication uses a test-only virtual clock outside the provider and the
+adapter, so this profile and the timestamp admission rules are unchanged.
 `getAPI_Manager(instance)` creates an independent manager. `getControl` reuses
 the live Control for that manager; a mismatched instance, foreign manager, or
 null manager is rejected. `getBuffer` creates an uninitialized buffer associated

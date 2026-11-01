@@ -1,7 +1,8 @@
-// Optional, uninstalled Aravis diagnostic (GIGE-MEL-008/009). Uses Aravis's
+// Optional, uninstalled Aravis diagnostic (GIGE-MEL-008/009/010). Uses Aravis's
 // GigE Vision interface only (no Fake fallback). `inspect` never writes a
-// camera feature or starts acquisition; `apply` and `capture` are separate
-// explicit commands.
+// camera feature or starts acquisition; `apply`, `capture` and `time-probe`
+// are separate explicit commands. `time-probe` only observes raw SDK
+// timestamps; it never qualifies them.
 #include "aravis_backend.hpp"
 
 #include <charconv>
@@ -31,6 +32,14 @@ constexpr const char* usage =
     "      Open exactly DEVICE_ID, use its current supported configuration (no feature write),\n"
     "      acquire ONE validated Mono8 frame within 5 s, write a tightly packed binary PGM,\n"
     "      then stop and close. The frame timestamp is unqualified (not a camera or MEL time).\n"
+    "  gige_mel_aravis_diagnostic time-probe DEVICE_ID COUNT OUTPUT.jsonl\n"
+    "      Read-only native timestamp OBSERVATION. Open exactly DEVICE_ID, use its current\n"
+    "      supported configuration (no feature write; no trigger/PTP/network change), receive\n"
+    "      COUNT (1-32) validated Mono8 frames within ONE overall 10 s deadline, stop, close,\n"
+    "      then write one JSON header line, one line per frame (raw SDK buffer/system\n"
+    "      timestamps) and one summary line. OUTPUT.jsonl must not exist; it is removed on any\n"
+    "      failure. Every record says timestamp_qualified=false: this is not a timing\n"
+    "      qualification and establishes no integration start, epoch, UTC or PTP fact.\n"
     "\n"
     "Internal tool for the experimental Aravis adapter; not a supported MEL image profile.\n"
     "Exit status: 0 success, 1 failure/unsupported/readback differs/cleanup failure, 2 usage.\n";
@@ -145,6 +154,25 @@ int capture(backend::ICameraBackend& camera, std::string_view id, const std::str
     return outcome.ok() ? 0 : (status ? status : 1);
 }
 
+int time_probe(backend::ICameraBackend& camera, std::string_view id, std::uint32_t count, const std::string& output) {
+    versions();
+    const auto outcome = aravis::time_probe(camera, id, count, output, aravis::time_probe_max_deadline);
+    if (outcome.report) {
+        const auto& r = *outcome.report;
+        std::cout << "Observed " << r.frames.size() << " frame(s) from " << r.device_id << " via "
+                  << r.context.native_device_type << "; wrote " << output << " (" << r.output_lines << " JSONL lines, "
+                  << r.output_bytes << " bytes)\n  timing origin: " << aravis::timing_origin(r.context.native_interface)
+                  << "\n  timestamp_qualified=false: " << aravis::timestamp_qualification_reason() << '\n';
+    }
+    int status = 0;
+    if (outcome.error) status = report(*outcome.error);
+    if (outcome.cleanup_error) {
+        std::cerr << "cleanup ";
+        status = report(*outcome.cleanup_error);
+    }
+    return outcome.ok() ? 0 : (status ? status : 1);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -170,6 +198,16 @@ int main(int argc, char** argv) {
             return 2;
         }
         return capture(*camera, args[1], std::string(args[2]));
+    }
+    if (args[0] == "time-probe" && args.size() == 4) {
+        std::uint32_t count = 0;
+        if (args[1].empty() || args[3].empty() || !parse(args[2], count) || count < 1 ||
+            count > aravis::time_probe_max_frames) {
+            std::cerr << "time-probe: DEVICE_ID and OUTPUT.jsonl must be non-empty and COUNT a decimal integer in [1, "
+                      << aravis::time_probe_max_frames << "]\n" << usage;
+            return 2;
+        }
+        return time_probe(*camera, args[1], count, std::string(args[3]));
     }
     std::cerr << usage;
     return 2;

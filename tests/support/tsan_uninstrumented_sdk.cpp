@@ -1,7 +1,8 @@
 // TEST-ONLY ThreadSanitizer suppressions for the UNINSTRUMENTED Aravis SDK
-// and the system GLib it uses (GIGE-MEL-009). Linked only into the two test
-// executables that drive a real SDK receiver thread (aravis_stream_contract
-// and aravis_mel_embedding); consulted only by the TSan runtime.
+// and the system GLib it uses (GIGE-MEL-009). Linked only into the test
+// executables that drive a real SDK receiver thread (aravis_stream_contract,
+// aravis_mel_embedding and, since GIGE-MEL-010, aravis_timestamp_contract);
+// consulted only by the TSan runtime. The two patterns are unchanged.
 //
 // Why: Aravis hands buffers between its receiver thread and the caller
 // through GAsyncQueue. On Linux, GLib's g_mutex_lock is a futex with an
