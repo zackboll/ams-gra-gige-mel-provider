@@ -688,7 +688,12 @@ public:
     AravisStream& operator=(const AravisStream&) = delete;
 
     Status start(std::uint64_t configuration_generation) override;
-    Result<FrameLease> receive(std::chrono::milliseconds timeout) override;
+    Result<FrameLease> receive(std::chrono::milliseconds timeout) override { return receive_observed(timeout, nullptr); }
+    // GIGE-MEL-010 read-only observation: the SAME receive; when `observed`
+    // is non-null and a lease is returned, it holds SDK facts read from that
+    // lease's buffer on this (receiving) thread. Never touches the timestamp
+    // in the descriptor, the buffer, the pool or the release order.
+    Result<FrameLease> receive_observed(std::chrono::milliseconds timeout, NativeTimestampObservation* observed);
 
     void request_stop() noexcept override {
         if (const auto run = current()) run->cancel.store(true);
@@ -918,7 +923,8 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
 // transient wait result, never evidence of disconnection. Incomplete and
 // malformed buffers are recycled and the loop continues within the SAME
 // deadline. timeout_count counts expired public calls, not slices.
-Result<FrameLease> AravisStream::receive(std::chrono::milliseconds timeout) {
+Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds timeout,
+                                                 NativeTimestampObservation* observed) {
     if (timeout < std::chrono::milliseconds::zero())
         return fail(ErrorCode::invalid_argument, "receive timeout must not be negative");
     const auto run = current();
@@ -1003,7 +1009,26 @@ Result<FrameLease> AravisStream::receive(std::chrono::milliseconds timeout) {
                 d.stream_generation = run->stream_generation;
                 d.configuration_generation = run->configuration_generation;
                 d.configuration = run->configuration;
-                d.timestamp = FrameTimestamp{}; // deliberately unqualified (GIGE-MEL-009)
+                d.timestamp = FrameTimestamp{}; // deliberately unqualified (GIGE-MEL-009); observation never changes it
+                // GIGE-MEL-010 observation: constant-time public getters on the
+                // still-owned buffer, read directly from the SDK (not from the
+                // possibly test-edited decoded facts). Unsigned values are
+                // copied unconverted; nothing is written to the buffer.
+                NativeTimestampObservation native;
+                if (observed) {
+                    gint x = 0, y = 0, w = 0, h = 0;
+                    arv_buffer_get_image_region(buffer.get(), &x, &y, &w, &h);
+                    native.stream_generation = run->stream_generation;
+                    native.native_frame_id = arv_buffer_get_frame_id(buffer.get());
+                    // Accepted geometry equals the frozen unsigned ROI, so the
+                    // SDK's gint values are nonnegative here.
+                    native.width = static_cast<std::uint32_t>(w);
+                    native.height = static_cast<std::uint32_t>(h);
+                    native.offset_x = static_cast<std::uint32_t>(x);
+                    native.offset_y = static_cast<std::uint32_t>(y);
+                    native.sdk_buffer_timestamp_ns = arv_buffer_get_timestamp(buffer.get());
+                    native.sdk_system_timestamp_ns = arv_buffer_get_system_timestamp(buffer.get());
+                }
                 {
                     std::lock_guard lock(run->mutex);
                     // Retired after the pop: the guard frees the buffer.
@@ -1019,6 +1044,7 @@ Result<FrameLease> AravisStream::receive(std::chrono::milliseconds timeout) {
                 }
                 (void)buffer.release(); // owned by the lease from here on
                 delivered_.fetch_add(1);
+                if (observed) *observed = native;
                 return FrameLease{d, std::span<const std::byte>(data, decision.span_bytes), std::move(owner)};
             }
             if (decision.verdict == profile::FrameVerdict::incomplete) incomplete_.fetch_add(1);
@@ -1170,6 +1196,43 @@ public:
         return true;
     }
 
+    // GIGE-MEL-010: read-only timing context (device lock held; no write).
+    Result<TimingContext> timing_context() {
+        std::lock_guard lock(core_->mutex);
+        if (!core_->device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+        ArvDevice* device = core_->device.get();
+        TimingContext context;
+        context.native_device_type = copy(G_OBJECT_TYPE_NAME(device));
+        context.native_interface = ARV_IS_GV_DEVICE(device) ? NativeInterface::gige_vision
+                                   : ARV_IS_FAKE_DEVICE(device) ? NativeInterface::fake
+                                                                : NativeInterface::other;
+        for (const char* name : {"DeviceVendorName", "DeviceModelName", "DeviceSerialNumber", "DeviceVersion",
+                                 "DeviceFirmwareVersion", "DeviceManufacturerInfo", "DeviceID"}) {
+            auto value = read_optional_string(device, name);
+            if (!value) return fail(value.error().code, "timing context: " + value.error().message);
+            if (value.value()) context.identity.emplace_back(name, *value.value());
+        }
+        // GenICam XML identity: size and SHA-256 of the description the SDK
+        // actually loaded (device-owned memory; read, never modified).
+        std::size_t xml_size = 0;
+        const char* xml = arv_device_get_genicam_xml(device, &xml_size);
+        if (xml && xml_size > 0) {
+            std::unique_ptr<gchar, decltype(&g_free)> digest(
+                g_compute_checksum_for_data(G_CHECKSUM_SHA256, reinterpret_cast<const guchar*>(xml), xml_size), &g_free);
+            context.identity.emplace_back("GenICamXmlBytes", std::to_string(xml_size));
+            if (digest) context.identity.emplace_back("GenICamXmlSha256", digest.get());
+        }
+        // Tick frequency only through the supported GigE Vision accessor. The
+        // Fake device is not an ArvGvDevice, so none is reported for it.
+        if (context.native_interface == NativeInterface::gige_vision) {
+            ErrorSlot error;
+            const guint64 frequency = arv_gv_device_get_timestamp_tick_frequency(ARV_GV_DEVICE(device), error.out());
+            if (error.failed()) return translate("read timestamp tick frequency of", "", *error.take());
+            context.tick_frequency_hz = static_cast<std::uint64_t>(frequency);
+        }
+        return context;
+    }
+
 private:
     const std::shared_ptr<DeviceCore> core_;
 };
@@ -1317,6 +1380,21 @@ std::string compiled_version() { return ARAVIS_VERSION; }
 bool with_native_device_for_testing(ICameraDevice& device, const std::function<void(ArvDevice*)>& fn) {
     auto* concrete = dynamic_cast<AravisDevice*>(&device);
     return concrete && concrete->with_native(fn);
+}
+
+Result<ObservedFrame> receive_with_native_timestamps(IFrameStream& stream, std::chrono::milliseconds timeout) {
+    auto* concrete = dynamic_cast<AravisStream*>(&stream);
+    if (!concrete) return fail(ErrorCode::invalid_argument, "timestamp observation requires a stream created by the Aravis adapter");
+    NativeTimestampObservation native;
+    auto received = concrete->receive_observed(timeout, &native);
+    if (!received) return received.error();
+    return ObservedFrame{std::move(received).value(), native};
+}
+
+Result<TimingContext> read_timing_context(ICameraDevice& device) {
+    auto* concrete = dynamic_cast<AravisDevice*>(&device);
+    if (!concrete) return fail(ErrorCode::invalid_argument, "timing context requires a device opened by the Aravis adapter");
+    return concrete->timing_context();
 }
 
 Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id) {

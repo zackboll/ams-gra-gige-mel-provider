@@ -75,4 +75,91 @@ inline constexpr std::chrono::milliseconds default_capture_deadline{5000};
 CaptureOutcome capture_one(ICameraBackend& backend, std::string_view device_id, const std::string& output_path,
                            std::chrono::milliseconds deadline = default_capture_deadline);
 
+// ---------------------------------------------------------------------------
+// Native timestamp OBSERVATION (GIGE-MEL-010). Observation is not
+// qualification: nothing below feeds FrameDescriptor::timestamp, which stays
+// FrameTimestamp{} (valid == false) for every Aravis frame. The values are the
+// SDK's own unsigned 64-bit results, copied without any signed conversion,
+// arithmetic, relabelling or mutation of the ArvBuffer.
+
+// SDK facts for ONE successfully received and validated buffer. Read on the
+// thread that called receive (never on the SDK receiver thread), after the
+// production validator accepted the buffer and before its lease is returned.
+struct NativeTimestampObservation {
+    std::uint64_t stream_generation{0};
+    std::uint64_t native_frame_id{0};          // arv_buffer_get_frame_id()
+    std::uint32_t width{0}, height{0};         // arv_buffer_get_image_region() (validated == frozen ROI)
+    std::uint32_t offset_x{0}, offset_y{0};
+    std::uint64_t sdk_buffer_timestamp_ns{0};  // arv_buffer_get_timestamp()
+    std::uint64_t sdk_system_timestamp_ns{0};  // arv_buffer_get_system_timestamp()
+};
+struct ObservedFrame {
+    FrameLease frame;                    // the ordinary lease (same owner, same release/requeue)
+    NativeTimestampObservation native;   // facts read from that lease's SDK buffer
+};
+// Exactly stream.receive(timeout) (same deadline, validation, pool accounting,
+// lease ownership and queue/release order), additionally returning the
+// observation for the buffer behind the returned lease. The stream must come
+// from this adapter. No callback is installed and no state is shared: the
+// observation travels only in this call's result.
+Result<ObservedFrame> receive_with_native_timestamps(IFrameStream& stream, std::chrono::milliseconds timeout);
+
+// Native device kind, from the GObject type of the open native device (not
+// from a device ID or a timestamp value).
+enum class NativeInterface { gige_vision, fake, other };
+// Read-only timing context of an open adapter device: identity features the
+// device implements, and - for an ArvGvDevice only - the timestamp tick
+// frequency through the supported arv_gv_device_get_timestamp_tick_frequency()
+// (GVBS bootstrap registers 0x093C/0x0940). Writes nothing; starts nothing.
+// A failed identity or frequency query is an error, never treated as absence.
+struct TimingContext {
+    NativeInterface native_interface{NativeInterface::other};
+    std::string native_device_type;                            // e.g. "ArvGvDevice", "ArvFakeDevice"
+    std::vector<std::pair<std::string, std::string>> identity; // implemented identity features only
+    std::optional<std::uint64_t> tick_frequency_hz;            // GigE Vision devices only
+};
+Result<TimingContext> read_timing_context(ICameraDevice& device);
+
+// Bounded, read-only timestamp investigation used by the diagnostic
+// `time-probe` command and, with the private Fake backend, by tests (the SAME
+// routine). Validates every argument and creates output_path EXCLUSIVELY (an
+// existing file is never overwritten) before any device I/O. Then opens
+// exactly device_id on `backend`, reads its current configuration and timing
+// context (no feature write), starts one acquisition, receives `frames`
+// validated Mono8 frames within ONE overall `deadline`, releasing each lease
+// immediately, stops and closes. The JSONL report is written only after
+// cleanup; on any failure (including cleanup) the output file is removed.
+struct TimeProbeFrame {
+    NativeTimestampObservation native;
+    bool descriptor_timestamp_valid{false}; // the production FrameDescriptor value (always false)
+};
+struct TimeProbeReport {
+    std::string device_id;
+    std::string compiled_sdk_version, runtime_sdk_version;
+    TimingContext context;
+    CameraConfiguration configuration; // current readback used for the run (nothing written)
+    std::vector<TimeProbeFrame> frames;
+    StreamStatistics statistics;
+    std::size_t output_bytes{0};
+    std::size_t output_lines{0};
+};
+struct TimeProbeOutcome {
+    std::optional<TimeProbeReport> report; // set only when the report file was completely written
+    std::optional<Error> error;            // first failure (arguments/output/open/start/receive)
+    std::optional<Error> cleanup_error;    // stop/close failure, reported separately
+    [[nodiscard]] bool ok() const noexcept { return report && !error && !cleanup_error; }
+};
+inline constexpr std::uint32_t time_probe_max_frames = 32;
+// The one overall receive deadline for all frames; also its maximum.
+inline constexpr std::chrono::milliseconds time_probe_max_deadline{10000};
+// Every JSONL line is at most this long; a longer record is an error.
+inline constexpr std::size_t time_probe_max_line_bytes = 4096;
+TimeProbeOutcome time_probe(ICameraBackend& backend, std::string_view device_id, std::uint32_t frames,
+                            const std::string& output_path,
+                            std::chrono::milliseconds deadline = time_probe_max_deadline);
+
+// Wording written by the probe (also asserted by tests).
+std::string_view timing_origin(NativeInterface native_interface);
+std::string_view timestamp_qualification_reason();
+
 } // namespace gige_mel::backend::aravis
