@@ -119,6 +119,30 @@ struct ConfigurationOutcome {
     }
 };
 
+// Exact pinned ScanParam/ScanType defaults, not a scan geometry interpretation.
+// Equality to finite zero also rejects NaN and either infinity (including center).
+bool unset_scan(const ir::ScanParam& scan) {
+    const ir::ScanParam defaults;
+    const auto center = scan.getCenter();
+    const auto& type = scan.getScanType();
+    return scan.getIsDefinedWithRangeAndAltitude() == defaults.getIsDefinedWithRangeAndAltitude() &&
+        center.az == defaults.getCenter().az && center.el == defaults.getCenter().el &&
+        scan.getCentFrameRefEl() == defaults.getCentFrameRefEl() &&
+        scan.getCentFrameRefAz() == defaults.getCentFrameRefAz() &&
+        scan.getScanWidth() == defaults.getScanWidth() && scan.getScanHeight() == defaults.getScanHeight() &&
+        type.getContinuousScan() == defaults.getScanType().getContinuousScan() &&
+        type.getReturning() == defaults.getScanType().getReturning() &&
+        type.getAgileScan() == defaults.getScanType().getAgileScan() &&
+        scan.getScanId() == defaults.getScanId() && scan.getScanRate() == defaults.getScanRate() &&
+        scan.getPreferredRevisitInterval() == defaults.getPreferredRevisitInterval() &&
+        scan.getRequiredRevisitInterval() == defaults.getRequiredRevisitInterval() &&
+        scan.getMaxRangeOfInterest() == defaults.getMaxRangeOfInterest() &&
+        scan.getMinRangeOfInterest() == defaults.getMinRangeOfInterest() &&
+        scan.getElevationScanCenterAltitude() == defaults.getElevationScanCenterAltitude() &&
+        scan.getElevationScanCenterRange() == defaults.getElevationScanCenterRange() &&
+        scan.getDegredationType() == defaults.getDegredationType();
+}
+
 class ChannelCore;
 class ControlImpl;
 struct StreamState;
@@ -1024,7 +1048,48 @@ public:
     GIGE_UNSUPPORTED_SEND(ir::CameraProtectCmd, ir::CameraProtectCmdResp)
     GIGE_UNSUPPORTED_SEND(ir::EraseCommand, ir::EraseCommandType)
     GIGE_UNSUPPORTED_SEND(ir::SystemTrackDataResponse, ir::CommandStatus)
-    GIGE_UNSUPPORTED_SEND(ir::ModeCmd, ir::MFA_Mode)
+    mel::RequestFor<ir::MFA_Mode> send(ir::ModeCmd command) override {
+        // Same admission precedence as configuration/BIT: no recursive status
+        // dispatch or operation-lock wait from any provider callback thread.
+        if (in_provider_callback())
+            return failed<ir::MFA_Mode>(mel::ErrorCode::InvalidState, "submit ModeCmd outside provider callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<ir::MFA_Mode>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        ConfigurationOutcome outcome;
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return failed<ir::MFA_Mode>(mel::ErrorCode::InvalidState, "channel is detached");
+            const auto state = command.getState();
+            const auto mode = command.getMode();
+            const bool operational = state == mel::MFA_State::Operate || state == mel::MFA_State::OperateRxOnly ||
+                                     state == mel::MFA_State::OperateTxOnly;
+            const bool compatible_mode = operational ? mode != ir::MFA_Mode::Unused : mode == ir::MFA_Mode::Unused;
+            const auto reject = [&](backend::ErrorCode code, const char* message) {
+                outcome = ConfigurationOutcome::failure({code, message});
+            };
+            if (state <= mel::MFA_State::NotSet || state >= mel::MFA_State::MaxExclusive ||
+                mode > ir::MFA_Mode::ScanBarSched || !compatible_mode)
+                reject(backend::ErrorCode::invalid_argument, "invalid ModeCmd state/mode combination");
+            else if (state == mel::MFA_State::Standby && !unset_scan(command.getScanParameters()))
+                reject(backend::ErrorCode::invalid_argument, "Standby requires every ScanParam field at its upstream default");
+            else if (state != mel::MFA_State::Standby)
+                reject(backend::ErrorCode::unsupported, "only an already-observed Standby/Unused acknowledgement is implemented");
+            else {
+                // The same core facts used by Health MFA_Status. No snapshot
+                // preparation here: it may commit BIT observations. No I/O or
+                // state changes, including for a faulted but still owned stream.
+                std::lock_guard lock(runtime_->state_mutex);
+                if (!runtime_->initialized || !runtime_->configuration_valid || runtime_->image_active)
+                    reject(backend::ErrorCode::invalid_state, "Standby acknowledgement requires initialized, valid, idle provider state");
+                else outcome.success = true;
+            }
+        }
+        auto result = outcome.error ? failed<ir::MFA_Mode>(map_error(outcome.error->code), outcome.description)
+                                    : ready(ir::MFA_Mode::Unused);
+        on_command_status(outcome.status(command.getCommandID()));
+        return result;
+    }
     mel::RequestFor<ir::Return> send(ir::ConfigSetCommand command) override { return config_set(command); }
     ir::Return registerMetadataCallback(Callback<mel::BIT_Configuration> callback) override {
         return register_initial(catalogue_callback_, std::move(callback), [&] { return bit_catalogue(); });

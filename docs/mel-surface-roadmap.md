@@ -109,7 +109,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | `CameraProtectCmd` → `CameraProtectCmdResp` | Required if camera protection | Unsupported | P4 if sensor supports it: define safe actuation/state and actual response; never inherit default OK for unsupported hardware |
 | `EraseCommand` → `EraseCommandType` | Optional | Unsupported | P4 only with a defined target and lifecycle semantics |
 | `SystemTrackDataResponse` → `CommandStatus` | Optional | Unsupported | P5 or earlier pointing integration; distinct from the same-named TrackChannel operation |
-| `ModeCmd` → `MFA_Mode` | Required | Unsupported | P1: define accepted MFA states/modes and their relationship to acquisition/tasking |
+| `ModeCmd` → `MFA_Mode` | Required | Partial: already-observed Standby/Unused/default-scan acknowledgement only | [Bounded contract](mode-command.md); no I/O, transition, Image stop or scheduling. P1: operational state machine and real task admission/execution/status/cancellation remain required |
 | `ConfigSetCommand` → `Return` | Required | Supported for provider-defined camera schema v1 | [Exact configuration/status profile](configuration.md); other configuration domains remain future work |
 
 ### C2 metadata
@@ -117,7 +117,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | Callback payload | Upstream annotation | Bootstrap | Priority |
 | --- | --- | --- | --- |
 | `mel::BIT_Configuration` | Required | One observed-state test catalogue | [Software BIT profile](software-bit.md) |
-| `CommandStatus` | Required | Supported for C2 ConfigSet, CameraCommand and the documented BIT_Command subset | [Synchronous terminal Accepted/Rejected profile](configuration.md) and [software BIT command outcomes](software-bit.md); ModeCmd and other unsupported commands produce no status; not complete C2 status coverage |
+| `CommandStatus` | Required | Supported for C2 ConfigSet, CameraCommand and the documented BIT_Command/ModeCmd subsets | [Configuration](configuration.md), [software BIT](software-bit.md) and [ModeCmd](mode-command.md) terminal outcomes; other unsupported command overloads produce no status; not complete C2 status coverage |
 | `mel::CalibrationConfiguration` | Optional | NotSupported | P4 |
 | `CameraProtectCmdResp` | Required if camera protection | NotSupported | P4 when protection is implemented |
 | `mel::CalibrationStatus` | Optional | NotSupported | P4 |

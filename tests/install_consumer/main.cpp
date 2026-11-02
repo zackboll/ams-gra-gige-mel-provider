@@ -3,6 +3,7 @@
 #include "../public_health_demo.hpp"
 #include "../public_bit_demo.hpp"
 #include "../public_subsystem_demo.hpp"
+#include "../public_mode_demo.hpp"
 
 #include <iostream>
 
@@ -15,7 +16,7 @@ int main() {
         return 1;
     }
     namespace ir = ams::iface::irmel;
-    try { demonstrate_health(control); demonstrate_bit(control); demonstrate_subsystem(control); }
+    try { demonstrate_health(control); demonstrate_bit(control); demonstrate_subsystem(control); demonstrate_mode(control); }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 6; }
     ir::Config config;
     for (const auto& capability : control->getCapabilities()) {
