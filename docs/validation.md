@@ -2448,3 +2448,131 @@ locally in this bootstrap session. The GitHub workflow itself has not run becaus
 no accessible remote repository was available. Configured CI is not reported as
 a completed remote run. Tests and sanitizers cover the recorded scenarios; they
 are not proof of complete MEL conformance or absence of all possible defects.
+
+## GIGE-MEL-013 evidence collector validation (2026-11-02)
+
+Base freshly fetched `main`: commit
+`93f4254675a989f52d7aa43ad98413b7e49537f9`, tree
+`8b27c74fb6045f02d5351d96304e4acf4e1ea127`. Work used a separate clean
+feature worktree. No files under `include/gige_mel`, production `src`, pinned
+vendor manifests, SDK provisioning, virtual clock, suppression definition or
+hosted workflow were changed. No physical camera was used.
+
+### Executed local checks
+
+Linux, GCC 14.2.0, Clang 19.1.7, CMake 3.31.6/Ninja. Pinned checksum-verified
+Aravis 0.8.36, uninstrumented SDK/GLib, same local provisioned GLib sysroot as
+the prior validation. Python 3.13.5; CMake selected Python 3.13.16.
+
+- New `tests/aravis_evidence_tests.py`: **12/12** on Python 3.13.5 and
+  CPython **3.9.22** in the existing `python:3.9.22-slim-bookworm` image,
+  non-root, read-only source mount, `--network none`. Cases include P5,
+  schema-v2/near-UINT64_MAX, exact metadata/interface/argv, inspect-only and
+  acquisition, copied verification directory without diagnostic, no-network
+  verifier mocks, corrupt/missing/stale-hash/extra/symlink artifacts, corrupt
+  manifest, semantic corruption even after rehash, invalid COUNT/executable,
+  exclusive output, failed inspect/capture, no retry, incomplete final check,
+  and a hung process group with descendant reaped and unrelated process alive.
+- GCC SDK-free Debug: **9/9**; GCC SDK-enabled Debug: **15/15**;
+  GCC SDK-enabled Release: **15/15**; Clang SDK-enabled Debug: **15/15**.
+- ASan/UBSan SDK-enabled: **15/15**, unchanged
+  `detect_leaks=1:halt_on_error=1`, UBSan `halt_on_error=1:print_stacktrace=1`.
+- Both offline dependency verifiers passed: 97 pinned upstream files and two
+  nlohmann/json files. Package verifier regression suite **29/29** on both
+  Python 3.13.5 and Python 3.9.22.
+- Actual SDK-enabled installs (GCC Debug, GCC Release, Clang Debug): package
+  isolation passed; 157 installed paths, 97 non-documentation text files,
+  two installed binaries, no SDK symbols/dependencies, separately configured,
+  built and executed installed consumer without `PKG_CONFIG_PATH`. Collector
+  and diagnostic are not installed. Diagnostic help and `git diff --check`
+  passed.
+
+A first SDK-free run caught a stale time-probe fixture after strengthening
+stdout validation; the fixture was corrected and the full **9/9** suite rerun.
+This is not represented as an initially clean run.
+
+### Actual simulator and diagnostic evidence
+
+E3 remains within `aravis_gige_loopback_contract`, not a new CTest target.
+Actual `ArvGvFakeCamera` on 127.0.0.1, exact discovered ID
+`Aravis-Fake-GVTest`, actual diagnostic executable, explicit `--acquire --frames
+8 --discovery-interface lo`. It independently checks inspect output, the
+64x48 P5 header and **all 3072 pixels**, ten schema-v2 JSONL records (header,
+eight frames, summary), XML digest against the server, complete manifest,
+SHA-256/size of every artifact, unchanged files after refused second collection,
+and offline verification at another pathname **after simulator destruction**.
+Server-side acquisition/control privilege/stream port are all zero afterward;
+reopening succeeds. Existing E1/E2 and Q1–Q6 control-loss scenarios pass with
+production `FrameTimestamp{}` unchanged. No virtual clock is used by E3.
+
+The option tests exercise missing/empty/duplicate/malformed/nonexistent NIC,
+help without discovery, wrong exact device ID without fallback and per-command
+SDK debug discovery output (only `Add interface 127.0.0.1`). Offline fixtures
+also prove omission passes no NIC option. A separate unprivileged user/network
+namespace probe with `lo` plus an UP IPv4 `dummy0` observed:
+
+```text
+omitted: Add interface 127.0.0.1 (127.0.0.1)
+         Add interface 10.213.7.1 (10.213.7.1)
+lo:      Add interface 127.0.0.1 (127.0.0.1) only
+```
+
+The displayed broadcast suffix depends on dummy-interface flags; the addresses
+and eligible-interface count, not that suffix, establish the contrast. Down
+`down0` and UP/no-IPv4 `noip0` each returned 1 before device I/O. These isolated
+host-interface probes are supplementary local checks, not a privileged CTest
+requirement. CTest itself uses ordinary unprivileged UDP, no namespace setup.
+All existing socket audits and the documented simulator wildcard-listener
+exception remain in force; no claim of complete network isolation is made.
+
+### TSan child control and limitation
+
+Before the child suppression solution, the actual diagnostic with
+`TSAN_OPTIONS=halt_on_error=1` returned **66** from inspect, capture and time-probe.
+Retained out-of-repository logs under `/tmp/gm13-work/control-unsuppressed-*.log`
+show intercepted GLib eventfd/write teardown versus heartbeat, queue-node
+malloc/free (`g_queue_pop_tail`), and GIO cancellation. The two original queue
+patterns alone still yielded GIO/GLib cancellation and SDK payload memcpy vs
+`write_pgm` reports, matching the previously investigated three GigE report
+groups. Project frames in teardown stacks are callers of native finalizers;
+the reported accesses are SDK-internal libc/GLib. The `write_pgm` group is the
+already documented SDK-to-project buffer-handoff blind spot, not a newly
+suppressed project-versus-project race. No new pattern was added.
+
+Only E3 in TSan builds writes a temporary file directly from the parent's
+unchanged `__tsan_default_suppressions()` definition:
+
+```text
+race:g_queue_pop_tail
+race:arv_buffer_set_n_parts
+called_from_lib:libaravis-0.8.so.0
+called_from_lib:libgio-2.0.so.0
+called_from_lib:libglib-2.0.so.0
+called_from_lib:libgobject-2.0.so.0
+```
+
+The test copies its environment into a `posix_spawn` envp and appends
+`:halt_on_error=1:suppressions=TEMPFILE` to its existing TSAN_OPTIONS for the
+collector child; the diagnostic inherits it. Other options are preserved.
+No `setenv` mutates the threaded parent. The temporary scenario directory/file
+is removed by RAII. Nothing is linked into the production diagnostic and
+non-TSan builds do not apply these patterns. Acquisition failure is never
+accepted as successful evidence.
+
+**A green TSan diagnostic subprocess uses the same broad uninstrumented-SDK
+suppressions as the loopback test. It is NOT unrestricted race coverage of the
+SDK-to-project buffer-handoff boundary.** Existing limitations and functional
+held-lease byte-stability tests are unchanged.
+
+### Remaining qualification
+
+All thirteen camera timing checklist items remain open. Simulator acquisition
+and evidence verification establish no physical identity, NIC/MTU, real packet
+loss/resend, cable/power-loss behavior, reliability, integration start, epoch,
+UTC/PTP synchronization, clock generation, uncertainty or stream-internal
+frequency path. No camera profile or production MEL readiness is qualified.
+
+Final TSan SDK-enabled result: **15/15**, 103.52 s, `halt_on_error=1`.
+E3 required all three actual diagnostic commands and offline verification to
+succeed, and checked retained child stderr for no unsuppressed TSan reports.
+The six-pattern suppression definition was unchanged.

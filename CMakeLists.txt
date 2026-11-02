@@ -118,6 +118,9 @@ if(BUILD_TESTING)
   add_test(NAME package_isolation_verifier
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_package_isolation_tests.py)
   set_tests_properties(package_isolation_verifier PROPERTIES TIMEOUT 120)
+  add_test(NAME aravis_evidence_offline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
+  set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
   set_tests_properties(backend_contract provider_contract provider_backend_portability configuration_public_api
     native_loader PROPERTIES TIMEOUT 30)
 endif()

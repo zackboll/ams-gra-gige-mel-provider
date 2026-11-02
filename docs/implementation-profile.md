@@ -296,3 +296,11 @@ ErrorCode enum has no Timeout: synchronous backend timeout/state failures map to
 InvalidState, resource exhaustion to InsufficientLocalResources, and I/O or
 disconnect failures to InsufficientRemoteResources. Unsupported maps to
 Unsupported. Worker receive timeouts are ordinary polling, not MEL failures.
+
+## Evidence tooling (GIGE-MEL-013)
+
+The uninstalled collector/offline verifier adds no MEL capability or timestamp
+admission. It wraps existing inspect/capture/time-probe diagnostics and records
+unqualified observations, not camera qualification. All selected-physical-camera
+timing gates remain open. The diagnostic's explicit, default-off discovery-NIC
+option changes only that diagnostic process, not the production backend policy.

@@ -270,3 +270,19 @@ These are release criteria, not assertions that hardware qualification has occur
 [stacked-listener]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/stacked-image/StackedImageListener.h
 [capability]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelCapability.h
 [metadata-enum]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h
+
+### GIGE-MEL-013: reproducible evidence, no new MEL surface
+
+An uninstalled Python collector invokes the existing diagnostic (inspect-only by
+default; capture/time-probe require `--acquire`), validates P5 and schema-v2 JSONL,
+retains complete hashes/metadata and generates an offline-verifiable manifest and
+13-item all-open qualification checklist. The diagnostic's optional, default-off
+`--discovery-interface IFNAME` restricts child discovery before device I/O; exact
+ID remains required. The actual pinned Aravis 0.8.36 network simulator exercises
+this path, including native release and offline verification. This is **not** a
+physical-camera qualification or a supported Aravis MEL image profile. Timestamp
+admission, GIGE-MEL-012 control-loss behavior and all public surfaces are unchanged.
+All thirteen [timing gates](aravis-integration.md#camera-timing-qualification-checklist),
+physical identity/NIC/MTU/loss/disconnect and reliability remain open. The simulator
+wildcard-discovery-listener exception remains unchanged; child discovery
+restriction does not establish network isolation.

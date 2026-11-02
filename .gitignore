@@ -7,3 +7,5 @@
 __pycache__/
 *.pyc
 .DS_Store
+# Private camera/host/network evidence must not be committed.
+/camera-evidence*/

@@ -1886,3 +1886,173 @@ loopback network simulator `ArvGvFakeCamera`. It does **not** establish:
 The first physical-camera qualification and a second real SDK implementation
 remain pending. Sanitizer jobs instrument the project's code only, not the
 SDK.
+
+## Reproducible evidence collection (GIGE-MEL-013)
+
+`scripts/aravis_evidence.py` is an **uninstalled**, Python 3.9+ standard-library
+collector and offline verifier. It invokes the existing production diagnostic;
+it implements no acquisition, clock mapping, camera profile or qualification.
+Production `FrameTimestamp{}` and MEL timestamp admission remain unchanged.
+
+### Select an exact device and discovery interface
+
+First identify the UP IPv4 NIC physically connected to the camera (`ip -br
+addr`); select it explicitly rather than guessing from a device ID. The
+**diagnostic `list` operation performs network discovery**:
+
+```sh
+build/aravis-dev/gige_mel_aravis_diagnostic --discovery-interface CAMERA_NIC list
+build/aravis-dev/gige_mel_aravis_diagnostic --discovery-interface CAMERA_NIC inspect EXACT_DEVICE_ID
+```
+
+Copy the complete stable device ID printed by `list`, not its display name,
+serial, address or first-list position. The collector requires this exact ID
+and never invokes `list`, selects a first camera or calls `apply`. Opening by
+exact ID still performs the backend's ordinary SDK discovery.
+
+The new diagnostic syntax is:
+
+```text
+gige_mel_aravis_diagnostic [--discovery-interface IFNAME] COMMAND [ARGUMENTS]
+```
+
+It applies to `list`, `inspect`, `apply`, `capture` and `time-probe`. At most one
+option may precede the command. Missing, empty, duplicate and malformed options
+are usage errors (2). An interface that does not exist, is down or has no IPv4
+address fails operationally (1), before SDK/device I/O. A read-only Linux
+`if_nametoindex`/`getifaddrs` check precedes the public pinned
+`arv_gv_interface_set_discovery_interface_name()` setter and its readback.
+The setter is applied **before discovery or opening**. There is no fallback to
+another interface or the in-process Fake device. `--help` succeeds without an
+SDK call or device I/O. **Omission preserves the SDK default**, every UP IPv4
+interface; the diagnostic does not set a default or infer a NIC. The production
+`make_backend()` and its discovery policy are unchanged.
+
+A child's Aravis discovery settings are process-local: the loopback fixture's
+parent setting does not survive launching the diagnostic. Accordingly E3
+explicitly passes the simulator's loopback interface to **every child command**.
+This only restricts the child's GigE discovery; it does not eliminate the
+simulator's independently existing **255.255.255.255:3956 wildcard discovery
+listener**. All GIGE-MEL-011-R1 exception documentation and socket audits still
+apply. Neither network isolation, suppression of all physical-NIC traffic nor a
+configured firewall/network namespace is claimed.
+
+### Collect and verify
+
+The destination must not exist, including an empty directory. Its parent must
+already exist. The directory is created mode 0700; use trusted local storage
+and do not let other processes modify it during collection/verification.
+
+```sh
+# Default: exactly one inspect; no image acquisition.
+python3 scripts/aravis_evidence.py collect \
+  --diagnostic build/aravis-dev/gige_mel_aravis_diagnostic \
+  --device-id EXACT_DEVICE_ID --discovery-interface CAMERA_NIC \
+  --output /tmp/new-camera-evidence
+
+# Explicit acquisition: sequential inspect, capture, time-probe; no retries.
+python3 scripts/aravis_evidence.py collect \
+  --diagnostic build/aravis-dev/gige_mel_aravis_diagnostic \
+  --device-id EXACT_DEVICE_ID --discovery-interface CAMERA_NIC \
+  --output /tmp/new-camera-acquisition-evidence --acquire --frames 8
+
+# Fully offline, on this or another machine. No diagnostic/SDK/camera needed.
+python3 scripts/aravis_evidence.py verify --input /tmp/new-camera-acquisition-evidence
+```
+
+For the pinned network simulator use `--discovery-interface lo` and exact ID
+`Aravis-Fake-GVTest`. The simulator is a test fixture, not a physical camera.
+Omitting the collector's interface option omits it from every child invocation;
+`discovery_interface` is then JSON `null`, not an inferred NIC.
+
+Operations retain their established behavior:
+
+- `inspect DEVICE_ID`: feature/configuration reads, no acquisition. Opening an
+  ArvGvDevice can still take GVCP control, start the SDK heartbeat thread and
+  relinquish control at finalization. “Read-only” does not mean no GVCP writes.
+- `capture DEVICE_ID OUTPUT.pgm`: one current-configuration Mono8 image within
+  the existing **5 s** receive deadline. Native stream creation, SDK transport
+  setup and `AcquisitionStart`/`AcquisitionStop`, then stream destruction/close.
+- `time-probe DEVICE_ID COUNT OUTPUT.jsonl`: COUNT in **[1,32]**, within the
+  existing **10 s overall** receive deadline, separate acquisition run; output
+  written after normal stop/close. Native frame IDs need not continue from
+  capture. It only observes raw unsigned SDK values.
+- SDK stream setup can program destination/port and supply its default packet
+  size if none is reported. The collector never intentionally changes trigger,
+  exposure, gain, PTP, packet or network features; it never calls `apply`.
+
+Each child has a conservative external **120 s wall timeout**, including
+SDK control I/O/discovery/cleanup, without enlarging either receive deadline.
+On timeout only that command's newly created process group receives SIGTERM,
+then SIGKILL after **2 s**. Linux subreaping reaps its descendants; no unrelated
+process is killed or waited on. No subsequent camera command, AcquisitionStart
+retry, reconnect, reset or timestamp correction follows a failure. A killed
+process cannot guarantee a native AcquisitionStop or immediate GVCP release;
+inspect the retained logs and hardware state independently before further use.
+
+### Folder and schema
+
+```text
+new-camera-acquisition-evidence/
+  manifest.json
+  qualification-checklist.md
+  inspect.stdout.txt       inspect.stderr.txt
+  capture.stdout.txt       capture.stderr.txt       capture.pgm
+  time-probe.stdout.txt    time-probe.stderr.txt    time-probe.jsonl
+```
+
+Inspect-only omits the last six files. Manifest schema is
+`gige-mel.aravis-evidence`, **schema_version 1**. The actual members are:
+
+| Member | Meaning |
+| --- | --- |
+| `device_id`, `discovery_interface`, `collection_directory` | exact request, nullable explicit interface, original absolute output path (not used for file access by verification) |
+| `host`, `start_utc`, `end_utc`, `time_basis` | OS/kernel and UTC host log times; `HOST LOG TIME ONLY` |
+| `diagnostic` | original resolved executable path, complete SHA-256 and size; executable is not copied or required offline |
+| `parameters`, `timeout_seconds` | explicit acquisition flag, requested probe frames, capture_frames=1; external timeout |
+| `commands` | inspect/capture/time-probe: `not_executed`, `succeeded`, `failed` or `timed_out`; executed entries retain argv array, signed exit code, UTC host start/end |
+| `artifacts` | each retained file except manifest: complete SHA-256 and byte size |
+| `observations` | parsed exact inspect/capture metadata and unconverted complete parsed schema-v2 JSONL records |
+| `validation` | `verified`/`incomplete` and errors |
+| `status` | `EVIDENCE_COLLECTED_AND_VERIFIED` or `INCOMPLETE_EVIDENCE` |
+| `qualification` | hardware/timestamp `NOT_QUALIFIED`, production_mel_ready=false |
+
+The manifest is the integrity index, not a self-hashed artifact. Hashing the
+manifest externally is useful when retaining or transferring it. Hashes detect
+corruption and internal inconsistencies, **not authenticity** against an actor
+who can rewrite the entire bundle. No credentials, tokens or environment dump
+are collected. Diagnostic output is retained verbatim and can itself contain
+sensitive identity/network data: review before sharing. **Do not commit bundles
+to this repository.** Keep vendor documents outside the immutable bundle, with
+source/title/revision/pages/hash and a reference to its manifest hash.
+
+Verification checks the complete artifact inventory (no symlinks or extra
+files), hashes/sizes, command request/status consistency, exact selected device,
+SDK versions, observation metadata and generated checklist. P5 validation parses
+the actual `P5\nWIDTH HEIGHT\n255\n` format with positive checked integer
+geometry, exactly WIDTH*HEIGHT Mono8 bytes, no truncation or trailing payload.
+It never modifies pixels. JSONL requires schema `gige-mel.aravis-time-probe`
+version **2**, exactly one header, COUNT indexed frames and one summary,
+4096-byte lines, exact uint64 values (including near UINT64_MAX), correct positive
+geometry, consistent configuration/SDK/device/count, invalid descriptor timestamps
+and `timestamp_qualified=false` everywhere. GigE timestamp path stays
+`unverified`; a separate diagnostic frequency read proves no stream-internal
+frequency/fallback path. Duplicate JSON keys, NaN and floating timestamps fail.
+A failed/partial collection retains useful logs and an incomplete manifest;
+verification never silently repairs it and returns nonzero.
+
+### Qualification remains open
+
+The generated checklist is a tested normalized snapshot of the existing
+[13 timing items](#camera-timing-qualification-checklist), divided into collected,
+missing and independent human/vendor/hardware review. **All thirteen remain
+NOT QUALIFIED**, even after acquisition succeeds. Actual loaded SDK-library path
+is not reported by this diagnostic and remains a separate evidence task. SDK
+identity observations do not confirm physical manufacturer/model/serial/firmware.
+Integration start, epoch/domain, PTP lock/accuracy, clock generation continuity,
+hardware uncertainty, internal SDK path, physical NIC/MTU, real loss/resend,
+cable removal and camera power loss remain independent gates. Timestamp trends,
+UTC-like magnitude, stable intervals or buffer/system equality qualify nothing.
+Image dimensions prove no scene identity, optics calibration or thermal
+sensitivity. Collector success means only **EVIDENCE_COLLECTED_AND_VERIFIED**,
+never HARDWARE_QUALIFIED, TIMESTAMP_QUALIFIED or PRODUCTION_MEL_READY.

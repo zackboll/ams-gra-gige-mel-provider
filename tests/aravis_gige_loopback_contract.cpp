@@ -47,6 +47,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
+#include <spawn.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -60,6 +64,11 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+extern char** environ;
+#ifdef GIGE_EVIDENCE_TSAN
+extern "C" const char* __tsan_default_suppressions();
+#endif
 
 namespace ir = ams::iface::irmel;
 namespace mel = ams::iface::mel;
@@ -1154,6 +1163,140 @@ void time_probe_gige() {
     sim.finish();
 }
 
+// E3. Actual diagnostic subprocesses; no shell, mock acquisition or virtual clock.
+void evidence_collection() {
+    namespace fs = std::filesystem;
+    auto template_path = temp_path("gige-mel-evidence", "-XXXXXX");
+    CHECK(::mkdtemp(template_path.data()) != nullptr);
+    const fs::path dir(template_path);
+    struct RemoveTree {
+        fs::path path;
+        ~RemoveTree() { std::error_code ec; fs::remove_all(path, ec); }
+    } remove_tree{dir};
+    std::map<std::string, std::string> env;
+    for (char** entry = environ; *entry; ++entry) {
+        const std::string value(*entry);
+        const auto eq = value.find('=');
+        env[value.substr(0, eq)] = value.substr(eq + 1);
+    }
+    env["ARV_DEBUG"] = "interface"; // prove discovery is restricted inside child
+#ifdef GIGE_EVIDENCE_TSAN
+    const auto suppressions = dir / "sdk.supp";
+    { std::ofstream out(suppressions); out << __tsan_default_suppressions(); }
+    // Same definition, no second list. Preserve caller options; required settings
+    // appended last. No setenv while the simulator/SDK threads are running.
+    env["TSAN_OPTIONS"] += ":halt_on_error=1:suppressions=" + suppressions.string();
+    std::cout << "  child-only TSan suppression file: " << suppressions << '\n'
+              << __tsan_default_suppressions();
+#endif
+    std::vector<std::string> environment;
+    for (const auto& [key, value] : env) environment.push_back(key + "=" + value);
+    std::vector<char*> envp;
+    for (auto& entry : environment) envp.push_back(entry.data());
+    envp.push_back(nullptr);
+    const auto log = dir / "child.log";
+    const auto run = [&](std::vector<std::string> args) {
+        std::vector<char*> argv;
+        for (auto& arg : args) argv.push_back(arg.data());
+        argv.push_back(nullptr);
+        posix_spawn_file_actions_t actions;
+        CHECK(::posix_spawn_file_actions_init(&actions) == 0);
+        CHECK(::posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, log.c_str(),
+                                                O_WRONLY | O_CREAT | O_TRUNC, 0600) == 0);
+        CHECK(::posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO) == 0);
+        pid_t pid = 0;
+        const auto error = ::posix_spawn(&pid, argv[0], &actions, nullptr, argv.data(), envp.data());
+        ::posix_spawn_file_actions_destroy(&actions);
+        CHECK(error == 0);
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0) CHECK(errno == EINTR);
+        CHECK(WIFEXITED(status));
+        return WEXITSTATUS(status);
+    };
+    const std::string diagnostic = GIGE_EVIDENCE_DIAGNOSTIC;
+    // Usage/invalid interface cases never begin discovery and never fallback.
+    for (const auto& [args, expected] : std::vector<std::pair<std::vector<std::string>, int>>{
+             {{diagnostic, "--help"}, 0},
+             {{diagnostic, "--discovery-interface", "lo", "--help"}, 0},
+             {{diagnostic, "--discovery-interface"}, 2},
+             {{diagnostic, "--discovery-interface", "" , "list"}, 2},
+             {{diagnostic, "--discovery-interface", "lo", "--discovery-interface", "lo", "list"}, 2},
+             {{diagnostic, "--discovery-interface=lo", "list"}, 2},
+             {{diagnostic, "--discovery-interface", "gige-no-such0", "list"}, 1}}) {
+        CHECK(run(args) == expected);
+        CHECK(!contains(read_file(log.string()), "Add interface"));
+    }
+    lb::Simulator sim;
+    auto camera = aravis::make_backend();
+    const auto discovered = sim.discover(*camera);
+    CHECK(std::any_of(discovered.begin(), discovered.end(), [](const auto& d) { return d.device_id == device_id; }));
+    arrange_configuration(sim, oracle);
+    CHECK(run({diagnostic, "--discovery-interface", sim.discovery_interface(), "inspect", "NOT-" + device_id}) == 1);
+    auto failure = read_file(log.string());
+    CHECK(contains(failure, "no other device or alias was tried"));
+    CHECK(contains(failure, "Add interface 127.0.0.1"));
+    const fs::path bundle = dir / "bundle";
+    const std::vector<std::string> collect{GIGE_EVIDENCE_PYTHON, GIGE_EVIDENCE_SCRIPT, "collect", "--diagnostic", diagnostic,
+        "--device-id", device_id, "--discovery-interface", sim.discovery_interface(), "--output", bundle.string(),
+        "--acquire", "--frames", "8"};
+    const auto status = run(collect);
+    if (status != 0) throw std::runtime_error("collector: " + read_file(log.string()));
+    CHECK(sim.acquisition_status() == 0 && sim.control_privilege() == 0 && sim.stream_port() == 0);
+    (void)audit_live(sim, "E3 after child collection");
+    const auto manifest_text = read_file((bundle / "manifest.json").string());
+    const auto m = Json::parse(manifest_text);
+    CHECK(m.at("status") == "EVIDENCE_COLLECTED_AND_VERIFIED");
+    CHECK(m.at("schema") == "gige-mel.aravis-evidence" && m.at("schema_version") == 1);
+    CHECK(m.at("device_id") == device_id && m.at("discovery_interface") == sim.discovery_interface());
+    CHECK(m.at("qualification").at("hardware") == "NOT_QUALIFIED");
+    for (const char* name : {"inspect", "capture", "time-probe"}) {
+        CHECK(m.at("commands").at(name).at("status") == "succeeded");
+        const auto& argv = m.at("commands").at(name).at("argv");
+        CHECK(argv[1] == "--discovery-interface" && argv[2] == sim.discovery_interface());
+        CHECK(argv[3] == name && argv[4] == device_id);
+        const auto err = read_file((bundle / (std::string(name) + ".stderr.txt")).string());
+        std::size_t pos = 0;
+        CHECK(contains(err, "Add interface 127.0.0.1"));
+        while ((pos = err.find("Add interface ", pos)) != std::string::npos) {
+            CHECK(err.compare(pos, std::strlen("Add interface 127.0.0.1 "), "Add interface 127.0.0.1 ") == 0);
+            ++pos;
+        }
+        CHECK(!contains(err, "WARNING: ThreadSanitizer"));
+    }
+    CHECK(contains(read_file((bundle / "inspect.stdout.txt").string()), "Device " + device_id + " via GigEVision"));
+    const auto pgm = read_file((bundle / "capture.pgm").string());
+    const std::string header = "P5\n64 48\n255\n";
+    CHECK(pgm.size() == header.size() + 64 * 48 && pgm.compare(0, header.size(), header) == 0);
+    const auto fid = m.at("observations").at("capture").at("native_frame_id").get<std::uint64_t>();
+    for (std::uint32_t y = 0; y < 48; ++y)
+        for (std::uint32_t x = 0; x < 64; ++x)
+            CHECK(static_cast<unsigned char>(pgm[header.size() + y * 64 + x]) == expected_pixel(x, y, fid, oracle.exposure));
+    const auto records = parse_jsonl(read_file((bundle / "time-probe.jsonl").string()));
+    CHECK(records.size() == 10 && records[0].at("schema_version") == 2);
+    CHECK(records[0].at("identity").at("GenICamXmlSha256") == sim.genicam_xml_sha256());
+    for (std::size_t i = 1; i <= 8; ++i) {
+        CHECK(records[i].at("descriptor_timestamp_valid") == false);
+        CHECK(records[i].at("timestamp_qualified") == false && records[i].at("actual_stream_timestamp_path") == "unverified");
+    }
+    // Independent SHA-256 of every artifact, not just collector exit status.
+    for (auto it = m.at("artifacts").begin(); it != m.at("artifacts").end(); ++it) {
+        const auto bytes = read_file((bundle / it.key()).string());
+        std::unique_ptr<gchar, decltype(&g_free)> hash(g_compute_checksum_for_data(G_CHECKSUM_SHA256,
+            reinterpret_cast<const guchar*>(bytes.data()), bytes.size()), &g_free);
+        CHECK(it.value().at("sha256") == hash.get() && it.value().at("size") == bytes.size());
+    }
+    CHECK(run(collect) == 1); // exclusive directory: no camera command, no overwrite
+    CHECK(read_file((bundle / "manifest.json").string()) == manifest_text);
+    CHECK(read_file((bundle / "capture.pgm").string()) == pgm);
+    auto reopened = open_device(*camera);
+    CHECK(reopened->close());
+    reopened.reset();
+    sim.finish(); // verification runs after the simulator is gone, at another path
+    fs::rename(bundle, dir / "moved");
+    CHECK(run({GIGE_EVIDENCE_PYTHON, GIGE_EVIDENCE_SCRIPT, "verify", "--input", (dir / "moved").string()}) == 0);
+    std::cout << "  evidence: actual inspect, P5 every pixel, 8 schema-v2 frames, all hashes, exclusive output, offline verification; native control/stream released\n";
+}
+
 // ===========================================================================
 // M. MEL Image publication of NETWORK pixels through the unchanged provider.
 
@@ -1780,6 +1923,7 @@ int main(int argc, char** argv) {
         {"D2 bounded cancellation of a blocked network receive", cancellation},
         {"E1 production capture_one() over GigE", direct_capture},
         {"E2 production time_probe() over GigE (JSONL)", time_probe_gige},
+        {"E3 actual diagnostic collector and offline verification", evidence_collection},
         {"M1 positive MEL publication of network pixels (TEST-ONLY virtual time)", positive_publication},
         {"M2 negative control: production timestamps rejected", negative_publication},
         {"L  SIMULATED GVSP packet loss (gvsp-lost-ratio 0.0 / 1.0)", packet_loss},
@@ -1800,7 +1944,7 @@ int main(int argc, char** argv) {
         for (const auto& [name, run] : tests) {
             if (!filter.empty() && std::string(name).find(filter) == std::string::npos) continue;
             try {
-                Watchdog watchdog(name, std::chrono::seconds{90});
+                Watchdog watchdog(name, std::chrono::seconds{run == evidence_collection ? 420 : 90});
                 run();
                 // Every simulator is destroyed: no wildcard UDP socket of any
                 // kind may remain (no exception is permitted here).

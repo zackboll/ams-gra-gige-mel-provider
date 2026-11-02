@@ -287,3 +287,29 @@ on every normal build. Its headers are not installed or exposed to consumers.
 Original project sources are licensed under [Apache-2.0](LICENSE). Third-party
 copyright, license, and intent notices remain with their respective sources;
 the upstream federal-government notice is not applied to newly written code.
+
+## Camera evidence collection (not hardware qualification)
+
+The uninstalled Python 3.9+ standard-library tool reuses the existing Aravis
+diagnostic. Find the exact ID with `gige_mel_aravis_diagnostic
+--discovery-interface CAMERA_NIC list` (**network discovery**); choose an UP IPv4
+NIC explicitly. Omission preserves all-interface SDK discovery. Then:
+
+```sh
+python3 scripts/aravis_evidence.py collect \
+  --diagnostic build/aravis-dev/gige_mel_aravis_diagnostic \
+  --device-id EXACT_DEVICE_ID --discovery-interface CAMERA_NIC \
+  --output /tmp/new-evidence-directory
+# Add --acquire --frames 8 explicitly to run capture and time-probe after inspect.
+python3 scripts/aravis_evidence.py verify --input /tmp/new-evidence-directory
+```
+
+Default collection inspects once and never acquires. Verification is offline,
+portable and SDK-free. An exclusive directory retains logs, SHA-256/size manifest
+(schema `gige-mel.aravis-evidence`, v1), validated P5/schema-v2 JSONL when requested,
+and an all-open 13-item qualification checklist. Camera/host/network details may
+be sensitive: **do not commit evidence**. Read-only does not mean passive: native
+control/stream setup and explicit acquisition have side effects. See the
+[commands, timeout/cleanup safety, folder and qualification limits](docs/aravis-integration.md#reproducible-evidence-collection-gige-mel-013).
+No physical camera, NIC, integration-start, UTC/PTP, reliability or production MEL
+readiness is qualified by a successful collection.
