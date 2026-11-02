@@ -86,6 +86,14 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
   target_link_libraries(aravis_gige_loopback_contract_tests PRIVATE gige_mel_provider gige_mel_aravis_test_support
     gige_mel_build_options Threads::Threads)
+  add_dependencies(aravis_gige_loopback_contract_tests gige_mel_aravis_diagnostic)
+  target_compile_definitions(aravis_gige_loopback_contract_tests PRIVATE
+    GIGE_EVIDENCE_PYTHON="${Python3_EXECUTABLE}"
+    GIGE_EVIDENCE_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/scripts/aravis_evidence.py"
+    GIGE_EVIDENCE_DIAGNOSTIC="$<TARGET_FILE:gige_mel_aravis_diagnostic>")
+  if(GIGE_MEL_SANITIZERS MATCHES "thread")
+    target_compile_definitions(aravis_gige_loopback_contract_tests PRIVATE GIGE_EVIDENCE_TSAN=1)
+  endif()
   add_test(NAME aravis_gige_loopback_contract COMMAND aravis_gige_loopback_contract_tests)
   # Uses the fixed GVCP port 3956 on loopback: never run concurrently with
   # another process that binds it (ctest -j).

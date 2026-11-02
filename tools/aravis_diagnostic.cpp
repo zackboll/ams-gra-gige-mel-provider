@@ -3,11 +3,28 @@
 // camera feature or starts acquisition; `apply`, `capture` and `time-probe`
 // are separate explicit commands. `time-probe` only observes raw SDK
 // timestamps; it never qualifies them.
+//
+// GIGE-MEL-013: the optional, default-off `--discovery-interface IFNAME`
+// restricts THIS process's GigE Vision discovery to one network interface
+// through the pinned public arv_gv_interface_set_discovery_interface_name().
+// When omitted, nothing is set and the SDK default (every UP IPv4 interface)
+// is unchanged. The production backend (aravis::make_backend()) is unchanged.
 #include "aravis_backend.hpp"
 
+#include <arv.h>
+
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+
+#include <cerrno>
 #include <charconv>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +37,17 @@ namespace {
 constexpr const char* usage =
     "Usage:\n"
     "  gige_mel_aravis_diagnostic --help\n"
+    "  gige_mel_aravis_diagnostic [--discovery-interface IFNAME] COMMAND [ARGUMENTS]\n"
+    "\n"
+    "Option (before COMMAND, at most once; default off):\n"
+    "  --discovery-interface IFNAME\n"
+    "      Restrict this process's GigE Vision discovery to the existing, UP network\n"
+    "      interface IFNAME, which must have an IPv4 address (e.g. lo, or the camera NIC).\n"
+    "      Checked before any device I/O. No fallback: a device not found through IFNAME\n"
+    "      is a failure; no other interface is tried. When omitted, discovery uses the\n"
+    "      SDK default: every UP IPv4 interface. The exact DEVICE_ID is still required.\n"
+    "\n"
+    "Commands:\n"
     "  gige_mel_aravis_diagnostic list\n"
     "      Discover GigE Vision devices (network broadcast) and print stable device IDs.\n"
     "  gige_mel_aravis_diagnostic inspect DEVICE_ID\n"
@@ -42,7 +70,8 @@ constexpr const char* usage =
     "      qualification and establishes no integration start, epoch, UTC or PTP fact.\n"
     "\n"
     "Internal tool for the experimental Aravis adapter; not a supported MEL image profile.\n"
-    "Exit status: 0 success, 1 failure/unsupported/readback differs/cleanup failure, 2 usage.\n";
+    "Exit status: 0 success, 1 failure/unsupported/readback differs/cleanup failure or an\n"
+    "unusable discovery interface, 2 usage.\n";
 
 const char* code_name(backend::ErrorCode code) {
     using C = backend::ErrorCode;
@@ -104,17 +133,22 @@ int inspect(backend::ICameraBackend& camera, std::string_view id) {
     return i.problems.empty() ? 0 : 1;
 }
 
-int apply(backend::ICameraBackend& camera, const std::vector<std::string_view>& args) {
+// Argument validation for `apply`, before any device I/O.
+std::optional<backend::CameraConfiguration> parse_apply(const std::vector<std::string_view>& args) {
     backend::CameraConfiguration requested;
     std::int64_t exposure_ns = 0;
     if (!parse(args[2], requested.width) || !parse(args[3], requested.height) || !parse(args[4], requested.offset_x) ||
         !parse(args[5], requested.offset_y) || !parse(args[6], requested.frame_rate_hz) || !parse(args[7], exposure_ns)) {
         std::cerr << "apply: every value must be a decimal integer in range\n" << usage;
-        return 2;
+        return std::nullopt;
     }
     requested.exposure = std::chrono::nanoseconds{exposure_ns};
+    return requested;
+}
+
+int apply(backend::ICameraBackend& camera, std::string_view id, const backend::CameraConfiguration& requested) {
     versions();
-    auto opened = camera.open(args[1]);
+    auto opened = camera.open(id);
     if (!opened) return report(opened.error());
     auto device = std::move(opened).value();
     auto actual = device->apply(requested);
@@ -173,16 +207,155 @@ int time_probe(backend::ICameraBackend& camera, std::string_view id, std::uint32
     return outcome.ok() ? 0 : (status ? status : 1);
 }
 
+// ---- --discovery-interface (GIGE-MEL-013) ---------------------------------
+
+constexpr std::string_view discovery_option = "--discovery-interface";
+
+// Syntax only (no system or SDK call): a Linux interface name is 1..15 bytes
+// (IFNAMSIZ - 1) without '/', ':' (alias syntax), whitespace or control
+// characters, and may not begin with '-' (an option, never a name here).
+bool well_formed_interface_name(std::string_view name) {
+    if (name.empty() || name.size() >= IFNAMSIZ || name.front() == '-' || name == "." || name == "..") return false;
+    for (const char c : name) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte <= 0x20 || byte >= 0x7f || c == '/' || c == ':') return false;
+    }
+    return true;
+}
+
+// The interface must exist (if_nametoindex), be UP and carry an IPv4
+// address: exactly the interfaces the pinned SDK discovery enumerates
+// (src/arvnetwork.c arv_enumerate_network_interfaces: IFF_UP and AF_INET).
+// Read-only host queries; no socket is opened and no SDK function is called.
+// Returns the IPv4 address(es) found, or an actionable error message.
+bool usable_discovery_interface(const std::string& name, std::string& addresses, std::string& problem) {
+    if (::if_nametoindex(name.c_str()) == 0) {
+        problem = "network interface '" + name + "' does not exist (" + std::strerror(errno) +
+                  "); list the host's interfaces with 'ip -br addr' and pass the one attached to the camera";
+        return false;
+    }
+    ifaddrs* list = nullptr;
+    if (::getifaddrs(&list) != 0) {
+        problem = std::string("cannot enumerate network interfaces: ") + std::strerror(errno);
+        return false;
+    }
+    const std::unique_ptr<ifaddrs, void (*)(ifaddrs*)> owner(list, &::freeifaddrs);
+    bool seen = false, up = false;
+    for (const ifaddrs* entry = list; entry; entry = entry->ifa_next) {
+        if (!entry->ifa_name || name != entry->ifa_name) continue;
+        seen = true;
+        if ((entry->ifa_flags & IFF_UP) == 0) continue;
+        up = true;
+        if (!entry->ifa_addr || entry->ifa_addr->sa_family != AF_INET) continue;
+        char text[INET_ADDRSTRLEN] = {};
+        sockaddr_in address{};
+        std::memcpy(&address, entry->ifa_addr, sizeof address);
+        if (!::inet_ntop(AF_INET, &address.sin_addr, text, sizeof text)) continue;
+        addresses += (addresses.empty() ? "" : ", ") + std::string(text);
+    }
+    if (!addresses.empty()) return true;
+    if (!seen || !up) problem = "network interface '" + name + "' is not UP; bring it up or choose the interface attached to the camera";
+    else problem = "network interface '" + name + "' has no IPv4 address; GigE Vision discovery uses IPv4 only";
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
-    const std::vector<std::string_view> args(argv + 1, argv + argc);
-    if (args.empty() || args[0] == "--help" || args[0] == "-h") {
+    std::vector<std::string_view> args(argv + 1, argv + argc);
+    if (args.empty()) {
         std::cout << usage; // no SDK call, no device I/O
-        return args.empty() ? 2 : 0;
+        return 2;
     }
+    // Optional, default-off discovery restriction: before COMMAND, at most once.
+    std::optional<std::string> discovery_interface;
+    while (!args.empty() && args[0].substr(0, discovery_option.size()) == discovery_option) {
+        if (args[0] != discovery_option) {
+            std::cerr << "malformed option '" << args[0] << "': use '" << discovery_option << " IFNAME'\n" << usage;
+            return 2;
+        }
+        if (discovery_interface) {
+            std::cerr << discovery_option << " was given more than once; pass exactly one interface\n" << usage;
+            return 2;
+        }
+        if (args.size() < 2 || args[1].empty() || args[1].front() == '-') {
+            std::cerr << discovery_option << " requires a network interface name (IFNAME), e.g. lo or the camera NIC\n"
+                      << usage;
+            return 2;
+        }
+        if (!well_formed_interface_name(args[1])) {
+            std::cerr << discovery_option << ": '" << args[1] << "' is not a valid network interface name (1-"
+                      << (IFNAMSIZ - 1) << " bytes; no '/', ':', whitespace or control characters)\n" << usage;
+            return 2;
+        }
+        discovery_interface = std::string(args[1]);
+        args.erase(args.begin(), args.begin() + 2);
+    }
+    if (args.empty()) {
+        std::cerr << "missing COMMAND\n" << usage;
+        return 2;
+    }
+    if (args[0] == "--help" || args[0] == "-h") {
+        std::cout << usage; // no SDK call, no device I/O
+        return 0;
+    }
+    for (const auto& arg : args) {
+        if (arg.substr(0, discovery_option.size()) == discovery_option) {
+            std::cerr << discovery_option << " must precede COMMAND\n" << usage;
+            return 2;
+        }
+    }
+
+    // Usage validation of COMMAND and its arguments, before any SDK call.
+    std::optional<backend::CameraConfiguration> apply_request;
+    std::uint32_t count = 0;
+    const auto& command = args[0];
+    if (command == "list" && args.size() == 1) {
+    } else if (command == "inspect" && args.size() == 2) {
+    } else if (command == "apply" && args.size() == 8) {
+        apply_request = parse_apply(args);
+        if (!apply_request) return 2;
+    } else if (command == "capture" && args.size() == 3) {
+        if (args[1].empty() || args[2].empty()) {
+            std::cerr << "capture: DEVICE_ID and OUTPUT.pgm must be non-empty\n" << usage;
+            return 2;
+        }
+    } else if (command == "time-probe" && args.size() == 4) {
+        if (args[1].empty() || args[3].empty() || !parse(args[2], count) || count < 1 ||
+            count > aravis::time_probe_max_frames) {
+            std::cerr << "time-probe: DEVICE_ID and OUTPUT.jsonl must be non-empty and COUNT a decimal integer in [1, "
+                      << aravis::time_probe_max_frames << "]\n" << usage;
+            return 2;
+        }
+    } else {
+        std::cerr << usage;
+        return 2;
+    }
+
+    if (discovery_interface) {
+        // Verified BEFORE the SDK is touched: the setter itself returns no
+        // status, so calling it proves nothing about the interface.
+        std::string addresses, problem;
+        if (!usable_discovery_interface(*discovery_interface, addresses, problem)) {
+            std::cerr << "error (discovery_interface): " << problem
+                      << "; no device I/O was performed and no other interface is tried\n";
+            return 1;
+        }
+        // Process-local SDK setting, applied before the first enumeration,
+        // discovery or open of this process, then read back.
+        arv_gv_interface_set_discovery_interface_name(discovery_interface->c_str());
+        std::unique_ptr<char, decltype(&g_free)> applied(arv_gv_interface_dup_discovery_interface_name(), &g_free);
+        if (!applied || *discovery_interface != applied.get()) {
+            std::cerr << "error (discovery_interface): the SDK did not retain discovery interface '" << *discovery_interface
+                      << "'; no device I/O was performed\n";
+            return 1;
+        }
+        std::cout << "GigE Vision discovery restricted to interface " << *discovery_interface << " (UP, IPv4 "
+                  << addresses << "); no fallback to other interfaces\n";
+    }
+
     auto camera = aravis::make_backend(); // GigE Vision interface only; no I/O yet
-    if (args[0] == "list" && args.size() == 1) {
+    if (command == "list") {
         versions();
         auto devices = camera->enumerate();
         if (!devices) return report(devices.error());
@@ -190,25 +363,8 @@ int main(int argc, char** argv) {
         for (const auto& device : devices.value()) std::cout << "  " << device.device_id << "  " << device.display_name << '\n';
         return 0;
     }
-    if (args[0] == "inspect" && args.size() == 2) return inspect(*camera, args[1]);
-    if (args[0] == "apply" && args.size() == 8) return apply(*camera, args);
-    if (args[0] == "capture" && args.size() == 3) {
-        if (args[1].empty() || args[2].empty()) {
-            std::cerr << "capture: DEVICE_ID and OUTPUT.pgm must be non-empty\n" << usage;
-            return 2;
-        }
-        return capture(*camera, args[1], std::string(args[2]));
-    }
-    if (args[0] == "time-probe" && args.size() == 4) {
-        std::uint32_t count = 0;
-        if (args[1].empty() || args[3].empty() || !parse(args[2], count) || count < 1 ||
-            count > aravis::time_probe_max_frames) {
-            std::cerr << "time-probe: DEVICE_ID and OUTPUT.jsonl must be non-empty and COUNT a decimal integer in [1, "
-                      << aravis::time_probe_max_frames << "]\n" << usage;
-            return 2;
-        }
-        return time_probe(*camera, args[1], count, std::string(args[3]));
-    }
-    std::cerr << usage;
-    return 2;
+    if (command == "inspect") return inspect(*camera, args[1]);
+    if (command == "apply") return apply(*camera, args[1], *apply_request);
+    if (command == "capture") return capture(*camera, args[1], std::string(args[2]));
+    return time_probe(*camera, args[1], count, std::string(args[3]));
 }
