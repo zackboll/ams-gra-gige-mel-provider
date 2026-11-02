@@ -195,6 +195,32 @@ Its virtual-clock MEL publication is a test fixture, not a time mapping. See
 
 ## Adapter acceptance checklist
 
+### Confirmed control loss is not a frame timeout
+
+GIGE-MEL-012 subscribes privately to Aravis `ArvDevice::control-lost`, emitted
+by the GigE heartbeat thread. Its callback stores only a sticky atomic latch;
+it never calls MEL, takes device locks, performs I/O or releases native objects.
+The adapter returns `disconnected` with "Aravis reported camera control lost",
+without claiming independently measured physical disconnection. All wrappers
+share this terminal logical-device state; configuration reads/writes and new
+acquisition are refused until explicit close and a **new** open. An SDK read
+success cannot recover it. Ordinary packet starvation remains a timeout.
+
+At lease admission, the last false atomic observation defines the concurrency
+boundary; already committed leases cannot be retroactively revoked. Stop/close
+retire local receivers without an explicit AcquisitionStop after known loss,
+retain source bytes, and release the reservation only after native stream/device
+finalization. Disconnecting a signal handler alone does not ensure its emission
+has relinquished the instance reference; releasing the final reference on the
+heartbeat thread can cause self-join. The pinned-specific closure/ref-count
+handshake, SDK cleanup I/O, simulator evidence, explicit recovery and limitations
+are documented in [Aravis integration](aravis-integration.md#confirmed-camera-control-loss-gige-mel-012).
+No public backend/provider contract or provider worker change is needed.
+
+Physical unplug detection, hardware qualification and real integration-start
+timestamps remain open gates. The existing GIGE-MEL-009-R1 uncertain-command
+recovery policy still applies when the SDK has **not** confirmed control loss.
+
 Before an adapter is called supported:
 
 - Record SDK version, supported platform/compiler, licensing/redistribution requirements, camera models/firmware, and feature profile.

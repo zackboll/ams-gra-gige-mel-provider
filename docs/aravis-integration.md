@@ -46,6 +46,146 @@ and [Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1).
 > `enable()` fails, or that acquisition is pending describe that milestone.
 > They are kept as history and are marked where they appear.
 
+## Confirmed camera-control loss (GIGE-MEL-012)
+
+The private adapter subscribes to **`ArvDevice::control-lost`**. In pinned
+0.8.36, `arv_gv_device_heartbeat_thread()` emits it synchronously on
+`arv_gv_heartbeat` when the GVBS control-privilege register has neither the
+control nor exclusive bit. This means **Aravis reported camera control lost**;
+it does not independently measure Ethernet carrier, unplugging, camera power,
+the cause of the loss, or the camera's acquisition state. No reconnect or
+control-reclaim operation is added.
+
+### Pinned SDK findings
+
+Inspected at commit `97ff5e330919d7a44b871df4eda669feeafdf342`:
+`src/arvdevice.{c,h}`, `src/arvgvdevice.{c,h}`, `src/arvgvfakecamera.c`,
+`src/arvfakecamera.h`, and the related Fake, GigE stream and device-private
+sources. `arvdevice.c` registers a `G_SIGNAL_RUN_LAST`, void/no-argument signal;
+`arv_device_emit_control_lost_signal()` calls `g_signal_emit()` directly.
+
+The ordinary build's heartbeat period is 1 s, with 10 ms retry delays and a
+5 s retry-window check. A GVCP operation defaults to five 500 ms attempts;
+the outer retry-window check is between operations, not a hard 5 s deadline.
+`_send_cmd_and_receive_ack()` clears a failed register read's output to zero;
+the heartbeat does not separately gate its bit test on successful readback.
+Thus the adapter accepts the SDK signal as authoritative about *reported*
+control loss, but does not reinterpret silence or every failed GVCP command as
+that signal, nor promise that every network failure yields a reliable event.
+Without the signal, ordinary receive starvation remains transient. The positive
+test specifically proves acknowledged CCP zero, not a nonresponsive server.
+No extra status API, health-poll thread or SDK `is_controller` polling is used.
+
+The simulator's public `arv_fake_camera_set_control_channel_privilege(camera, 0)`
+changes the register that the real heartbeat reads. Its server drops the old
+controller address when handling a packet with CCP zero. A later read can still
+succeed, and the simulator may even accept a later write; neither clears the
+adapter's sticky state. Its GVSP loop stops sending at zero CCP, but this is
+simulator behavior, **not evidence that an arbitrary camera stopped acquiring**.
+
+### Callback ownership and synchronization
+
+Each native open creates a new independent atomic latch before profile
+validation and transfers it to `DeviceCore`, separate from native run
+ownership, caller cancellation, closure, uncertain acquisition-command outcomes
+and retained historical command errors. Connection uses `g_signal_connect_data`.
+The GClosure owns a heap `shared_ptr` to the latch, not to DeviceCore, stream or
+device. Both latch and callback owner are initialized before native open starts
+the heartbeat, providing an instrumented thread-creation publication edge in
+addition to GLib's (uninstrumented) signal-registration synchronization.
+Failed/unsupported native opens use the same disconnection and emission
+drain as logical close, and a confirmed validation-time loss refuses open.
+The `noexcept` handler performs one lock-free atomic store: no locks,
+native I/O, logging, allocation, callbacks, joins or GObject release. There is no
+cycle, and a new logical open never shares the old latch.
+
+Close cancels receiving, drains native waiters and finalizes the native stream
+first. It then disconnects the handler while it still owns the device. GLib
+keeps a selected handler/closure alive through invocation; its destroy notifier
+marks detachment and releases only the latch owner. **Disconnect alone is not
+a join.** GLib also temporarily references the signal instance. Dropping the
+adapter's reference during emission can make the heartbeat the final owner and
+cause `arv_gv_device_finalize()` to join itself. A controlled regression reproduced
+this failure before the release-order correction.
+
+For GigE teardown only, close retains the native device and reservation until
+the closure is detached and GObject's public atomic `ref_count` is back to the
+adapter's sole reference. The closure handshake covers a handler selected before
+its invocation takes the temporary instance reference. The ref-count observation
+covers the interval after the handler returns but before the emission releases
+its instance. This is local lifetime synchronization, not a camera-status API.
+There is no new worker or long-running health poll. Production does not export
+native references or install blocking signal subscribers. The private test seam
+must not retain GigE native references across close; the old Fake-only command
+tests retain their readback reference policy. Native device finalization then
+cancels and joins the heartbeat on the closing thread before releasing control.
+The process-wide reservation is released **last**, after native finalization.
+
+Known loss suppresses the adapter's explicit AcquisitionStop (including recovery
+and start-compensation paths); it cannot establish that the camera stopped.
+SDK finalization is **not** instant, allocation-free or free of I/O: the GigE
+stream joins its receiver, writes stream destination port zero and releases its
+device reference; the device joins its heartbeat and attempts leave-control.
+Those SDK transactions use its finite retry/timeout machinery (an arbitrary
+peer sending pending acknowledgments is not a hard wall-clock guarantee).
+The production callback cannot cause heartbeat self-join. Stop remains noexcept;
+first close returns the control-loss diagnostic, including a prior command
+failure if present, and repeated close is successful without I/O.
+
+### Terminal behavior and concurrency boundary
+
+Receive checks the latch before native waits, after each finite 5 ms pop slice,
+and under the run mutex at frame admission. The **final false atomic observation
+is the lease-admission boundary**. A lease committed before that observation of
+loss is not retroactively revoked. Once loss is observed, no new source lease is
+admitted; popped buffers are released, not fabricated or delivered. Existing
+leases retain immutable bytes and descriptors through stop, close and destruction
+of all external owners, and can be freed on another thread without requeue.
+
+The result is `ErrorCode::disconnected` with the exact diagnostic
+**"Aravis reported camera control lost"**, not `timeout`, `stopped` or
+`unsupported`. It does not increment `timeout_count`. `configuration()` refuses
+instead of returning a healthy fresh snapshot; `apply()` refuses before writes;
+`create_stream()` and `start()` refuse before new native streams/pools, including
+previously created second wrappers. Successful later SDK reads do not heal the
+latch. The ordinary GIGE-MEL-009-R1 failed-command/explicit-stop recovery policy
+is unchanged when no control loss has been confirmed.
+
+The unchanged provider's terminal receive path increments `stream_failures`,
+records the control-loss diagnostic and stops publication. Explicit disable
+drains callbacks; held registered destinations remain consumer-owned and
+unchanged. Tests use the existing virtual clock to obtain positive network-pixel
+Image callbacks before loss. Production timestamps still are `FrameTimestamp{}`;
+no integration-start time or production MEL publication is qualified.
+
+### Simulator evidence and recovery
+
+Q1–Q6 extend the **existing** `aravis_gige_loopback_contract`, without another
+CTest target (SDK-free 8, SDK-enabled 14). Q1 uses `aravis::make_backend()` and a
+second SDK signal subscriber. A fully leased pool and a counted empty native
+wait establish a genuinely blocked 60 s receive. Server CCP is revoked and read
+back as zero; the actual SDK event and terminal result are separately timed.
+Q2 counts native writes/streams and exact-once buffer destruction. Q3 holds a
+test-only subscriber during actual heartbeat emission while another thread
+closes, then checks fresh acquisition on a new device (three bounded overlaps).
+Q4 checks positive MEL network pixels/headers, terminal failure, no new
+publication, destination stability and explicit disable. Q5 pauses a genuinely
+popped frame before admission (without editing its decoded facts), observes the
+real heartbeat event, then proves the frame is refused rather than committed.
+Q6 revokes privilege while native open is validating, proves the real event,
+and checks failed-open cleanup and an independent new open.
+Existing complete GVSP
+loss, cancellation, invalid-production-time and command-failure controls remain.
+
+Recovery is **explicit close/reopen only**. After the failed client is finalized,
+the test explicitly clears the simulator's acquisition register server-side,
+then a new production logical open configures/acquires successfully, even with
+an old source lease held. This is not implicit reconnect or real-camera
+reacquisition qualification. The simulator is never destroyed to provoke loss.
+The existing wildcard `255.255.255.255:3956` listener exception, socket audits,
+negative controls and unchanged TSan suppression blind spots still apply; see
+the sections below and [validation](validation.md).
+
 ## Qualified SDK baseline
 
 | Item | Value |

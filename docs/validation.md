@@ -1,5 +1,188 @@
 # Bootstrap validation record
 
+## GIGE-MEL-012 confirmed Aravis control loss
+
+**Starting revision.** Fetched `origin/main` was exactly commit
+`b2c1002de784af0e12c82a9a6aff12ca56c03426`, tree
+`8d425a2d2e2ef077309cb946c205a114ce01730f` (merged PR #11). The working tree
+was clean. Work starts on `feature/gige-mel-012-control-loss`; no completed
+GIGE-MEL-008–011 correction is intentionally removed. The unchanged starting
+adapter is built separately in an external detached worktree.
+
+**Scope.** The only production behavior change is private Aravis signal/state
+and native-lifetime handling in `src/backends/aravis/aravis_backend.cpp`.
+`aravis_private.hpp` clarifies the existing private native-reference restriction.
+The existing network contract/fixture gains Q1–Q6 and explicit server-side
+privilege revocation/reset. Public `backend.hpp`/`provider.hpp`, `provider.cpp`,
+timestamp descriptors, SDK pin, vendored bytes, build options, CTest target count,
+the five hosted jobs and both suppression files are unchanged. Current behavior
+is documented in the integration guide, backend guide, architecture,
+implementation profile, README and surface roadmap. This does not add a MEL
+surface, provider C ABI, reconnect mechanism or full-conformance claim.
+
+### Native signal and before/after control
+
+Inspected the requested pinned Aravis 0.8.36 sources at
+`97ff5e330919d7a44b871df4eda669feeafdf342`, including signal registration,
+heartbeat, GVCP failure/readback behavior, public Fake privilege API, simulator
+controller bookkeeping and native stream/device finalization. Also inspected
+GLib 2.84.4 `gobject/gsignal.c` and `gclosure.c` for closure/invocation lifetime
+and temporary signal-instance references. Details and the limits of silent
+network-failure detection are in
+[the integration contract](aravis-integration.md#confirmed-camera-control-loss-gige-mel-012).
+
+The local SDK was reprovisioned with the existing checksum-verifying script,
+unmodified source and no SDK instrumentation, into `/tmp/gm12/aravis-prefix`.
+Its archive SHA-256 remains `246deaa0042a387ff1bc00332d0fb80537ce14abde2c28d1a54c91f17adc51bf`.
+Every SDK test prints runtime/compiled **0.8.36** and the loaded
+`/tmp/gm12/aravis-prefix/lib/libaravis-0.8.so.0`. Local compilers are GCC 14.2.0
+and Clang 19.1.7. Missing development prerequisites were extracted outside the
+repository; no package or SDK artifacts enter commits.
+
+The same Q1 control source, unchanged private headers, real simulator fixture
+and virtual-clock support were separately compiled against the **starting-main
+static adapter and provider**, using that same SDK. It reported:
+
+```text
+SDK control-lost emitted after server CCP readback zero; heartbeat detection 802 ms
+FAIL Q1 ... timed out waiting for terminal receive after signal
+```
+
+The failure is the intended missing signal-to-terminal translation, not SDK
+loading, private header incompatibility or a simulator setup failure. The
+failure cleanup cancels before joining, so the baseline does not wait 60 s.
+Corrected production passes the same primary control with `make_backend()`.
+Representative corrected measurements: 785–804 ms from server revocation to
+SDK detection and 0–4 ms from actual SDK event to receive completion. Assertions
+separate the heartbeat detection bound (10 s) from event-handling latency
+(500 ms; public receive deadline 60 s). These are simulator measurements, not
+physical-camera latency guarantees.
+
+### Regression evidence
+
+- **Q1:** genuine GVSP Mono8 frames, all four source leases held, counted empty
+  native wait, actual SDK signal after public server-side CCP revocation and
+  zero readback, terminal `disconnected`, exact control-loss text, zero timeout
+  increment, no restart/configuration/second-wrapper bypass, later successful
+  native read does not heal state, held bytes survive all owners, cross-thread
+  release and explicit new-open acquisition.
+- **Q2:** observation-only hooks prove no configuration writes or stream
+  creation after loss; no adapter AcquisitionStop after loss; native stream
+  precedes device finalization; one remaining source buffer survives all
+  external owners, is immutable and is freed exactly once on another thread,
+  never requeued.
+- **Q3:** actual heartbeat emission overlaps close, three times per scenario.
+  A bounded **test-only** subscriber holds emission in flight; native stream
+  finalization is observed before releasing it and joining close. Teardown
+  completes, no native resources remain, close is idempotent, and a fresh
+  production logical open/acquisition cannot inherit the old signal.
+- **Q4:** unchanged provider, existing test virtual clock, genuine network
+  bytes and correct headers before loss; `stream_failures == 1` plus diagnostic,
+  no new Image publication after fault (including a released destination),
+  registered bytes unchanged, faulted enable/config rejected, explicit disable
+  drains and source leases return. No `provider.cpp` defect was reproduced.
+- **Q5:** actual popped frame paused before admission, actual heartbeat signal,
+  zero delivered leases and timeouts; no edited native facts or injected flag.
+- **Q6:** real signal during native-open validation refuses open and safely
+  retires the native device/reservation; a subsequent independent open succeeds.
+- Existing **L** proves complete GVSP loss still yields three bounded ordinary
+  timeouts with valid CCP, no control-lost signal, successful configuration
+  readback and deliberate cancellation classified `stopped`.
+- Existing **D2**, SDK command-failure, timestamp and embedding contracts retain
+  their cancellation, uncertain-command recovery and invalid-time behavior.
+  Production Aravis frames still carry exactly `FrameTimestamp{}`. Positive MEL
+  publication is only under the test virtual clock; the existing negative
+  production-time control still publishes nothing and leaves bytes untouched.
+
+**Failure investigated and corrected.** The first controlled close/emission
+overlap reproduced `g_system_thread_wait: Resource deadlock avoided` on the
+heartbeat thread. GLib's emission reference became the final device reference
+and invoked the SDK finalizer, which joins that same heartbeat. Close now
+disconnects, observes closure detachment and drains the emission instance
+reference before dropping its native reference and reservation. A Fake-only
+failed-command readback test also exposed why this GigE reference handshake
+must not be applied to retained Fake test handles; that test policy remains
+unchanged. Intermediate tests of the old binary are not final validation.
+
+**Network test scheduling.** Two early local full-suite runs collided because
+an older suite was still using port 3956. CTest's resource lock is per build
+directory, not cross-process/cross-build isolation. Final local SDK-enabled
+suites and repeats run serially across build directories. Port conflicts fail
+explicitly, are not skipped, and are not treated as feature failures or passes.
+
+### Validation execution
+
+SDK-free GCC development CTest passed **8/8**. SDK-enabled GCC development,
+Release, Clang development, ASan/UBSan and TSan are exercised with **14** CTest
+entries, including the extended existing loopback target. The final-source
+matrix and bounded repeat results are recorded below after completion.
+ASan uses `detect_leaks=1:halt_on_error=1`; UBSan uses
+`halt_on_error=1:print_stacktrace=1`; TSan uses `halt_on_error=1` and the
+**unchanged** documented SDK suppressions. The SDK itself is not instrumented.
+No new suppression or weakened sanitizer option was introduced.
+
+**New TSan report investigated.** Q6 initially reported project callback user
+data initialization versus its first heartbeat callback (`shared_ptr::get`,
+allocation in `NativeOpen::connect_loss`). GLib's registration lock is in the
+uninstrumented SDK stack. Rather than suppressing the report, the production
+latch and immutable callback owner are now allocated **before** native open
+creates the heartbeat thread, giving their initialization a thread-creation
+publication edge as well as GLib's signal-registration synchronization. Q6's
+test subscriber follows the same pre-thread initialization order. No suppression
+pattern or callback lock was added; final-source TSan is rerun below.
+
+A bounded TSan repeat then exposed the analogous initialization report in the
+**second, test-only** SDK subscriber (`LossSignal::notified`, allocation in
+`observe_loss`), not the production callback. Production-factory tests attach
+this observer after opening the device, so its immutable owner publication is
+now explicitly synchronized by a test-only C++ mutex, with a pinned owner copied
+before recording the event. Its destroy notifier uses the same publication
+mutex. The production signal callback remains a single atomic store and never
+takes that mutex. This project-involved report was fixed without any new SDK
+suppression; the final observer version is rerun under TSan.
+
+| Final production/test source configuration | Result |
+| --- | --- |
+| SDK-free GCC development | **8/8** |
+| SDK-enabled GCC development | **14/14**, 92.40 s |
+| SDK-enabled GCC Release | **14/14**, 92.53 s |
+| SDK-enabled Clang development | **14/14**, 92.52 s |
+| SDK-enabled ASan/UBSan | **14/14**, 93.05 s |
+| SDK-enabled TSan, final test observer, unchanged suppressions | **14/14**, 93.21 s; no report |
+
+The final test-observer change is separately revalidated across the matrix;
+it does not alter production behavior. TSan Q1–Q6 ×3 passed with no report.
+ASan/UBSan and GCC development Q1–Q6 ×3 also passed
+(18 scenario executions, including nine controlled close/emission overlaps).
+Each scenario has a 90 s watchdog and each repeated invocation an outer 180 s
+bound. These are focused repetitions, not a mutation campaign.
+
+Both offline dependency verifiers passed; all **29** package-isolation verifier
+tests passed. Actual ordinary SDK-enabled installs (GCC Debug, Release and
+Clang) passed the fail-closed package verifier: correct SDK resolution, no
+provider Aravis/GLib dependencies, 157 installed paths, 97 checked text files,
+two installed binaries without Aravis symbols, and a separately configured,
+built and executed installed consumer with `PKG_CONFIG_PATH` removed.
+Diagnostic `--help` and `git diff --check` passed.
+
+The wildcard **255.255.255.255:3956** simulator discovery listener remains an
+explicit test-only network exception, not loopback confinement or an isolated
+namespace. Existing inode/socket audits and unrelated-listener negative
+controls remain. TSan's unchanged loopback suppression file hides intercepted
+SDK-internal accesses, including a blind spot across the SDK buffer handoff;
+project/project reports remain fatal. Functional byte-stability assertions do
+not substitute for instrumenting the SDK. No new project-involved sanitizer
+report has been dismissed as an SDK issue.
+
+**Limitations:** no physical camera/NIC was used. Privilege revocation is not
+physical unplug/power/carrier detection, and a signal is not promised for every
+network outage. The test explicitly resets the simulator's acquisition register
+server-side after failed-client close before recovery; it does not infer camera
+stop or add automatic reconnect. Device/stream finalizers themselves may issue
+SDK I/O and retries. Timestamp qualification and full MEL conformance remain
+open. Final-head push/pull_request hosted results are handoff evidence, separate
+from local execution; READY_FOR_REVIEW requires all five jobs in **both** runs.
+
 ## GIGE-MEL-011-R1 simulator wildcard discovery listener (2026-11-02)
 
 **Disposition.** This is one ordinary corrective commit on

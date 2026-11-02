@@ -24,6 +24,7 @@
 #include <optional>
 #include <set>
 #include <functional>
+#include <thread>
 #include <utility>
 
 namespace gige_mel::backend::aravis {
@@ -523,23 +524,91 @@ struct LeasedBuffer {
     ArvBuffer* buffer;
 };
 
-// One natively open device: ownership reservation plus native reference.
+// Independent of cancellation, closure and uncertain camera-command outcomes.
+// The closure owns a shared latch, NOT DeviceCore or any native object. GLib
+// retains the closure during an invocation; disconnect can invalidate it while
+// the heartbeat callback is running without destroying its user data early.
+struct ControlLoss {
+    std::atomic<bool> lost{false};
+    std::atomic<bool> detached{false}; // closure no longer selected/invoking
+};
+static_assert(std::atomic<bool>::is_always_lock_free);
+
+void control_lost(ArvDevice*, gpointer data) noexcept {
+    (*static_cast<std::shared_ptr<ControlLoss>*>(data))->lost.store(true);
+}
+
+void release_control_loss(gpointer data, GClosure*) noexcept {
+    (*static_cast<std::shared_ptr<ControlLoss>*>(data))->detached.store(true);
+    delete static_cast<std::shared_ptr<ControlLoss>*>(data);
+}
+
+Error control_loss_error() {
+    return fail(ErrorCode::disconnected,
+                "Aravis reported camera control lost; this logical device is terminal; close and reopen explicitly; "
+                "physical Ethernet connectivity and camera acquisition state were not independently measured");
+}
+
+void drain_loss_emission(ArvDevice* device, const ControlLoss& state) noexcept {
+    if (device && ARV_IS_GV_DEVICE(device)) {
+        while (!state.detached.load()) std::this_thread::yield();
+        while (g_atomic_int_get(&G_OBJECT(device)->ref_count) > 1)
+            std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
+}
+
+// Subscribe immediately after SDK open, before profile reads/validation.
+// Failed opens have a heartbeat too and need the same safe release order.
 struct NativeOpen {
+    NativeOpen() = default;
+    NativeOpen(NativeOpen&&) = default;
+    NativeOpen& operator=(NativeOpen&&) = delete;
+    ~NativeOpen() {
+        if (device && loss_handler) {
+            g_signal_handler_disconnect(device.get(), loss_handler);
+            drain_loss_emission(device.get(), *control_loss);
+        }
+    }
+    void connect_loss() {
+        loss_handler = g_signal_connect_data(device.get(), "control-lost", G_CALLBACK(control_lost), loss_data.get(),
+                                             release_control_loss, G_CONNECT_DEFAULT);
+        (void)loss_data.release(); // GClosure owns user data through its last invocation
+    }
     std::unique_ptr<Reservation> reservation;
     GObjectPtr<ArvDevice> device;
     std::string device_id;
+    std::shared_ptr<ControlLoss> control_loss{std::make_shared<ControlLoss>()};
+    // Constructed BEFORE native open creates the heartbeat thread. In addition
+    // to GLib's registration synchronization this supplies an instrumented
+    // thread-creation publication edge for the immutable callback user data.
+    std::unique_ptr<std::shared_ptr<ControlLoss>> loss_data{
+        std::make_unique<std::shared_ptr<ControlLoss>>(control_loss)};
+    gulong loss_handler{0};
 };
 
 struct DeviceCore {
     DeviceCore(NativeOpen native, CameraCapabilities c, profile::NativeSnapshot e, std::shared_ptr<const TestHooks> h)
         : reservation(std::move(native.reservation)), device(std::move(native.device)), caps(c),
-          envelope(std::move(e)), hooks(std::move(h)) {}
+          envelope(std::move(e)), hooks(std::move(h)), control_loss(std::move(native.control_loss)),
+          loss_handler(std::exchange(native.loss_handler, 0)) {}
+    ~DeviceCore() {
+        if (device) {
+            disconnect_loss();
+            drain_loss_emission(device.get(), *control_loss);
+        }
+    }
+    void disconnect_loss() noexcept {
+        if (device && loss_handler) g_signal_handler_disconnect(device.get(), std::exchange(loss_handler, 0));
+    }
+    bool lost() const noexcept { return control_loss->lost.load(); }
     std::mutex mutex; // D
     std::unique_ptr<Reservation> reservation;
     GObjectPtr<ArvDevice> device; // null after logical close
     const CameraCapabilities caps;
     const profile::NativeSnapshot envelope;
     const std::shared_ptr<const TestHooks> hooks;
+    const std::shared_ptr<ControlLoss> control_loss;
+    gulong loss_handler{0}; // D; disconnected before releasing the native device
     // Three distinct private concepts (GIGE-MEL-009-R1):
     //  - receiver ownership: `active`, the run owning a native stream;
     //  - camera-command outcome: `acquisition` and the wrapper token `owner`
@@ -570,7 +639,9 @@ std::string text(const CameraConfiguration& c) {
 
 // Fresh, truthful configuration (device lock held).
 Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
+    if (core.lost()) return control_loss_error();
     auto native = read_snapshot(core.device.get());
+    if (core.lost()) return control_loss_error();
     if (!native) return native.error();
     if (auto ok = profile::check_preconditions(native.value()); !ok) return ok.error();
     return profile::configuration_from(native.value());
@@ -583,6 +654,7 @@ Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
 // because the caller is retiring (or has retired) the receiver while the
 // camera may still be acquiring.
 Status stop_command_locked(DeviceCore& core, const char* recovered_by) {
+    if (core.lost()) return control_loss_error(); // no command/reclaim after confirmed loss
     auto stopped = execute_command(core.device.get(), "AcquisitionStop", core.hooks.get(), core.acquisition);
     if (!stopped) {
         core.acquisition = Acquisition::uncertain;
@@ -630,7 +702,7 @@ void retire_locked(DeviceCore& core, bool closing, std::optional<Error>* close_f
     core.acquisition = Acquisition::uncertain;
     core.attempted = "AcquisitionStop";
     core.attempted_generation = run->stream_generation;
-    if (core.device) {
+    if (core.device && !core.lost()) {
         try {
             if (auto stopped = stop_command_locked(core, "a later successful AcquisitionStop"); !stopped) {
                 Error failure{stopped.error().code, stopped.error().message + " (stream generation " +
@@ -716,7 +788,7 @@ public:
                 return;
             }
         }
-        if (!core.device || core.active || core.acquisition != Acquisition::uncertain || core.owner != token_) return;
+        if (core.lost() || !core.device || core.active || core.acquisition != Acquisition::uncertain || core.owner != token_) return;
         try {
             if (auto stopped = stop_command_locked(core, "an explicit stop() retry"); !stopped)
                 record_fault(core, Error{stopped.error().code,
@@ -786,6 +858,7 @@ private:
 Status AravisStream::start(std::uint64_t configuration_generation) {
     std::lock_guard device_lock(core_->mutex);
     DeviceCore& core = *core_;
+    if (core.lost()) return control_loss_error();
     if (!core.device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
     if (core.active)
         return fail(ErrorCode::busy, "an acquisition is already active on this Aravis device (stream generation " +
@@ -817,6 +890,7 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
     if (!payload) return payload.error();
     auto pool = profile::plan_pool(payload.value(), frozen.value());
     if (!pool) return pool.error();
+    if (core.lost()) return control_loss_error(); // last admission check before native stream creation
 
     auto run = std::make_shared<Run>(stream_generations.fetch_add(1) + 1, configuration_generation, frozen.value(),
                                      pool.value().buffers, pool.value().buffer_bytes);
@@ -886,6 +960,10 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
             if (core.hooks->after_buffer_allocated) core.hooks->after_buffer_allocated(buffer.get());
             arv_stream_push_buffer(run->stream.get(), buffer.release()); // transfer full
         }
+        if (core.lost()) {
+            retire_partial();
+            return control_loss_error();
+        }
         if (auto ok = execute_command(device, "AcquisitionStart", core.hooks.get(), core.acquisition); !ok) {
             if (core.acquisition != Acquisition::uncertain) {
                 // The executor was never called: nothing to compensate.
@@ -906,6 +984,10 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
         core.owner = token_;
         core.attempted = "AcquisitionStart";
         core.attempted_generation = run->stream_generation;
+        if (core.lost()) {
+            retire_locked(core, false);
+            return control_loss_error();
+        }
         return {};
     } catch (...) {
         // Unexpected exception (test hook or allocation). If the executor was
@@ -927,6 +1009,7 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
                                                  NativeTimestampObservation* observed) {
     if (timeout < std::chrono::milliseconds::zero())
         return fail(ErrorCode::invalid_argument, "receive timeout must not be negative");
+    if (core_->lost()) return control_loss_error();
     const auto run = current();
     if (!run) return fail(ErrorCode::stopped, "Aravis stream has not been started");
     const auto entry = Clock::now();
@@ -936,6 +1019,7 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
     const auto& hooks = core_->hooks;
     std::optional<Error> malformed; // last rejected complete buffer, reported on expiry
     for (;;) {
+        if (core_->lost()) return control_loss_error();
         if (run->cancel.load()) return ended(*run);
         // Borrowed: retirement waits for waiters == 0 before it drops the
         // run's reference, so the stream outlives this slice. No reference is
@@ -963,6 +1047,11 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
                 run->idle.notify_all();
                 throw;
             }
+            if (core_->lost()) {
+                { std::lock_guard lock(run->mutex); --run->waiters; }
+                run->idle.notify_all();
+                return control_loss_error();
+            }
             const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(slice).count();
             popped = arv_stream_timeout_pop_buffer(stream, static_cast<guint64>(std::max<std::int64_t>(micros, 1)));
         }
@@ -980,6 +1069,10 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
             }
         }
         run->idle.notify_all();
+        if (core_->lost()) {
+            if (popped) g_object_unref(popped); // transfer-full, never deliver/requeue this result
+            return control_loss_error();
+        }
         if (starved_now) starvation_.fetch_add(1);
         if (popped) {
             GObjectPtr<ArvBuffer> buffer(popped); // transfer full from the pop
@@ -1031,6 +1124,9 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
                 }
                 {
                     std::lock_guard lock(run->mutex);
+                    // Admission linearizes at this atomic observation. A loss
+                    // observed later cannot retroactively revoke this lease.
+                    if (core_->lost()) return control_loss_error();
                     // Retired after the pop: the guard frees the buffer.
                     if (run->retired) return ended(*run);
                     ++run->outstanding;
@@ -1053,6 +1149,7 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
         }
         if (Clock::now() >= deadline) break;
     }
+    if (core_->lost()) return control_loss_error();
     timeouts_.fetch_add(1);
     if (malformed)
         return fail(ErrorCode::timeout, "no valid frame before the receive deadline; last rejected buffer: " +
@@ -1075,6 +1172,7 @@ public:
 
     Result<CameraConfiguration> configuration() const override {
         std::lock_guard lock(core_->mutex);
+        if (core_->lost()) return control_loss_error();
         if (!core_->device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
         return read_configuration_locked(*core_);
     }
@@ -1082,6 +1180,7 @@ public:
     Result<CameraConfiguration> apply(const CameraConfiguration& request) override {
         std::lock_guard lock(core_->mutex);
         DeviceCore& core = *core_;
+        if (core.lost()) return control_loss_error();
         if (!core.device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
         // Start, active acquisition and stop/retirement all hold this lock, so
         // a set `active` is the only acquisition state visible here.
@@ -1099,7 +1198,9 @@ public:
         if (!plan) return plan.error();
         std::string written;
         for (const auto& write : plan.value()) {
+            if (core.lost()) return control_loss_error();
             if (core.hooks && core.hooks->before_write) core.hooks->before_write(write.feature, core.device.get());
+            if (core.lost()) return control_loss_error();
             if (auto ok = write_feature(core.device.get(), write); !ok) {
                 // Preserve the original failure; report earlier writes and the
                 // actual native state. No rollback is attempted or claimed.
@@ -1121,6 +1222,7 @@ public:
     // Lightweight: no native stream, receiver, allocation or feature write.
     Result<std::unique_ptr<IFrameStream>> create_stream() override {
         std::lock_guard lock(core_->mutex);
+        if (core_->lost()) return control_loss_error();
         if (!core_->device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
         return std::unique_ptr<IFrameStream>(std::make_unique<AravisStream>(core_));
     }
@@ -1143,13 +1245,15 @@ public:
         std::optional<DeviceCore::Fault> history;
         std::optional<Error> now;
         bool unresolved = false;
+        bool had_device = false;
         {
             std::lock_guard lock(core_->mutex);
             DeviceCore& core = *core_;
             if (core.device) {
+                had_device = true;
                 if (core.active) {
                     retire_locked(core, true, &now);
-                } else if (core.acquisition != Acquisition::none) {
+                } else if (!core.lost() && core.acquisition != Acquisition::none) {
                     try {
                         if (auto stopped = stop_command_locked(core, "AcquisitionStop during close()"); !stopped)
                             now = stopped.error();
@@ -1158,6 +1262,7 @@ public:
                     }
                 }
                 unresolved = core.acquisition != Acquisition::none;
+                core.disconnect_loss(); // no DeviceCore pointer is exposed to the SDK
             }
             retired = std::move(core.device);
             released = std::move(core.reservation);
@@ -1165,8 +1270,25 @@ public:
             core.acquisition = Acquisition::none; // logically closed: no further device I/O
             core.owner = 0;
         }
+        // Disconnect prevents future selection, but does not wait for a handler
+        // already selected by GSignal. Its closure notifier proves that such
+        // an invocation has finished (including selection-before-instance-ref).
+        // GSignal also references its instance until after handler release.
+        // Keep OUR reference until that emission reference is gone: otherwise
+        // the heartbeat could run the finalizer and attempt to join itself.
+        // Streams are already gone; no native handles are exported. ref_count
+        // is a public atomic GObject field, not an invented camera-status API.
+        // These are teardown-only waits, never a background health poll.
+        drain_loss_emission(retired.get(), *core_->control_loss);
         retired.reset();
         released.reset();
+        // Finalization joined the heartbeat: even an invocation already running
+        // at disconnect has completed its latch store before this observation.
+        if (had_device && core_->lost()) {
+            auto error = control_loss_error();
+            if (history) error.message += "; prior command failure: " + history->error.message;
+            return error;
+        }
         if (!history && !now && !unresolved) return {};
         const ErrorCode code = history ? history->error.code : now ? now->code : ErrorCode::io_error;
         try {
@@ -1275,7 +1397,9 @@ public:
     Result<std::shared_ptr<ICameraDevice>> open(std::string_view device_id) override {
         auto native = open_native(device_id);
         if (!native) return native.error();
+        if (native.value().control_loss->lost.load()) return control_loss_error();
         auto snapshot = read_snapshot(native.value().device.get());
+        if (native.value().control_loss->lost.load()) return control_loss_error();
         if (!snapshot) return fail(snapshot.error().code, "open '" + std::string(device_id) + "': " + snapshot.error().message);
         auto caps = profile::capabilities_from(snapshot.value());
         if (!caps) return fail(caps.error().code, "open '" + std::string(device_id) + "': unsupported camera profile: " + caps.error().message);
@@ -1321,6 +1445,7 @@ public:
         native.device.reset(arv_interface_open_device(iface.value(), id.c_str(), error.out()));
         if (error.failed()) return translate("open device", id, *error.take()); // native/reservation released
         if (!native.device) return fail(ErrorCode::not_found, "Aravis could not open device '" + id + "'");
+        native.connect_loss(); // cover profile validation and failed-open cleanup too
         // Per-device client policy (not process-wide, not a camera feature):
         // the SDK revalidates bounds and access mode on every write.
         arv_device_set_range_check_policy(native.device.get(), ARV_RANGE_CHECK_POLICY_ENABLE);

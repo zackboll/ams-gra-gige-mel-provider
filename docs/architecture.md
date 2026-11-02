@@ -12,6 +12,17 @@ The interface snapshots, exact commits, source licenses, and integrity procedure
 
 ## The product boundary
 
+GIGE-MEL-012 adds a private per-logical-device terminal latch for Aravis's
+`ArvDevice::control-lost` heartbeat signal. It is independent of acquisition
+ownership, uncertain commands, cancellation and logical closure. No public
+backend/provider interface changes or provider-specific SDK branches are added.
+The signal handler only stores an atomic; receive and operations translate it
+to an explicit terminal backend error. Existing MEL stream-failure diagnostics
+apply, and recovery requires explicit close/reopen. The native release order
+accounts for GLib's temporary signal-instance reference to avoid heartbeat
+self-join; see [the lifecycle contract](aravis-integration.md#confirmed-camera-control-loss-gige-mel-012).
+Simulated privilege revocation does not qualify physical disconnect detection.
+
 A Skill calls this repository's MEL implementation. The existing consumer bridge can be another client of that implementation; it does not define the provider's internal architecture.
 
 ```mermaid
