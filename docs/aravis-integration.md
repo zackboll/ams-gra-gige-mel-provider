@@ -2041,6 +2041,37 @@ frequency/fallback path. Duplicate JSON keys, NaN and floating timestamps fail.
 A failed/partial collection retains useful logs and an incomplete manifest;
 verification never silently repairs it and returns nonzero.
 
+### Interruption-safe completion (GIGE-MEL-013-R1)
+
+`manifest.json` is the **authoritative completion state**. It remains
+`INCOMPLETE_EVIDENCE` while commands execute, artifacts are indexed and final
+validation runs. The collector constructs a success candidate in memory,
+stages its final status-dependent checklist, and validates that candidate with
+the same read-only checks used by the public offline verifier. These checks
+include the actual final checklist bytes and SHA-256 as well as every retained
+artifact and the existing schema/semantic checks. Public `verify` still loads
+its own manifest from disk and never accepts incomplete evidence.
+
+Only after all checks pass does the collector serialize the final manifest,
+exclusively create a mode-0600 temporary file in the same mode-0700 evidence
+directory, write/flush/fsync its complete bytes, and atomically replace
+`manifest.json` using `os.replace`. There is no required validation step after
+this completion commit. The same atomic writer also protects intermediate
+incomplete manifests. Image and JSONL bytes are not rewritten during finalization.
+
+A validation failure retains an incomplete manifest with an error and diagnostic
+artifacts. Interruption before replacement leaves the previous incomplete
+manifest; a staged checklist may already describe the proposed success and not
+match that incomplete manifest's hash. **That checklist is not a completion
+claim:** offline verification rejects the bundle. Catchable failures while
+writing the temporary manifest remove it; uncatchable process death may leave
+an extra staging file, also rejected offline. After replacement, success is
+valid because every required check has already passed. This provides process-
+interruption safety, not a promise of power-loss durability on every filesystem
+(directory fsync is not performed). Use trusted storage without concurrent
+artifact writers, as above. Hardware/timestamp qualification and all thirteen
+NOT QUALIFIED requirements are unchanged.
+
 ### Qualification remains open
 
 The generated checklist is a tested normalized snapshot of the existing

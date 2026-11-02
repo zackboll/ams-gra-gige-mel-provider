@@ -216,12 +216,135 @@ if name == 'time-probe':
         with self.assertRaises(e.EvidenceError): e.verify(path)
         self.assertEqual(before, {p.name: p.read_bytes() for p in path.iterdir()})
 
-    def test_final_validation_failure_is_incomplete(self):
-        with patch.object(e, "verify", side_effect=e.EvidenceError("final control")):
-            with self.assertRaises(e.EvidenceError): self.collect(False)
-        m = json.loads((self.root / "bundle/manifest.json").read_text())
+    def assert_incomplete(self, path, calls, acquired=True):
+        m = json.loads((path / "manifest.json").read_bytes())
         self.assertEqual(m["status"], e.INCOMPLETE)
         self.assertEqual(m["validation"]["status"], "incomplete")
+        self.assertEqual(len((self.root / "calls").read_text().splitlines()), calls)
+        names = ["inspect.stdout.txt", "inspect.stderr.txt"]
+        if acquired:
+            names += ["capture.stdout.txt", "capture.stderr.txt", "capture.pgm",
+                      "time-probe.stdout.txt", "time-probe.stderr.txt", "time-probe.jsonl"]
+            self.assertEqual((path / "capture.pgm").read_bytes(), self.pgm.read_bytes())
+            self.assertEqual((path / "time-probe.jsonl").read_bytes(), (self.fixture / "probe").read_bytes())
+        for name in names:
+            self.assertTrue((path / name).is_file(), name)
+        before = {p.name: p.read_bytes() for p in path.iterdir()}
+        with self.assertRaises(e.EvidenceError): e.verify(path)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in path.iterdir()})
+        self.assertFalse(list(path.glob(".manifest-*.tmp")))
+        return m
+
+    def test_final_validation_failure_is_incomplete(self):
+        with patch.object(e, "validate_manifest", side_effect=e.EvidenceError("final control")):
+            with self.assertRaisesRegex(e.EvidenceError, "final control"): self.collect()
+        m = self.assert_incomplete(self.root / "bundle", 3)
+        self.assertIn("final control", m["validation"]["errors"])
+
+    def test_final_candidate_rejects_changed_checklist(self):
+        real_validate = e.validate_manifest
+        for rehash in (False, True):
+            def corrupt(root, candidate):
+                path = root / "qualification-checklist.md"
+                path.write_bytes(path.read_bytes() + b"changed\n")
+                if rehash:
+                    candidate["artifacts"][path.name] = e.digest(path)
+                return real_validate(root, candidate)
+            path = self.root / ("checklist-" + str(rehash))
+            message = "checklist mismatch" if rehash else "hash/size mismatch"
+            with patch.object(e, "validate_manifest", side_effect=corrupt):
+                with self.assertRaisesRegex(e.EvidenceError, message): self.collect(name=path.name)
+            m = self.assert_incomplete(path, 6 if rehash else 3)
+            self.assertIn(message, m["validation"]["errors"][0])
+
+    def test_moved_acquisition_without_diagnostic_or_network(self):
+        path = self.collect()
+        moved = self.root / "moved"
+        path.rename(moved)
+        self.diag.unlink()
+        with patch.object(subprocess, "Popen", side_effect=AssertionError("subprocess")), \
+             patch.object(socket, "socket", side_effect=AssertionError("network")):
+            self.assertEqual(e.verify(moved)["status"], e.SUCCESS)
+
+    def test_interrupt_before_final_validation(self):
+        # R1-A: the reviewed code persisted success at the equivalent boundary.
+        for acquire in (True, False):
+            path = self.root / ("interrupt-" + str(acquire))
+            with patch.object(e, "validate_manifest", side_effect=KeyboardInterrupt("before validation")) as validate:
+                with self.assertRaises(KeyboardInterrupt): self.collect(acquire=acquire, name=path.name)
+            self.assertEqual(validate.call_count, 1)
+            self.assert_incomplete(path, 3 if acquire else 4, acquired=acquire)
+
+    def test_interrupt_after_validation_before_commit(self):
+        # R1-C: run every real check, then interrupt before publication starts.
+        real_validate = e.validate_manifest
+        def validated_then_interrupt(root, candidate):
+            real_validate(root, candidate)
+            self.assertEqual(json.loads((root / "manifest.json").read_bytes())["status"], e.INCOMPLETE)
+            raise SystemExit("validated, not committed")
+        with patch.object(e, "validate_manifest", side_effect=validated_then_interrupt):
+            with self.assertRaises(SystemExit): self.collect()
+        self.assert_incomplete(self.root / "bundle", 3)
+
+    def test_failure_before_atomic_replace_preserves_manifest(self):
+        # R1-D: inject at the actual commit boundary, after bytes are fsynced.
+        real_replace = e.os.replace
+        for index, failure in enumerate((KeyboardInterrupt, SystemExit, OSError)):
+            previous = []
+            def fail_success(source, destination):
+                candidate = json.loads(Path(source).read_bytes())
+                if candidate["status"] == e.SUCCESS:
+                    previous.append(Path(destination).read_bytes())
+                    self.assertEqual(json.loads(previous[-1])["status"], e.INCOMPLETE)
+                    self.assertEqual(Path(source).parent, Path(destination).parent)
+                    raise failure("before replace")
+                return real_replace(source, destination)
+            path = self.root / ("before-replace-" + str(index))
+            with patch.object(e.os, "replace", side_effect=fail_success):
+                with self.assertRaises(failure): self.collect(name=path.name)
+            self.assertEqual(len(previous), 1)
+            self.assertEqual((path / "manifest.json").read_bytes(), previous[0])
+            self.assert_incomplete(path, 3 * (index + 1))
+
+    def test_atomic_success_acquisition_and_inspect_only(self):
+        # R1-E/F: old canonical and complete staged bytes at the commit boundary.
+        real_replace, real_fsync, real_validate = e.os.replace, e.os.fsync, e.validate_manifest
+        for acquire in (True, False):
+            validated, synced, committed = [], [], []
+            def validate(root, candidate):
+                self.assertEqual(json.loads((root / "manifest.json").read_bytes())["status"], e.INCOMPLETE)
+                result = real_validate(root, candidate)
+                validated.append(copy.deepcopy(candidate))
+                return result
+            def fsync(fd):
+                real_fsync(fd)
+                synced.append(os.fstat(fd).st_ino)
+            def replace(source, destination):
+                source, destination = Path(source), Path(destination)
+                candidate = json.loads(source.read_bytes())
+                self.assertIn(source.stat().st_ino, synced)
+                self.assertEqual(source.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(source.parent, destination.parent)
+                if candidate["status"] == e.SUCCESS:
+                    self.assertEqual(validated, [candidate])
+                    self.assertEqual(json.loads(destination.read_bytes())["status"], e.INCOMPLETE)
+                    self.assertEqual((destination.parent / "qualification-checklist.md").read_bytes(),
+                                     e.checklist(candidate).encode("utf-8"))
+                    self.assertEqual(candidate["artifacts"]["qualification-checklist.md"],
+                                     e.digest(destination.parent / "qualification-checklist.md"))
+                    committed.append(candidate)
+                real_replace(source, destination)
+                self.assertEqual(json.loads(destination.read_bytes()), candidate)
+            with patch.object(e, "validate_manifest", side_effect=validate), \
+                 patch.object(e.os, "fsync", side_effect=fsync), patch.object(e.os, "replace", side_effect=replace):
+                path = self.collect(acquire=acquire, name="atomic-" + str(acquire))
+            self.assertEqual(len(committed), 1)
+            self.assertEqual(e.verify(path), committed[0])
+            self.assertEqual(committed[0]["validation"], {"status": "verified", "errors": []})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+            for name, identity in committed[0]["artifacts"].items():
+                self.assertEqual(identity, e.digest(path / name))
+            self.assertFalse(list(path.glob(".manifest-*.tmp")))
 
     def test_timeout_group_cleanup_no_retry(self):
         (self.root / "hang").touch()
@@ -237,6 +360,9 @@ if name == 'time-probe':
             unrelated.wait()
         m = json.loads((self.root / "bundle/manifest.json").read_text())
         self.assertEqual(m["commands"]["inspect"]["status"], "timed_out")
+        self.assertEqual(m["status"], e.INCOMPLETE)
+        self.assertEqual(m["validation"]["status"], "incomplete")
+        with self.assertRaises(e.EvidenceError): e.verify(self.root / "bundle")
         self.assertEqual(len((self.root / "calls").read_text().splitlines()), 1)
         pid = int((self.root / "descendant").read_text())
         with self.assertRaises(ProcessLookupError): os.kill(pid, 0)

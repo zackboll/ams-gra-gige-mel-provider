@@ -4,6 +4,7 @@ Linux collection; portable verification never uses SDK, executable or network.
 """
 from __future__ import annotations
 import argparse
+import copy
 import ctypes
 import datetime as dt
 import hashlib
@@ -16,6 +17,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -309,6 +311,12 @@ def verify(root):
     require(not (root / "manifest.json").is_symlink(), "manifest symlink forbidden")
     require((root / "manifest.json").stat().st_size <= 1024 * 1024, "oversized manifest")
     m = load_json((root / "manifest.json").read_bytes())
+    return validate_manifest(root, m)
+
+
+def validate_manifest(root, m):
+    """Shared, read-only checks for an offline manifest or an in-memory candidate."""
+    require(len(manifest_bytes(m)) <= 1024 * 1024, "oversized manifest")
     require(isinstance(m, dict) and m.get("schema") == SCHEMA and
             type(m.get("schema_version")) is int and m["schema_version"] == VERSION, "invalid evidence schema/version")
     text(m["device_id"], "device_id")
@@ -367,7 +375,7 @@ def verify(root):
     observations = validate_content(root, m)
     require(json.dumps(observations, sort_keys=True) == json.dumps(m["observations"], sort_keys=True),
             "retained observations inconsistent with artifacts")
-    require((root / "qualification-checklist.md").read_text(encoding="utf-8") == checklist(m), "checklist mismatch")
+    require((root / "qualification-checklist.md").read_bytes() == checklist(m).encode("utf-8"), "checklist mismatch")
     require(complete and m["status"] == SUCCESS and m["validation"] == {"status": "verified", "errors": []},
             "incomplete/invalid evidence (failure logs retained)")
     return m
@@ -430,9 +438,28 @@ def run_command(argv, root, name, timeout=COMMAND_TIMEOUT):
     return result
 
 
+def manifest_bytes(manifest):
+    return (json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n").encode("utf-8")
+
+
 def write_manifest(root, manifest):
-    (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
-                                        encoding="utf-8")
+    """Publish one complete manifest; replacement is the only completion commit."""
+    raw = manifest_bytes(manifest)
+    # mkstemp uses exclusive creation and mode 0600, on the destination filesystem.
+    fd, name = tempfile.mkstemp(prefix=".manifest-", suffix=".tmp", dir=root)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, root / "manifest.json")
+    finally:
+        # Also clean up on KeyboardInterrupt/SystemExit. An uncatchable process
+        # death can leave a staging file, but never a partial canonical manifest.
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
 
 
 def collect(diagnostic, device, output, acquire=False, frames=8, discovery_interface=None):
@@ -469,8 +496,6 @@ def collect(diagnostic, device, output, acquire=False, frames=8, discovery_inter
             # Validate before issuing another camera command.
             m["observations"] = validate_content(root, m)
         require(digest(executable) == identity, "diagnostic changed during collection")
-        m["status"] = SUCCESS
-        m["validation"] = {"status": "verified", "errors": []}
     except (EvidenceError, OSError, UnicodeError, KeyError, TypeError) as error:
         m["validation"] = {"status": "incomplete", "errors": [str(error)]}
     m["end_utc"] = utc_now()
@@ -479,18 +504,30 @@ def collect(diagnostic, device, output, acquire=False, frames=8, discovery_inter
         if path.name != "manifest.json":
             m["artifacts"][path.name] = digest(path)
     write_manifest(root, m)
-    if m["status"] != SUCCESS:
+    if m["validation"]["errors"]:
         raise EvidenceError("incomplete evidence retained at " + str(root) + ": " + "; ".join(m["validation"]["errors"]))
+
+    candidate = copy.deepcopy(m)
+    candidate["status"] = SUCCESS
+    candidate["validation"] = {"status": "verified", "errors": []}
     try:
-        verify(root)
+        # Stage the final status-dependent checklist while the authoritative
+        # manifest remains incomplete. Validate its actual bytes AND hash with
+        # exactly the same checks as public offline verification.
+        (root / "qualification-checklist.md").write_text(checklist(candidate), encoding="utf-8")
+        candidate["artifacts"]["qualification-checklist.md"] = digest(root / "qualification-checklist.md")
+        validate_manifest(root, candidate)
     except (EvidenceError, OSError, UnicodeError, KeyError, TypeError) as error:
-        m["status"] = INCOMPLETE
         m["validation"] = {"status": "incomplete", "errors": [str(error)]}
         (root / "qualification-checklist.md").write_text(checklist(m), encoding="utf-8")
         m["artifacts"]["qualification-checklist.md"] = digest(root / "qualification-checklist.md")
         write_manifest(root, m)
         raise EvidenceError("final offline validation failed; incomplete evidence retained: " + str(error)) from error
-    return m
+    # No success is durable before all checks pass. Failure/interruption before
+    # os.replace leaves the last incomplete manifest; nothing revalidates after
+    # this atomic commit. Pixel and JSONL artifacts are never rewritten here.
+    write_manifest(root, candidate)
+    return candidate
 
 
 def frame_count(value):
