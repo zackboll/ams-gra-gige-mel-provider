@@ -16,8 +16,11 @@
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <new>
+#include <numbers>
 #include <thread>
 #include <time.h>
+#include <type_traits>
 #include <utility>
 
 // The provider software version is the CMake project version, supplied as
@@ -236,7 +239,10 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     }
     cap.setChannelTypes({type});
     std::set<ir::ChannelMetadataCapabilityType> metadata{ir::ChannelMetadataCapabilityType::ChannelCommsTestRep};
-    if (type == ir::ChannelType::IRSTImage) metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
+    if (type == ir::ChannelType::IRSTImage) {
+        metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
+        metadata.insert(ir::ChannelMetadataCapabilityType::NavigationReportResp);
+    }
     if (type == ir::ChannelType::CommandAndControl) {
         metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
         metadata.insert(ir::ChannelMetadataCapabilityType::BITConfiguration);
@@ -253,8 +259,8 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
         cap.setPlatform(config->getPlatform());
         cap.setSensorLocation(config->getSensorLocation());
     }
-    // No navigation, NUC, distortion or tracking claims. TaskScheduleDepth's
-    // default zero is not a conformance claim: see the explicitly partial profile.
+    // Navigation receipt only, not image association, NUC, distortion or tracking.
+    // TaskScheduleDepth's default zero is not a conformance claim: see the profile.
     return cap;
 }
 
@@ -676,10 +682,15 @@ protected:
         slot = std::move(callback);
         return ir::Return::Success;
     }
+    // Used only when the caller holds operations and will unconditionally invoke
+    // after a no-throw commit. Detach must drain even a not-yet-entered callback.
+    template <class T> void admit_callback(const Callback<T>& callback) {
+        if (callback) { std::lock_guard lock(callback_mutex_); ++active_metadata_callbacks_; }
+    }
     template <class T> void invoke(const Callback<T>& callback, const T& message,
-                                  const std::atomic<bool>* admission = nullptr) {
+                                  const std::atomic<bool>* admission = nullptr, bool admitted = false) {
         if (!callback) return;
-        {
+        if (!admitted) {
             std::lock_guard lock(callback_mutex_);
             if (is_detached() || (admission && !admission->load())) return;
             ++active_metadata_callbacks_;
@@ -953,19 +964,115 @@ private:
         return ir::Return::NotSupported; \
     }
 
+// Structural checks only: consumer labels and values are not independently
+// qualified navigation. No clock conversion, clamping or normalization.
+std::optional<std::string> navigation_error(const mel::NavigationReport& report) {
+    if (report.getSystemTime() <= 0ns) return "systemTime must be positive nanoseconds";
+    switch (report.getState()) {
+    case mel::PositionSolutionState::Aligning:
+    case mel::PositionSolutionState::FreeInertial:
+    case mel::PositionSolutionState::GPS:
+    case mel::PositionSolutionState::Blended: break;
+    default: return "state must be Aligning, FreeInertial, GPS or Blended";
+    }
+    if (!std::isfinite(report.getLatitude()) || report.getLatitude() < -std::numbers::pi / 2 ||
+        report.getLatitude() > std::numbers::pi / 2) return "latitude must be finite and within [-pi/2, pi/2] radians";
+    if (!std::isfinite(report.getLongitude()) || report.getLongitude() < -std::numbers::pi ||
+        report.getLongitude() > std::numbers::pi) return "longitude must be finite and within [-pi, pi] radians";
+    const auto rate = report.getAttitudeRate();
+    if (rate.getAttitudeRateTime() < 0ns) return "attitudeRate.attitudeRateTime must be nonnegative nanoseconds";
+    const auto covariance = report.getPositionVelocityCovarianceUncertainty();
+    struct Field { const char* name; double value; bool variance = false; };
+    const Field fields[]{
+        {"altitude", report.getAltitude()}, {"altitudeMSL", report.getAltitudeMSL()},
+        {"attitude.roll", report.getAttitude().getRoll()},
+        {"attitude.pitch", report.getAttitude().getPitch()},
+        {"attitude.yaw", report.getAttitude().getYaw()},
+        {"attitudeRate.roll", rate.getAttitudeRate().getRoll()},
+        {"attitudeRate.pitch", rate.getAttitudeRate().getPitch()},
+        {"attitudeRate.yaw", rate.getAttitudeRate().getYaw()},
+        {"speed.north", report.getSpeed().getNorth()}, {"speed.east", report.getSpeed().getEast()},
+        {"speed.down", report.getSpeed().getDown()},
+        {"acceleration.north", report.getAcceleration().getNorth()},
+        {"acceleration.east", report.getAcceleration().getEast()},
+        {"acceleration.down", report.getAcceleration().getDown()},
+        {"wanderAngle", report.getWanderAngle()}, {"magneticHeading", report.getMagneticHeading()},
+        {"covariance.positionPositionPnPn", covariance.getPositionPositionPnPn(), true},
+        {"covariance.positionPositionPnPe", covariance.getPositionPositionPnPe()},
+        {"covariance.positionPositionPnPd", covariance.getPositionPositionPnPd()},
+        {"covariance.positionPositionPePe", covariance.getPositionPositionPePe(), true},
+        {"covariance.positionPositionPePd", covariance.getPositionPositionPePd()},
+        {"covariance.positionPositionPdPd", covariance.getPositionPositionPdPd(), true},
+        {"covariance.positionVelocityPnVn", covariance.getPositionVelocityPnVn()},
+        {"covariance.positionVelocityPnVe", covariance.getPositionVelocityPnVe()},
+        {"covariance.positionVelocityPnVd", covariance.getPositionVelocityPnVd()},
+        {"covariance.positionVelocityPeVe", covariance.getPositionVelocityPeVe()},
+        {"covariance.positionVelocityPeVd", covariance.getPositionVelocityPeVd()},
+        {"covariance.positionVelocityPdVd", covariance.getPositionVelocityPdVd()},
+        {"covariance.velocityVelocityVnVn", covariance.getVelocityVelocityVnVn(), true},
+        {"covariance.velocityVelocityVnVe", covariance.getVelocityVelocityVnVe()},
+        {"covariance.velocityVelocityVnVd", covariance.getVelocityVelocityVnVd()},
+        {"covariance.velocityVelocityVeVe", covariance.getVelocityVelocityVeVe(), true},
+        {"covariance.velocityVelocityVeVd", covariance.getVelocityVelocityVeVd()},
+        {"covariance.velocityVelocityVdVd", covariance.getVelocityVelocityVdVd(), true},
+    };
+    for (const auto& field : fields) {
+        if (!std::isfinite(field.value)) return std::string(field.name) + " must be finite";
+        if (field.variance && field.value < 0) return std::string(field.name) + " must be nonnegative";
+    }
+    return std::nullopt;
+}
+
 class ImageChannelImpl final : public ChannelCore, public ir::ImageChannel {
 public:
     using ChannelCore::ChannelCore;
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
     mel::RequestFor<ir::CameraCommandResp> send(ir::CameraCommand command) override { return camera_command(command); }
-    GIGE_UNSUPPORTED_SEND(mel::NavigationReport, ir::NavigationReportResp)
+    mel::RequestFor<ir::NavigationReportResp> send(mel::NavigationReport report) override {
+        if (in_provider_callback())
+            return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidState, "submit navigation outside provider callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        Callback<ir::NavigationReportResp> callback;
+        ir::NavigationReportResp reply;
+        mel::RequestFor<ir::NavigationReportResp> result;
+        try {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidState, "channel is detached");
+            if (const auto error = navigation_error(report))
+                return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidParameters, *error);
+            if (latest_navigation_ && report.getSystemTime() <= latest_navigation_->getSystemTime())
+                return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidState, "systemTime must strictly increase within this Image attachment");
+            // All potentially allocating preparation precedes the no-throw commit.
+            { std::lock_guard lock(callback_mutex_); callback = navigation_callback_; }
+            reply.setCommandID(0); // Unassigned: NavigationReport has no correlation IDs.
+            reply.setReqId(0);
+            reply.setSystemTime(report.getSystemTime()); // Exact echo, not an acknowledgement clock.
+            result = ready(reply);
+            static_assert(std::is_nothrow_copy_constructible_v<mel::NavigationReport>);
+            admit_callback(callback);
+            latest_navigation_.emplace(report);
+        } catch (const std::bad_alloc&) {
+            return failed<ir::NavigationReportResp>(mel::ErrorCode::InsufficientLocalResources, "navigation acknowledgement allocation failed");
+        }
+        invoke(callback, reply, nullptr, true);
+        return result;
+    }
     GIGE_UNSUPPORTED_CALLBACK(ir::BadPixelList)
     GIGE_UNSUPPORTED_CALLBACK(ir::OpticalDistortionMap)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightReport)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightQuaternion)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightEuler)
-    GIGE_UNSUPPORTED_CALLBACK(ir::NavigationReportResp)
+    ir::Return registerMetadataCallback(Callback<ir::NavigationReportResp> callback) override {
+        if (in_provider_callback()) return ir::Return::Fail;
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        const auto self = shared_from_this();
+        std::lock_guard operation(runtime_->operations);
+        return register_callback(navigation_callback_, std::move(callback));
+    }
     GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectMessage)
     GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectPreProcMessage)
     GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)
@@ -983,6 +1090,9 @@ private:
         invoke(callback, reply);
     }
     Callback<ir::CameraCommandResp> camera_callback_;
+    Callback<ir::NavigationReportResp> navigation_callback_;
+    // One private, attachment-local report; never read by frame publication.
+    std::optional<mel::NavigationReport> latest_navigation_; // Runtime::operations
 };
 
 class C2ChannelImpl final : public ChannelCore, public ir::C2Channel {
