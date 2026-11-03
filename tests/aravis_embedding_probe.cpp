@@ -329,6 +329,14 @@ void embedding_probe() {
         if (auto h = std::dynamic_pointer_cast<ir::HealthStatusChannel>(channel)) health = h;
     }
     CHECK(image && c2 && health);
+    for (const auto& cap : control->getCapabilities())
+        CHECK(!cap.getChannelMetadataCapabilities().contains(ir::ChannelMetadataCapabilityType::BadPixelList));
+    CHECK(!image->getCapabilities().getChannelMetadataCapabilities().contains(ir::ChannelMetadataCapabilityType::BadPixelList));
+    unsigned bad_pixel_calls = 0;
+    CHECK(image->registerMetadataCallback(std::function<void(ir::Channel&, const ir::BadPixelList*)>{
+        [&](auto&, auto*) { ++bad_pixel_calls; }}) == ir::Return::NotSupported);
+    CHECK(bad_pixel_calls == 0);
+    CHECK(image->registerMetadataCallback(std::function<void(ir::Channel&, const ir::BadPixelList*)>{}) == ir::Return::NotSupported);
     CHECK(c2->registerMetadataCallback(statuses.callback()) == ir::Return::Success);
     CHECK(image->registerMetadataCallback(replies.callback()) == ir::Return::Success);
     CHECK(health->registerMetadataCallback(details.callback()) == ir::Return::Success);

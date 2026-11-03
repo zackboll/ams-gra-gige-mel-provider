@@ -242,6 +242,8 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     if (type == ir::ChannelType::IRSTImage) {
         metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
         metadata.insert(ir::ChannelMetadataCapabilityType::NavigationReportResp);
+        if (runtime.camera_capabilities.known_empty_defect_map)
+            metadata.insert(ir::ChannelMetadataCapabilityType::BadPixelList);
     }
     if (type == ir::ChannelType::CommandAndControl) {
         metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
@@ -700,7 +702,7 @@ protected:
         catch (...) {
             ++runtime_->callback_failures;
             try { runtime_->report(admission ? "Health metadata callback threw; periodic reporting continues" :
-                "metadata callback threw; response remains available through its future"); } catch (...) {}
+                "metadata callback threw; successful operation remains committed"); } catch (...) {}
         }
         { std::lock_guard lock(callback_mutex_); --active_metadata_callbacks_; }
         callback_cv_.notify_all();
@@ -1060,7 +1062,25 @@ public:
         invoke(callback, reply, nullptr, true);
         return result;
     }
-    GIGE_UNSUPPORTED_CALLBACK(ir::BadPixelList)
+    ir::Return registerMetadataCallback(Callback<ir::BadPixelList> callback) override {
+        if (in_provider_callback()) return ir::Return::Fail;
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        const auto self = shared_from_this();
+        const ir::BadPixelList snapshot; // Pinned defaults: zero bytes/count, empty vector.
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return ir::Return::Fail;
+            if (!runtime_->camera_capabilities.known_empty_defect_map) return ir::Return::NotSupported;
+            const auto result = register_callback(bad_pixel_callback_, std::move(callback));
+            if (result != ir::Return::Success) return result;
+            // The slot is immutable after registration. Admit before releasing
+            // operations so concurrent detach drains even not-yet-entered dispatch.
+            admit_callback(bad_pixel_callback_);
+        }
+        invoke(bad_pixel_callback_, snapshot, nullptr, true);
+        return ir::Return::Success;
+    }
     GIGE_UNSUPPORTED_CALLBACK(ir::OpticalDistortionMap)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightReport)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightQuaternion)
@@ -1091,6 +1111,7 @@ private:
     }
     Callback<ir::CameraCommandResp> camera_callback_;
     Callback<ir::NavigationReportResp> navigation_callback_;
+    Callback<ir::BadPixelList> bad_pixel_callback_;
     // One private, attachment-local report; never read by frame publication.
     std::optional<mel::NavigationReport> latest_navigation_; // Runtime::operations
 };

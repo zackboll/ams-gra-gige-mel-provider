@@ -245,7 +245,13 @@ public:
     explicit SyntheticDevice(std::shared_ptr<DeviceState> state) : state_(std::move(state)) {}
     ~SyntheticDevice() override { (void)close(); }
 
-    CameraCapabilities capabilities() const override { return {}; }
+    CameraCapabilities capabilities() const override {
+        CameraCapabilities caps;
+        // The deterministic generator introduces no defective pixels; this is
+        // a source invariant, not a measurement or physical-sensor calibration.
+        caps.known_empty_defect_map = true;
+        return caps;
+    }
 
     Result<CameraConfiguration> configuration() const override {
         std::lock_guard lock(state_->mutex);

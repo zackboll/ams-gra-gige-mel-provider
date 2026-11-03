@@ -78,6 +78,33 @@ An invalid first frame cannot establish the accepted stream generation. A clock
 generation change or backward time within a stream stops acquisition and records
 a diagnostic. Disable, resolve the mapping, and start a new stream to recover.
 
+## Synthetic known-empty BadPixelList (GIGE-MEL-016)
+
+The deterministic synthetic generator introduces no defective pixels. Its device
+explicitly sets the SDK/MEL-independent `CameraCapabilities::known_empty_defect_map`
+evidence bit; the default is false. Neither backend identity nor successful frame
+receipt establishes this evidence. Aravis and physical cameras have **no qualified
+defect-map source**; the independent fixture remains unsupported by default.
+
+Only a qualified Image advertises the pinned `BadPixelList` metadata enum. C2 and
+Health do not advertise it. The first valid registration synchronously publishes
+exactly one upstream `BadPixelList` snapshot **before registration returns**:
+`size = 0` bytes, `badPixelCount = 0`, and an empty `std::vector<BadPixel>`.
+No buffers, acquisition enable, backend I/O, worker or queue are needed. ROI,
+exposure and frame-rate changes preserve this source invariant and do not repeat
+publication; disable/enable does not repeat it either. Reattachment starts a fresh
+registration state. The message pointer is valid only during callback dispatch.
+
+Null callbacks return BadPointer; duplicates, detached channels and provider
+callback reentry return Fail. Unsupported sources return NotSupported without a
+report or positive capability. Registration pins Control and channel, commits and
+admits the callback under the operation lock, then dispatches outside all provider
+locks using existing exception containment and detach draining. A consumer throw
+does not undo successful registration or stop another worker. Detach waits for an
+admitted callback, including one not yet entered, and no callback occurs after
+detach completes. This is limited required Image functionality, **not** sensor
+calibration, pixel correction, NUC, a defect mask or complete MEL conformance.
+
 ## Time conventions
 
 The synthetic frame timestamp is a host steady-clock value in nanoseconds,
@@ -300,7 +327,7 @@ Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
 documented BIT_Command and ModeCmd subsets, and metadata other than communications,
-Image camera/navigation receipt responses
+Image camera/navigation receipt responses and qualified known-empty BadPixelList
 and C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT_Configuration/BIT_Status or Health
 MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
 return unsupported.

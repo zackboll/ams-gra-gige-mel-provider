@@ -740,7 +740,7 @@ void unsupported_surfaces_return_real_errors() {
     expect_error(fixture.c2->send(ir::SystemTrackDataResponse{}), unsupported);
     expect_error(fixture.image->send(mel::NavigationReport{}), mel::ErrorCode::InvalidParameters);
     CHECK(fixture.image->registerMetadataCallback(
-        std::function<void(ir::Channel&, const ir::BadPixelList*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
+        std::function<void(ir::Channel&, const ir::OpticalDistortionMap*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
     CHECK(fixture.c2->registerMetadataCallback(
         std::function<void(ir::Channel&, const mel::CalibrationStatus*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
 }
@@ -1636,6 +1636,7 @@ void status_suppression_and_lifetime_pins() {
 #include "provider_health_tests.inc"
 #include "provider_bit_tests.inc"
 #include "provider_subsystem_tests.inc"
+#include "provider_bad_pixel_tests.inc"
 
 ir::ModeCmd standby_command(std::uint32_t id = 42) {
     ir::ModeCmd command;
@@ -2295,6 +2296,10 @@ void navigation_noninterference() {
 int main(int argc, char** argv) {
     test_join::prepare();
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"BadPixelList one-shot sessions configuration and frame invariants", bad_pixels_sessions},
+        {"BadPixelList callback reentry exception and independent workers", bad_pixels_reentry_and_throw},
+        {"BadPixelList detach drain registration race and lifetime pins", bad_pixels_detach_and_lifetime},
+        {"BadPixelList no backend Health BIT ModeCmd or generation interference", bad_pixels_noninterference},
         {"Navigation acceptance callbacks and attachment sessions", navigation_acceptance_and_sessions},
         {"Navigation every numeric field and boundary validation", navigation_numeric_validation},
         {"Navigation callback reentry and exception containment", navigation_callback_reentry_and_exceptions},

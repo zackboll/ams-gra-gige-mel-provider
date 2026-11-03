@@ -228,6 +228,7 @@ struct BackendCase {
     std::uint64_t first_native_id{0}, native_id_step{1};
     TimeModel time;
     std::string profile;
+    bool known_empty_defect_map{false};
 };
 
 std::chrono::nanoseconds period(const backend::CameraConfiguration& c) {
@@ -237,6 +238,7 @@ std::chrono::nanoseconds period(const backend::CameraConfiguration& c) {
 BackendCase synthetic_case() {
     BackendCase c;
     c.name = "synthetic";
+    c.known_empty_defect_map = true;
     c.initial = {64, 48, 0, 0, 30, 1ms};
     c.alternate = {48, 32, 6, 3, 60, 2ms};
     c.factory = [initial = c.initial] {
@@ -631,11 +633,28 @@ void identity_and_discovery(const BackendCase& kase) {
     const auto discovered = s.control->getCapabilities();
     CHECK(discovered.size() == 3);
     for (const auto& cap : discovered) {
+        CHECK(cap.getChannelMetadataCapabilities().contains(ir::ChannelMetadataCapabilityType::BadPixelList) ==
+            (kase.known_empty_defect_map && cap.getChannelTypes() == std::vector{ir::ChannelType::IRSTImage}));
         if (cap.getChannelTypes() == std::vector{ir::ChannelType::HealthAndStatus})
             CHECK(cap.getWidth() == 0 && cap.getHeight() == 0 && cap.getBufferSize() == 0);
         else check_geometry(cap, kase.initial);
     }
     check_geometry(s.image->getCapabilities(), kase.initial);
+    CHECK(s.image->getCapabilities().getChannelMetadataCapabilities().contains(ir::ChannelMetadataCapabilityType::BadPixelList) ==
+        kase.known_empty_defect_map);
+    unsigned bad_pixel_calls = 0;
+    bool valid_empty = false;
+    CHECK(s.image->registerMetadataCallback(std::function<void(ir::Channel&, const ir::BadPixelList*)>{
+        [&](auto& channel, auto* list) {
+            ++bad_pixel_calls;
+            valid_empty = &channel == s.image.get() && list && list->getSize() == 0 &&
+                list->getBadPixelCount() == 0 && list->getBadPixelList().empty();
+        }}) == (kase.known_empty_defect_map ? ir::Return::Success : ir::Return::NotSupported));
+    CHECK(kase.known_empty_defect_map ? bad_pixel_calls == 1 && valid_empty : bad_pixel_calls == 0);
+    CHECK(s.image->registerMetadataCallback(std::function<void(ir::Channel&, const ir::BadPixelList*)>{}) ==
+        (kase.known_empty_defect_map ? ir::Return::BadPointer : ir::Return::NotSupported));
+    CHECK(s.control->detachChannel(s.image) == ir::Return::Success);
+    CHECK(bad_pixel_calls == (kase.known_empty_defect_map ? 1U : 0U));
     check_geometry(s.c2->getCapabilities(), kase.initial);
     const auto health_cap = s.health->getCapabilities();
     CHECK(health_cap.getWidth() == 0 && health_cap.getHeight() == 0 && health_cap.getBufferSize() == 0);

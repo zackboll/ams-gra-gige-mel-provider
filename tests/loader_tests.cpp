@@ -8,6 +8,7 @@
 #include "public_subsystem_demo.hpp"
 #include "public_mode_demo.hpp"
 #include "public_navigation_demo.hpp"
+#include "public_bad_pixel_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -211,6 +212,9 @@ void run(const char* library_path, const std::string& mode) {
     session.control = control_factory("synthetic", session.manager);
     require(session.control != nullptr, "control factory returned null");
     require(session.control->init("") == ir::Return::Success, "Control::init failed");
+    if (mode == "--expect-no-bad-pixels" || mode == "--bad-pixels-only") {
+        demonstrate_bad_pixels(session.control, mode == "--expect-no-bad-pixels"); return;
+    }
     if (mode == "--expect-no-navigation") { demonstrate_navigation(session.control, true); return; }
     if (mode == "--navigation-only") { demonstrate_navigation(session.control); return; }
     std::cout << "Loaded provider: " << library_path << '\n';
@@ -229,6 +233,7 @@ void run(const char* library_path, const std::string& mode) {
     demonstrate_subsystem(session.control);
     demonstrate_mode(session.control);
     demonstrate_navigation(session.control);
+    demonstrate_bad_pixels(session.control);
 
     const auto capabilities = session.control->getCapabilities();
     const auto selected = std::find_if(capabilities.begin(), capabilities.end(), [](const auto& capability) {
@@ -283,6 +288,8 @@ int main(int argc, char** argv) {
         const std::string mode = argc == 3 ? argv[2] : "";
         run(argv[1], mode);
         std::cout << (mode == "--expect-no-health" ? "PASS: baseline Health absent and not attachable\n" :
+            mode == "--expect-no-bad-pixels" ? "PASS: unchanged baseline BadPixelList unadvertised, NotSupported, no callback\n" :
+            mode == "--bad-pixels-only" ? "PASS: public MEL Image BadPixelList one-shot zero-byte zero-entry payload without acquisition\n" :
             mode == "--expect-no-navigation" ? "PASS: unchanged baseline navigation Unsupported; no Image acquisition\n" :
             mode == "--navigation-only" ? "PASS: TEST DATA navigation ready echo, zero IDs, matching callback and typed stale rejection; no Image acquisition\n" :
             mode == "--expect-no-mode" ? "PASS: unchanged baseline Standby Unsupported; no Image acquisition\n" :
@@ -292,7 +299,7 @@ int main(int argc, char** argv) {
             mode == "--bit-only" ? "PASS: public MEL BIT catalogue, acceptance, completed result and Health faults\n" :
             mode == "--expect-no-subsystem" ? "PASS: baseline SubsystemStatusResp unadvertised; valid registration NotSupported\n" :
             mode == "--subsystem-only" ? "PASS: public MEL SubsystemStatusResp inventory, stable BIT_report and updated revision\n" :
-            "PASS: native factory loading, BIT, Health snapshots, SubsystemStatusResp, navigation receipt/echo/callback/stale rejection, registered Mono8 delivery, and teardown\n");
+            "PASS: native factory loading, BIT, Health snapshots, SubsystemStatusResp, navigation receipt/echo/callback/stale rejection, one-shot zero-entry BadPixelList, registered Mono8 delivery, and teardown\n");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

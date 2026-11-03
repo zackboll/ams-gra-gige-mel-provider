@@ -1,5 +1,145 @@
 # Bootstrap validation record
 
+## GIGE-MEL-016 synthetic known-empty Image BadPixelList
+
+**Starting point.** Fetch verified `origin/main` at
+`e5cf74c3a29d166624c0d7b3f1d372f44f55e6f0`, tree
+`29b720bb05d25afa8f67f1f6fa7c53886d981a10`, before creating
+`feature/gige-mel-016-synthetic-bad-pixels`. A separate detached, unchanged
+starting-main worktree at `/tmp/gm16/baseline` was built independently at
+`/tmp/gm16/baseline-build`; its SDK-free suite passed **9/9**.
+
+**Scope.** `CameraCapabilities::known_empty_defect_map` defaults to false; only
+the synthetic device explicitly sets it true. The deterministic generator has
+no introduced defective pixels, across its supported ROI/exposure/rate settings.
+This is evidence about a defined source, not a sensor calibration inferred from
+identity or a frame. Aravis and physical cameras have **no qualified defect-map
+source**. The independent fixture keeps the unsupported default. Their Image
+capabilities stay negative and registration returns NotSupported without a report.
+
+Qualified Image registration publishes one synchronous upstream BadPixelList
+before returning Success, even disabled: zero bytes, zero count, empty upstream
+`std::vector<BadPixel>`. Dispatch follows admission under operations, then runs
+outside provider locks with Control/channel pins, callback exception containment
+and detach draining. No additional worker, queue, repeat on reconfiguration or
+acquisition, backend I/O, frame-header/pixel change, reserved enum use, SDK/pin
+change, upstream edit, public factory/C ABI change or CI restructuring is added.
+The shared metadata-throw diagnostic now says the operation remains committed
+rather than assuming every publication has a future.
+
+### Permanent contract coverage
+
+The existing provider executable retains all **86** previous scenarios and adds
+four BadPixelList groups (**90** total):
+
+- Image-only discovery/attachment advertisement agrees with registration;
+  callback identity, exactly one initial notification, zero size/count/entries,
+  delivery without enable/buffers; ROI/offset/exposure/rate reconfiguration and
+  acquisition do not repeat it. Independent instances and fresh registration
+  after reattach are checked. Detached handles cannot register.
+- Null (before and after registration), duplicate and callback-context
+  registration failures; local/cross-provider mutation and CameraCommand/navigation
+  reentry rejection; registration reentry from Image and C2 callbacks. A thrown
+  consumer exception leaves registration successful and increments diagnostics
+  once, while the existing Image worker continues delivering frames.
+- Watchdog-gated registration permits independent CameraCommand completion
+  outside provider locks; external detach closes admission and waits for the
+  held callback, then rejects a queued registration. Control lifetime pins
+  survive external-owner release until dispatch ends. Twenty-four simultaneous
+  detach/registration trials accept only the two legal outcomes: Success/one
+  report or Fail/no report, with no publication after detach completes.
+- A counted synthetic decorator with a different backend identity proves
+  qualification follows explicit evidence, not a backend-name special case.
+  Registration changes no backend call count, Health Detailed values (including
+  configuration generation), observed MFA state, completed BIT time/result or
+  current faults. Bounded ModeCmd still acknowledges Standby. Navigation and
+  CameraCommand callback counts remain independent. Full retained-pool image
+  bytes, pattern, geometry, exposure, timestamp and empty navigation/inertial
+  fields stay intact.
+
+The shared backend portability discovery scenario checks synthetic positive and
+independent-fixture negative capability/registration/payload behavior, including
+unsupported null registration. Real pinned-Aravis adapter and MEL embedding
+tests assert false source evidence, absent advertisement, NotSupported for valid
+and null callbacks, and no fabricated report. All existing adapter, synthetic,
+loopback, timestamp, navigation and public-loader contracts remain enabled.
+
+### Public consumer and unchanged-main negative control
+
+`tests/public_bad_pixel_demo.hpp` uses only upstream MEL declarations and is
+shared by the native `dlopen` loader and separately built installed consumer.
+It checks discovery and attached Image capability, exact channel identity,
+one-shot zero-entry payload, and no acquisition. The same feature-built loader
+was executed against both independently built libraries:
+
+```text
+loader_tests <feature-library> --bad-pixels-only
+PASS: public MEL Image BadPixelList one-shot zero-byte zero-entry payload without acquisition
+
+loader_tests <unchanged-starting-main-library> --expect-no-bad-pixels
+PASS: unchanged baseline BadPixelList unadvertised, NotSupported, no callback
+
+loader_tests <unchanged-starting-main-library> --bad-pixels-only
+FAIL: BadPixelList discovery must be truthful and Image-only
+```
+
+The last command's exit **1** is the required expected negative-control result;
+factory resolution/loading succeeds and the explicit unsupported mode separately
+exercises actual registration, not just advertisement. Baseline sources are
+unchanged. The normal loader still checks registered Mono8 delivery and teardown.
+
+### Executed matrix and package checks
+
+All ten full existing CTest configurations passed, without exclusions:
+
+| Configuration | SDK-free | Pinned-Aravis-enabled |
+| --- | --- | --- |
+| GCC Debug | **9/9** | **15/15** |
+| GCC Release | **9/9** | **15/15** |
+| Clang Debug | **9/9** | **15/15** |
+| GCC ASan/UBSan (leaks and halt enabled) | **9/9** | **15/15** |
+| GCC TSan (halt enabled; existing SDK suppressions unchanged) | **9/9** | **15/15** |
+
+Every lane also ran all four BadPixelList groups in three separate processes.
+No environmental sanitizer failure or verified sanitizer defect occurred in
+these runs; no test was masked, skipped or weakened. The new detach test's first
+development run hit its watchdog because it attempted a synchronous registration
+while detach held operations waiting for the gated callback. The test now queues
+that attempt on another thread, opens the gate, and asserts Fail after detach;
+the corrected test and repeated/full suites pass. This was a test orchestration
+error, not evidence of a provider defect.
+
+The installed upstream-header consumer and a real synthetic 64×48 PGM capture
+passed. `verify_package_isolation.py` passed every check: exact provisioned SDK
+resolution in the adapter test, no SDK stack dependency in the common provider,
+no forbidden installed names/text/symbols, and a separately configured/built/run
+consumer with `PKG_CONFIG_PATH` removed. Offline vendor checks passed **97/97**
+upstream files and **2/2** private JSON files. The standalone package verifier's
+regressions and offline camera-evidence tests remain in every full suite.
+
+Hosted checks are separate from local evidence. The unchanged workflow runs all
+five lanes on both SDK configurations for the pushed PR head. Final-head hosted
+run URLs, conclusions, HEAD/tree identifiers and readiness are recorded in PR
+[#16](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/16), rather than
+embedding a self-referential commit identifier here.
+
+### Qualification environment and limits
+
+Executed locally on Linux 6.12.113, GCC 14.2.0, Clang 19.1.7, CMake/Ninja,
+Python 3.13.5. Builds and logs are outside the repository under `/tmp/gm16`.
+SDK-enabled lanes use the existing explicitly provisioned Aravis **0.8.36** at
+`/tmp/gm13-work/aravis-prefix`. Its release archive was rehashed as
+`246deaa0042a387ff1bc00332d0fb80537ce14abde2c28d1a54c91f17adc51bf`, matching
+the unchanged provisioning pin. The SDK itself is not sanitizer-instrumented;
+the existing documented SDK handoff suppressions/blind spots remain unchanged.
+ASan uses `detect_leaks=1:halt_on_error=1`, UBSan
+`halt_on_error=1:print_stacktrace=1`, TSan `halt_on_error=1`.
+
+The existing simulator wildcard discovery-listener exception, simulated/test-only
+virtual clock and lack of physical camera/NIC/timing qualification are unchanged.
+This is limited required Image functionality, not complete MEL conformance,
+calibration, correction, NUC, navigation association or physical-device evidence.
+
 ## GIGE-MEL-015 partial required navigation reception
 
 **Starting point.** Fresh fetch verified `origin/main` commit
