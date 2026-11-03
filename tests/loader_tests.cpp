@@ -6,6 +6,7 @@
 #include "public_health_demo.hpp"
 #include "public_bit_demo.hpp"
 #include "public_subsystem_demo.hpp"
+#include "public_mode_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -210,6 +211,9 @@ void run(const char* library_path, const std::string& mode) {
     require(session.control != nullptr, "control factory returned null");
     require(session.control->init("") == ir::Return::Success, "Control::init failed");
     std::cout << "Loaded provider: " << library_path << '\n';
+    if (mode == "--mode-only" || mode == "--expect-no-mode") {
+        demonstrate_mode(session.control, mode == "--expect-no-mode"); return;
+    }
     if (mode == "--bit-only" || mode == "--expect-no-bit") {
         demonstrate_bit(session.control, mode == "--expect-no-bit"); return;
     }
@@ -220,6 +224,7 @@ void run(const char* library_path, const std::string& mode) {
     if (!mode.empty()) return;
     demonstrate_bit(session.control);
     demonstrate_subsystem(session.control);
+    demonstrate_mode(session.control);
 
     const auto capabilities = session.control->getCapabilities();
     const auto selected = std::find_if(capabilities.begin(), capabilities.end(), [](const auto& capability) {
@@ -274,6 +279,8 @@ int main(int argc, char** argv) {
         const std::string mode = argc == 3 ? argv[2] : "";
         run(argv[1], mode);
         std::cout << (mode == "--expect-no-health" ? "PASS: baseline Health absent and not attachable\n" :
+            mode == "--expect-no-mode" ? "PASS: unchanged baseline Standby Unsupported; no Image acquisition\n" :
+            mode == "--mode-only" ? "PASS: public MEL Standby acknowledgement, correlated statuses, typed Operate rejection; no Image acquisition\n" :
             mode == "--health-only" ? "PASS: public MEL Health discovery, attachment and both current reports\n" :
             mode == "--expect-no-bit" ? "PASS: baseline BIT metadata/registrations absent; valid initiation Unsupported\n" :
             mode == "--bit-only" ? "PASS: public MEL BIT catalogue, acceptance, completed result and Health faults\n" :

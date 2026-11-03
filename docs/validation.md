@@ -1,5 +1,132 @@
 # Bootstrap validation record
 
+## GIGE-MEL-014 bounded ModeCmd
+
+**Starting point.** Freshly fetched `origin/main` was commit
+`27b3f4411674269eac891fbb50686d6c5872b6aa`, tree
+`7e01e79e7c6245309245b90693728e7af93b0b71` (PR #13 merged, no open PRs).
+Work used the clean branch `feature/gige-mel-014-mode-command`. An independent,
+detached worktree at `/tmp/gm14-baseline` retained that exact commit and tree
+with no tracked modifications. Its own SDK-free suite passed **9/9**.
+
+**Scope.** The production change is confined to the common provider's ModeCmd
+validation and read-only acknowledgement. The [exact contract](mode-command.md)
+accepts only Standby/Unused/default-scan when already initialized, valid and
+idle, using existing runtime locks, outcome/error mapping and CommandStatus
+dispatch. Health's observed state remains authoritative; there is no new state
+variable, device I/O, transition, Image disable, configuration mutation,
+diagnostic reset, BIT execution/change, scheduling or worker. No public provider
+headers, adapters, timestamp behavior, SDK provisioning/pins, vendored bytes,
+TSan suppressions, CI lanes, CTest targets or installed dependencies changed.
+
+### Before/after and public consumers
+
+The feature native loader includes only pinned public MEL headers and does not
+link the provider. The **same executable** loaded the separately built baseline
+library and the feature library via `dlopen`/the unchanged exported factories:
+
+```text
+loader_tests /tmp/gm14-baseline/build/dev/libgige_mel_provider.so --expect-no-mode
+PASS: unchanged baseline Standby Unsupported; no Image acquisition
+
+loader_tests /tmp/gm14-baseline/build/dev/libgige_mel_provider.so --mode-only
+FAIL: Standby did not return Unused and one status
+[expected exit 1: baseline lacks the feature, not a loader/setup failure]
+
+loader_tests <feature-library> --mode-only
+PASS: public MEL Standby acknowledgement, correlated statuses, typed Operate rejection; no Image acquisition
+```
+
+The baseline library was not patched or substituted. The feature demonstration
+discovers/attaches C2, registers CommandStatus, sends ID 0 Standby/Unused and
+checks ready Unused/Accepted/NotSet/empty description; ID UINT32_MAX
+Operate/TaskSched returns typed Unsupported and Rejected/CapabilityUnavailable.
+It attaches no Image and additionally checks real Health Standby, idle and zero
+delivered frames. The same demonstration runs in the existing native-loader
+CTest and the installed public-header consumer. The existing capture example
+still delivers a genuine synthetic 64×48 Mono8 frame.
+
+### Permanent provider regressions (M1–M15)
+
+Six cases extend the existing executable, now **80 provider scenarios** (all
+74 existing scenarios preserved). They cover:
+
+- initialized/idle acceptance; exact one terminal status; IDs 0, 42,
+  UINT32_MAX and repeated IDs; ready futures with and without registered
+  callbacks; no late status replay;
+- repeated acknowledgement with every backend/device/stream call counted,
+  unchanged configuration generation/Health details, diagnostic history and
+  completed BIT timestamp/result, and no Image delivery;
+- active acquisition and faulted-but-owned rejection, explicit disable and
+  restart recovery, real Health Standby/Operate/Degraded consistency, and
+  invalid configuration rejection without readback/apply or validity repair;
+- the complete defined-state × defined-mode matrix, NotSet/MaxExclusive,
+  out-of-range state/mode and exact typed error/CannotComply mapping;
+- independent changes to every ScanParam field and every nested ScanType flag,
+  valid non-default and invalid degradation values, and all seven floating
+  fields (center az/el, width, height, rate, preferred/required revisit) with
+  nonzero finite values, NaN and positive/negative infinity; zero device calls;
+- same-manager and cross-manager status-callback reentry, Image-callback
+  reentry, no recursive CommandStatus, and contained consumer exceptions on
+  acceptance and active-acquisition rejection without stopping Image;
+- deterministic gates inside stream start, receive/join and configuration
+  apply for enable/disable/CameraCommand overlap; both valid and invalid
+  post-readback outcomes; callback-held detach admission/drain and Control
+  lifetime pins/destruction. A separate Image configuration completes while a
+  ModeCmd status callback is held, proving user code runs outside runtime locks.
+
+Gates/promises and observed join/admission events establish operation overlap;
+no sleep-based race verdicts are used. Watchdogs bound deadlocks, and cleanup
+opens gates on unwinding. All six focused scenarios passed 15 consecutive runs.
+
+### Executed local validation
+
+Linux, GCC **14.2.0**, Clang **19.1.7**, real pinned Aravis **0.8.36** at
+`/tmp/gm13-work/aravis-prefix` (existing explicit provision), synthetic/Fake and
+simulated GigE loopback only. No physical camera was tested. SDK-free builds use
+the repository presets; SDK-enabled builds use external `/tmp/gm14/<lane>`
+directories, `GIGE_MEL_BUILD_ARAVIS=ON` and that SDK's pkg-config path.
+
+| Build/check | Result |
+| --- | --- |
+| GCC development, SDK-free | 9/9 CTests |
+| GCC Release, SDK-free | 9/9 CTests |
+| Clang development, SDK-free | 9/9 CTests |
+| GCC ASan/UBSan, SDK-free, leak detection/halt enabled | 9/9 CTests |
+| GCC TSan, SDK-free, halt enabled | 9/9 CTests |
+| GCC development with Aravis | 15/15 CTests |
+| GCC Release with Aravis | 15/15 CTests |
+| Clang development with Aravis | 15/15 CTests |
+| GCC ASan/UBSan with Aravis | 15/15 CTests |
+| GCC TSan with Aravis, existing suppressions | 15/15 CTests |
+| Offline upstream and JSON verifiers | 97 upstream files and 2 JSON files verified |
+| Package-isolation verifier regressions | 29/29 tests |
+| Real installed isolation + separate installed consumer | GCC development/Release and Clang passed |
+| SDK-free installed consumer | passed, including public ModeCmd demonstration |
+| Native loader, focused before/after and synthetic capture | passed (baseline positive control intentionally fails) |
+| `git diff --check` | clean |
+
+Each SDK-enabled suite includes the existing **22 adapter**, **15 stream**,
+**17 timestamp**, **17 loopback scenarios plus one socket-audit control**,
+MEL embedding and diagnostic help, as well as all SDK-free contracts. Real
+installed isolation verifies the adapter loads the expected SDK, the provider
+has no Aravis/GLib dependency, installed names/text/symbols stay isolated, and a
+separate consumer configures without `PKG_CONFIG_PATH`, builds and runs.
+
+The SDK is **not sanitizer-instrumented**. Existing test-only TSan suppressions
+remain unchanged: SDK handoff stack patterns can hide reports involving project
+accesses, and loopback `called_from_lib` suppressions leave SDK/GLib callback and
+handoff blind spots. A green run is not unrestricted boundary race coverage.
+The simulator's effective-wildcard `255.255.255.255:3956` discovery listener and
+documented test-only socket-audit exception remain unchanged; this is not strict
+network isolation or physical NIC/camera qualification. Production Aravis frame
+timestamps remain invalid; virtual-clock test publication does not qualify time.
+
+Hosted push and pull_request results must be checked against the **final head**
+and recorded in the PR handoff, separately from these executed local checks.
+Required ModeCmd/task-scheduling semantics and operational/hardware MEL gaps
+remain open; this acknowledgement does not close them.
+
 ## GIGE-MEL-012 confirmed Aravis control loss
 
 **Starting revision.** Fetched `origin/main` was exactly commit

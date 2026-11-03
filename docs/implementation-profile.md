@@ -260,6 +260,16 @@ still retained by a consumer-created cycle.
 
 ## Unsupported surfaces and diagnostics
 
+[ModeCmd's bounded subset](mode-command.md) is a synchronous, idempotent
+`Standby/Unused/default-ScanParam` acknowledgement of initialized, valid, idle
+observed provider state, with correlated terminal CommandStatus. It performs no
+device I/O, Image lifecycle operation, configuration/generation mutation,
+diagnostic clearing, BIT change or task scheduling. Active (including faulted
+but still owned) acquisition rejects Standby. Existing operations/state mutexes
+serialize the snapshot; no commanded state is added and Health's observed-state
+model is unchanged. All other state/mode requests are rejected. This does not
+complete required ModeCmd or task-scheduling conformance.
+
 The [bounded provider-software BIT profile](software-bit.md) supports one
 synchronous C2 observed-state test (numeric ID 1), C2 catalogue/status registration,
 correlated CommandStatus and Health BIT_Status. Latest completion and two current
@@ -277,9 +287,9 @@ association, not camera reachability.
 Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
-documented BIT_Command subset, Image
+documented BIT_Command and ModeCmd subsets, Image
 NavigationReport, and metadata other than communications, Image camera responses
-and C2 configuration/BIT CommandStatus, C2 BIT_Configuration/BIT_Status or Health
+and C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT_Configuration/BIT_Status or Health
 MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
 return unsupported.
 Some of these are upstream **required** methods, not optional capabilities; this
