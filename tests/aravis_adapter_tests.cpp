@@ -43,6 +43,7 @@ bool contains(const std::string& text, std::string_view part) { return text.find
 std::shared_ptr<backend::ICameraDevice> open_fake(backend::ICameraBackend& camera) {
     auto opened = camera.open(aravis_fake::device_id);
     if (!opened) throw std::runtime_error("open Fake_1 failed: " + opened.error().message);
+    CHECK(!opened.value()->capabilities().known_empty_defect_map);
     return std::move(opened).value();
 }
 

@@ -48,6 +48,18 @@ ctest --test-dir build/make --output-on-failure
 
 ## What is implemented
 
+**Synthetic Image BadPixelList** supports the generator's explicitly known-empty
+defect map: one synchronous callback before successful registration returns,
+including while Image is disabled, with zero bytes, zero entries and an empty
+upstream vector. No acquisition, worker, queue or repeat publication on
+ROI/exposure/frame-rate changes is needed. The synthetic generator introduces no
+defective pixels; the backend capability defaults to unsupported, not an inference
+from identity or received frames. Aravis and physical cameras have **no qualified
+defect-map source**; neither they nor the independent fixture fabricate empty
+reports. Advertisement is qualified Image-only. See the
+[exact registration/lifetime contract](docs/implementation-profile.md#synthetic-known-empty-badpixellist-gige-mel-016).
+This is not calibration, correction, NUC or complete MEL conformance.
+
 [Partial required Image navigation receipt](docs/navigation-reception.md)
 structurally validates consumer-supplied reports, retains one latest accepted
 report per Image attachment with strictly increasing time, and returns ready

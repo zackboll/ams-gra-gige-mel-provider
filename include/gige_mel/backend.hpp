@@ -88,6 +88,9 @@ struct CameraCapabilities {
     bool mono8{true};
     bool external_trigger{false};
     bool external_buffer_acquisition{false};
+    // Explicit source evidence, valid across all supported configurations.
+    // Unknown/unsupported by default; not inferred from identity or frames.
+    bool known_empty_defect_map{false};
 };
 
 struct DeviceInfo {
