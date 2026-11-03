@@ -1,6 +1,7 @@
 #include <gige_mel/provider.hpp>
 #include "join_observer.hpp"
 #include "clock_observer.hpp"
+#include "public_navigation_demo.hpp"
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
@@ -20,6 +21,7 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -736,7 +738,7 @@ void unsupported_surfaces_return_real_errors() {
     expect_error(fixture.c2->send(ir::CameraProtectCmd{}), unsupported);
     expect_error(fixture.c2->send(ir::EraseCommand{}), unsupported);
     expect_error(fixture.c2->send(ir::SystemTrackDataResponse{}), unsupported);
-    expect_error(fixture.image->send(mel::NavigationReport{}), unsupported);
+    expect_error(fixture.image->send(mel::NavigationReport{}), mel::ErrorCode::InvalidParameters);
     CHECK(fixture.image->registerMetadataCallback(
         std::function<void(ir::Channel&, const ir::BadPixelList*)>{[](auto&, auto*) {}}) == ir::Return::NotSupported);
     CHECK(fixture.c2->registerMetadataCallback(
@@ -1927,11 +1929,378 @@ void mode_detach_and_control_overlap() {
     expect_error(pinned.c2->send(standby_command()), mel::ErrorCode::InvalidState);
 }
 
+using NavigationCallback = std::function<void(ir::Channel&, const ir::NavigationReportResp*)>;
+
+void navigation_acceptance_and_sessions() {
+    Fixture f, other;
+    unsigned calls = 0, other_calls = 0, statuses = 0;
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{}) == ir::Return::BadPointer);
+    CHECK(response(f.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(f.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) { ++statuses; }}) == ir::Return::Success);
+    ir::NavigationReportResp observed;
+    bool correct = true;
+    NavigationCallback callback = [&](auto& channel, auto* reply) {
+        ++calls; correct = correct && &channel == f.image.get() && reply;
+        if (reply) observed = *reply;
+    };
+    CHECK(f.image->registerMetadataCallback(callback) == ir::Return::Success);
+    CHECK(calls == 0); // No historical replay.
+    CHECK(f.image->registerMetadataCallback(callback) == ir::Return::Fail);
+    CHECK(other.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) { ++other_calls; }}) == ir::Return::Success);
+    auto time = 2ns;
+    for (auto state : {mel::PositionSolutionState::Aligning, mel::PositionSolutionState::FreeInertial,
+                      mel::PositionSolutionState::GPS, mel::PositionSolutionState::Blended}) {
+        auto report = navigation_test_data(time++); report.setState(state);
+        const auto reply = response(f.image->send(report));
+        CHECK(reply->getSystemTime() == report.getSystemTime() && reply->getCommandID() == 0 && reply->getReqId() == 0);
+        CHECK(observed.getSystemTime() == reply->getSystemTime() && observed.getCommandID() == 0 && observed.getReqId() == 0);
+    }
+    CHECK(correct && calls == 4 && other_calls == 0 && statuses == 0);
+    expect_error(f.image->send(navigation_test_data(5ns)), mel::ErrorCode::InvalidState);
+    expect_error(f.image->send(navigation_test_data(1ns)), mel::ErrorCode::InvalidState);
+    auto invalid = navigation_test_data(100ns); invalid.setLatitude(2);
+    expect_error(f.image->send(invalid), mel::ErrorCode::InvalidParameters);
+    CHECK(response(f.image->send(navigation_test_data(6ns)))->getSystemTime() == 6ns); // Rejection did not advance state.
+    CHECK(response(other.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    f.add_buffer();
+    CHECK(f.image->enable() == ir::Return::Success);
+    CHECK(response(f.image->send(navigation_test_data(7ns)))->getSystemTime() == 7ns);
+    CHECK(f.image->disable() == ir::Return::Success);
+    expect_error(f.image->send(navigation_test_data(6ns)), mel::ErrorCode::InvalidState);
+    f.release_buffers();
+    CHECK(f.image->enable() == ir::Return::Success);
+    expect_error(f.image->send(navigation_test_data(7ns)), mel::ErrorCode::InvalidState);
+    CHECK(f.image->disable() == ir::Return::Success);
+    const auto old = f.image;
+    CHECK(f.control->detachChannel(old) == ir::Return::Success);
+    expect_error(old->send(navigation_test_data(8ns)), mel::ErrorCode::InvalidState);
+    CHECK(old->registerMetadataCallback(NavigationCallback{}) == ir::Return::Fail);
+    CHECK(old->registerMetadataCallback(callback) == ir::Return::Fail);
+    f.image = std::dynamic_pointer_cast<ir::ImageChannel>(f.control->attachChannel(f.config(ir::ChannelType::IRSTImage)));
+    CHECK(f.image && response(f.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(calls == 6 && other_calls == 1 && statuses == 0);
+}
+
+void navigation_numeric_validation() {
+    Fixture f;
+    unsigned calls = 0;
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) { ++calls; }}) == ir::Return::Success);
+    using Change = std::function<void(mel::NavigationReport&, double)>;
+    struct Field { const char* name; Change change; bool variance = false; };
+    const std::vector<Field> fields{
+        {"latitude", [](auto& r, double v) { r.setLatitude(v); }},
+        {"longitude", [](auto& r, double v) { r.setLongitude(v); }},
+        {"altitude", [](auto& r, double v) { r.setAltitude(v); }},
+        {"altitudeMSL", [](auto& r, double v) { r.setAltitudeMSL(v); }},
+        {"attitude.roll", [](auto& r, double v) { auto a = r.getAttitude(); a.setRoll(v); r.setAttitude(a); }},
+        {"attitude.pitch", [](auto& r, double v) { auto a = r.getAttitude(); a.setPitch(v); r.setAttitude(a); }},
+        {"attitude.yaw", [](auto& r, double v) { auto a = r.getAttitude(); a.setYaw(v); r.setAttitude(a); }},
+        {"attitudeRate.roll", [](auto& r, double v) { auto a = r.getAttitudeRate(); auto e = a.getAttitudeRate(); e.setRoll(v); a.setAttitudeRate(e); r.setAttitudeRate(a); }},
+        {"attitudeRate.pitch", [](auto& r, double v) { auto a = r.getAttitudeRate(); auto e = a.getAttitudeRate(); e.setPitch(v); a.setAttitudeRate(e); r.setAttitudeRate(a); }},
+        {"attitudeRate.yaw", [](auto& r, double v) { auto a = r.getAttitudeRate(); auto e = a.getAttitudeRate(); e.setYaw(v); a.setAttitudeRate(e); r.setAttitudeRate(a); }},
+        {"speed.north", [](auto& r, double v) { auto a = r.getSpeed(); a.setNorth(v); r.setSpeed(a); }},
+        {"speed.east", [](auto& r, double v) { auto a = r.getSpeed(); a.setEast(v); r.setSpeed(a); }},
+        {"speed.down", [](auto& r, double v) { auto a = r.getSpeed(); a.setDown(v); r.setSpeed(a); }},
+        {"acceleration.north", [](auto& r, double v) { auto a = r.getAcceleration(); a.setNorth(v); r.setAcceleration(a); }},
+        {"acceleration.east", [](auto& r, double v) { auto a = r.getAcceleration(); a.setEast(v); r.setAcceleration(a); }},
+        {"acceleration.down", [](auto& r, double v) { auto a = r.getAcceleration(); a.setDown(v); r.setAcceleration(a); }},
+        {"wanderAngle", [](auto& r, double v) { r.setWanderAngle(v); }},
+        {"magneticHeading", [](auto& r, double v) { r.setMagneticHeading(v); }},
+        {"covariance.positionPositionPnPn", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionPositionPnPn(v); r.setPositionVelocityCovarianceUncertainty(c); }, true},
+        {"covariance.positionPositionPnPe", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionPositionPnPe(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionPositionPnPd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionPositionPnPd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionPositionPePe", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionPositionPePe(v); r.setPositionVelocityCovarianceUncertainty(c); }, true},
+        {"covariance.positionPositionPePd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionPositionPePd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionPositionPdPd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionPositionPdPd(v); r.setPositionVelocityCovarianceUncertainty(c); }, true},
+        {"covariance.positionVelocityPnVn", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionVelocityPnVn(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionVelocityPnVe", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionVelocityPnVe(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionVelocityPnVd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionVelocityPnVd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionVelocityPeVe", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionVelocityPeVe(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionVelocityPeVd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionVelocityPeVd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.positionVelocityPdVd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setPositionVelocityPdVd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.velocityVelocityVnVn", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setVelocityVelocityVnVn(v); r.setPositionVelocityCovarianceUncertainty(c); }, true},
+        {"covariance.velocityVelocityVnVe", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setVelocityVelocityVnVe(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.velocityVelocityVnVd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setVelocityVelocityVnVd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.velocityVelocityVeVe", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setVelocityVelocityVeVe(v); r.setPositionVelocityCovarianceUncertainty(c); }, true},
+        {"covariance.velocityVelocityVeVd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setVelocityVelocityVeVd(v); r.setPositionVelocityCovarianceUncertainty(c); }},
+        {"covariance.velocityVelocityVdVd", [](auto& r, double v) { auto c = r.getPositionVelocityCovarianceUncertainty(); c.setVelocityVelocityVdVd(v); r.setPositionVelocityCovarianceUncertainty(c); }, true},
+    };
+    CHECK(fields.size() == 36);
+    auto time = 1ns;
+    const auto reject = [&](const auto& report, const char* field) {
+        auto future = f.image->send(report);
+        CHECK(future.wait_for(0ns) == std::future_status::ready);
+        auto result = future.get();
+        CHECK(!result && result.getError().getCode() == mel::ErrorCode::InvalidParameters);
+        CHECK(result.getError().getDescription().find(field) != std::string::npos);
+    };
+    for (const auto& field : fields) {
+        for (double value : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+                             -std::numeric_limits<double>::infinity()}) {
+            auto report = navigation_test_data(time); field.change(report, value); reject(report, field.name);
+            auto error = f.image->send(report).get();
+            CHECK(!error);
+            const std::string expected = std::string(field.name) + " must be finite";
+            CHECK(error.getError().getDescription().starts_with(expected));
+        }
+        if (field.variance) { auto report = navigation_test_data(time); field.change(report, -0.001); reject(report, field.name); }
+    }
+    CHECK(calls == 0);
+    for (auto state : {mel::PositionSolutionState::NotSet, mel::PositionSolutionState::MaxExclusive,
+                       static_cast<mel::PositionSolutionState>(99), static_cast<mel::PositionSolutionState>(UINT32_MAX)}) {
+        auto report = navigation_test_data(time); report.setState(state); reject(report, "state");
+    }
+    for (auto t : {0ns, -1ns, std::chrono::nanoseconds::min()}) reject(navigation_test_data(t), "systemTime");
+    auto rate_bad = navigation_test_data(time);
+    rate_bad.setAttitudeRate(mel::AttitudeRate{mel::Euler{}, -1ns}); reject(rate_bad, "attitudeRateTime");
+    for (double latitude : {-std::numbers::pi / 2, std::numbers::pi / 2}) {
+        for (double longitude : {-std::numbers::pi, std::numbers::pi}) {
+            auto report = navigation_test_data(time++); report.setLatitude(latitude); report.setLongitude(longitude);
+            report.setAttitudeRate(mel::AttitudeRate{mel::Euler{}, std::chrono::nanoseconds::max()});
+            CHECK(response(f.image->send(report))->getSystemTime() == report.getSystemTime());
+        }
+    }
+    for (double sign : {-1., 1.}) {
+        auto report = navigation_test_data(time); report.setLatitude(sign * (std::numbers::pi / 2 + 0.001)); reject(report, "latitude");
+        report = navigation_test_data(time); report.setLongitude(sign * (std::numbers::pi + 0.001)); reject(report, "longitude");
+    }
+    CHECK(response(f.image->send(navigation_test_data(time)))->getSystemTime() == time);
+    auto zero_rate_time = navigation_test_data(++time);
+    zero_rate_time.setAttitudeRate(mel::AttitudeRate{mel::Euler{}, 0ns});
+    CHECK(response(f.image->send(zero_rate_time))->getSystemTime() == time);
+    CHECK(response(f.image->send(navigation_test_data(std::chrono::nanoseconds::max())))->getSystemTime() == std::chrono::nanoseconds::max());
+    expect_error(f.image->send(navigation_test_data(std::chrono::nanoseconds::max())), mel::ErrorCode::InvalidState);
+    CHECK(calls == 7);
+}
+
+void navigation_callback_reentry_and_exceptions() {
+    Fixture f, other;
+    unsigned calls = 0, refused = 0;
+    NavigationCallback empty;
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) {
+        ++calls;
+        expect_error(f.image->send(navigation_test_data(100ns)), mel::ErrorCode::InvalidState);
+        expect_error(other.image->send(navigation_test_data(100ns)), mel::ErrorCode::InvalidState);
+        CHECK(other.image->registerMetadataCallback(empty) == ir::Return::Fail);
+        CHECK(other.image->registerMetadataCallback(NavigationCallback{[](auto&, auto*) {}}) == ir::Return::Fail);
+        CHECK(f.image->disable() == ir::Return::Fail && f.image->enable() == ir::Return::Fail);
+        CHECK(other.control->detachChannel(other.image) == ir::Return::Fail);
+        expect_error(other.c2->send(camera_command()), mel::ErrorCode::InvalidState);
+        ++refused;
+        throw std::runtime_error("TEST navigation consumer exception");
+    }}) == ir::Return::Success);
+    CHECK(response(f.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(calls == 1 && refused == 1 && gige_mel::provider_statistics(f.manager).callback_failures == 1);
+    expect_error(f.image->send(navigation_test_data(1ns)), mel::ErrorCode::InvalidState);
+    CHECK(calls == 1);
+    CHECK(response(f.image->send(navigation_test_data(2ns)))->getSystemTime() == 2ns);
+    CHECK(calls == 2 && refused == 2);
+    CHECK(other.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) {
+        expect_error(f.image->send(navigation_test_data(3ns)), mel::ErrorCode::InvalidState);
+        ++refused;
+    }}) == ir::Return::Success);
+    CHECK(response(other.c2->send(camera_command()))->getCommandSuccess()); CHECK(refused == 3);
+    CHECK(response(other.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    std::atomic<unsigned> image_refusals{0};
+    other.listener->hook = [&] {
+        expect_error(f.image->send(navigation_test_data(3ns)), mel::ErrorCode::InvalidState);
+        CHECK(other.image->registerMetadataCallback(NavigationCallback{}) == ir::Return::Fail);
+        ++image_refusals;
+    };
+    other.add_buffer(); CHECK(other.image->enable() == ir::Return::Success);
+    other.listener->wait_for(1); CHECK(other.image->disable() == ir::Return::Success);
+    CHECK(image_refusals == 1);
+
+    // Force an ordinary allocation failure during acknowledgement preparation
+    // (std::function snapshot), before the latest report is committed.
+    struct AllocationFailure {
+        std::shared_ptr<bool> fail;
+        std::shared_ptr<unsigned> calls;
+        AllocationFailure(std::shared_ptr<bool> f, std::shared_ptr<unsigned> c) : fail(f), calls(c) {}
+        AllocationFailure(const AllocationFailure& other) : fail(other.fail), calls(other.calls) {
+            if (*fail) throw std::bad_alloc{};
+        }
+        void operator()(ir::Channel&, const ir::NavigationReportResp*) const { ++*calls; }
+    };
+    Fixture allocation;
+    auto fail = std::make_shared<bool>(false);
+    auto allocated_calls = std::make_shared<unsigned>(0);
+    CHECK(allocation.image->registerMetadataCallback(NavigationCallback{AllocationFailure{fail, allocated_calls}}) == ir::Return::Success);
+    *fail = true;
+    expect_error(allocation.image->send(navigation_test_data(1ns)), mel::ErrorCode::InsufficientLocalResources);
+    CHECK(*allocated_calls == 0);
+    *fail = false;
+    CHECK(response(allocation.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(*allocated_calls == 1);
+}
+
+void navigation_detach_and_control_overlap() {
+    Fixture f;
+    WatchdogGate gate;
+    std::atomic<unsigned> calls{0};
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) { ++calls; gate.enter_and_wait(); }}) == ir::Return::Success);
+    auto sent = std::async(std::launch::async, [&] { return f.image->send(navigation_test_data(1ns)); });
+    TestCleanup sent_cleanup{[&] { gate.open(); }};
+    gate.wait_for_entry();
+    auto configure = std::async(std::launch::async, [&] { return f.c2->send(camera_command()).get(); });
+    TestCleanup configure_cleanup{[&] { gate.open(); }};
+    CHECK(configure.wait_for(2s) == std::future_status::ready && configure.get());
+    auto detached = std::async(std::launch::async, [&] { return f.control->detachChannel(f.image); });
+    TestCleanup detach_cleanup{[&] { gate.open(); }};
+    eventually([&] { return !f.image->sendKeepAliveRep().get(); });
+    CHECK(detached.wait_for(0ns) == std::future_status::timeout);
+    auto rejected = std::async(std::launch::async, [&] { return f.image->send(navigation_test_data(2ns)); });
+    TestCleanup reject_cleanup{[&] { gate.open(); }};
+    gate.open();
+    CHECK(response(sent.get())->getSystemTime() == 1ns);
+    CHECK(detached.get() == ir::Return::Success);
+    expect_error(rejected.get(), mel::ErrorCode::InvalidState);
+    CHECK(calls == 1); gate.check();
+
+    Fixture pinned;
+    WatchdogGate held;
+    CHECK(pinned.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) { held.enter_and_wait(); }}) == ir::Return::Success);
+    std::weak_ptr<ir::Control> weak = pinned.control;
+    auto pending = std::async(std::launch::async, [&] { return pinned.image->send(navigation_test_data(1ns)); });
+    TestCleanup pending_cleanup{[&] { held.open(); }};
+    held.wait_for_entry(); pinned.control.reset(); CHECK(!weak.expired());
+    held.open(); CHECK(response(pending.get())->getSystemTime() == 1ns); CHECK(weak.expired()); held.check();
+    expect_error(pinned.image->send(navigation_test_data(2ns)), mel::ErrorCode::InvalidState);
+    CHECK(pinned.image->registerMetadataCallback(NavigationCallback{}) == ir::Return::Fail);
+}
+
+void navigation_concurrent_reports_and_operations() {
+    Fixture f;
+    WatchdogGate first;
+    std::mutex mutex;
+    std::vector<std::chrono::nanoseconds> echoes;
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto* r) {
+        { std::lock_guard lock(mutex); echoes.push_back(r->getSystemTime()); }
+        if (r->getSystemTime() == 1ns) first.enter_and_wait();
+    }}) == ir::Return::Success);
+    auto a = std::async(std::launch::async, [&] { return f.image->send(navigation_test_data(1ns)); });
+    TestCleanup a_cleanup{[&] { first.open(); }};
+    first.wait_for_entry();
+    auto b = std::async(std::launch::async, [&] { return f.image->send(navigation_test_data(2ns)); });
+    TestCleanup b_cleanup{[&] { first.open(); }};
+    CHECK(b.wait_for(2s) == std::future_status::ready);
+    CHECK(response(b.get())->getSystemTime() == 2ns);
+    expect_error(f.image->send(navigation_test_data(2ns)), mel::ErrorCode::InvalidState);
+    first.open(); CHECK(response(a.get())->getSystemTime() == 1ns); first.check();
+    CHECK(echoes == (std::vector{1ns, 2ns}));
+
+    Fixture contended;
+    std::atomic<unsigned> contended_calls{0};
+    CHECK(contended.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) { ++contended_calls; }}) == ir::Return::Success);
+    std::promise<void> release;
+    auto start = release.get_future().share();
+    std::vector<std::future<mel::RequestFor<ir::NavigationReportResp>>> submissions;
+    for (unsigned i = 0; i != 8; ++i) submissions.push_back(std::async(std::launch::async, [&] {
+        start.wait(); return contended.image->send(navigation_test_data(1ns));
+    }));
+    release.set_value();
+    unsigned accepted = 0, stale = 0;
+    for (auto& submission : submissions) {
+        auto future = submission.get(); CHECK(future.wait_for(0ns) == std::future_status::ready);
+        auto result = future.get();
+        if (result) { ++accepted; CHECK(result.get() && result.get()->getSystemTime() == 1ns); }
+        else { ++stale; CHECK(result.getError().getCode() == mel::ErrorCode::InvalidState); }
+    }
+    CHECK(accepted == 1 && stale == 7 && contended_calls == 1);
+
+    auto plan = std::make_shared<ReceivePlan>(); plan->starting = std::make_shared<WatchdogGate>();
+    Fixture active(true, std::make_shared<TransformBackend>(Transform::none, plan)); active.add_buffer();
+    auto enabled = std::async(std::launch::async, [&] { return active.image->enable(); });
+    TestCleanup enable_cleanup{[&] { plan->starting->open(); plan->open(); }};
+    plan->starting->wait_for_entry();
+    std::promise<void> nav_started;
+    auto nav = std::async(std::launch::async, [&] { nav_started.set_value(); return active.image->send(navigation_test_data(1ns)); });
+    TestCleanup nav_cleanup{[&] { plan->starting->open(); plan->open(); }};
+    nav_started.get_future().wait(); CHECK(nav.wait_for(0ns) == std::future_status::timeout);
+    plan->starting->open(); CHECK(enabled.get() == ir::Return::Success);
+    CHECK(response(nav.get())->getSystemTime() == 1ns);
+    plan->wait_for(&ReceivePlan::entered);
+    std::atomic<bool> joining{false};
+    auto disabled = std::async(std::launch::async, [&] { test_join::Observe observe(joining); return active.image->disable(); });
+    TestCleanup disable_cleanup{[&] { plan->open(); }};
+    eventually([&] { return joining.load(); });
+    std::promise<void> idle_started;
+    auto idle = std::async(std::launch::async, [&] { idle_started.set_value(); return active.image->send(navigation_test_data(2ns)); });
+    TestCleanup idle_cleanup{[&] { plan->open(); }};
+    idle_started.get_future().wait(); CHECK(idle.wait_for(0ns) == std::future_status::timeout);
+    plan->open(); CHECK(disabled.get() == ir::Return::Success); CHECK(response(idle.get())->getSystemTime() == 2ns);
+    plan->starting->check();
+
+    auto probe = std::make_shared<ConfigurationProbe>();
+    Fixture configured(true, std::make_shared<TransformBackend>(Transform::none, nullptr, probe));
+    probe->applying = std::make_shared<WatchdogGate>();
+    auto change = std::async(std::launch::async, [&] { return configured.c2->send(camera_command()).get(); });
+    TestCleanup change_cleanup{[&] { probe->applying->open(); }};
+    probe->applying->wait_for_entry();
+    std::promise<void> ack_started;
+    auto ack = std::async(std::launch::async, [&] { ack_started.set_value(); return configured.image->send(navigation_test_data(1ns)); });
+    TestCleanup ack_cleanup{[&] { probe->applying->open(); }};
+    ack_started.get_future().wait(); CHECK(ack.wait_for(0ns) == std::future_status::timeout);
+    probe->applying->open(); CHECK(change.get()); CHECK(response(ack.get())->getSystemTime() == 1ns); probe->applying->check();
+}
+
+void navigation_noninterference() {
+    HealthReports before, after;
+    mel::BIT_Status bit_before;
+    BitReports bit_reports;
+    auto counted = std::make_shared<CountingBackend>();
+    Fixture f(true, counted);
+    f.add_buffer();
+    CHECK(*response(f.c2->send(ir::BIT_Command{9, {1}, {}, {}})) == ir::Return::Success);
+    CHECK(f.c2->registerMetadataCallback(BitCallback{[&](auto&, auto* r) { bit_before = *r; }}) == ir::Return::Success);
+    auto health = attach_health(f); before.register_both(health);
+    CHECK(health->enable() == ir::Return::Success); before.wait([&] { return !before.details.empty(); });
+    CHECK(health->disable() == ir::Return::Success); CHECK(f.control->detachChannel(health) == ir::Return::Success);
+    auto calls = counted->calls->load();
+    const auto stats = gige_mel::provider_statistics(f.manager);
+    CHECK(response(f.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    auto bad = navigation_test_data(2ns); bad.setAltitude(std::numeric_limits<double>::infinity());
+    expect_error(f.image->send(bad), mel::ErrorCode::InvalidParameters);
+    CHECK(counted->calls->load() == calls);
+    CHECK(gige_mel::provider_statistics(f.manager).last_error == stats.last_error);
+    health = attach_health(f); after.register_both(health);
+    CHECK(health->registerMetadataCallback(bit_reports.callback()) == ir::Return::Success);
+    CHECK(health->enable() == ir::Return::Success); after.wait([&] { return !after.details.empty(); });
+    bit_reports.wait(1);
+    CHECK(health->disable() == ir::Return::Success); CHECK(f.control->detachChannel(health) == ir::Return::Success);
+    const auto bit_after = bit_reports.last();
+    CHECK(HealthReports::values(before.details.back()) == HealthReports::values(after.details.back()));
+    CHECK(before.statuses.back().getMFAState() == after.statuses.back().getMFAState());
+    CHECK(bit_before.getCompletedBITs().front().getTimeTag() == bit_after.getCompletedBITs().front().getTimeTag());
+    CHECK(bit_before.getCompletedBITs().front().getResult() == bit_after.getCompletedBITs().front().getResult());
+    CHECK(bit_after.getFaults().empty() && counted->calls->load() == calls);
+    CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(1);
+    const auto frame = f.listener->at(0); const auto bytes = copy_image(frame);
+    // Full pool: frame retained, receive may still run independently.
+    CHECK(response(f.image->send(navigation_test_data(2ns)))->getSystemTime() == 2ns);
+    CHECK(copy_image(frame) == bytes); check_pattern(frame);
+    CHECK(frame.header.getSensorNavState().empty() && frame.header.getSensorInertialState().empty());
+    CHECK(frame.header.getSystemTime() > 0ns && frame.header.getIntegrationTime() == 1ms);
+    CHECK(frame.header.getWidth() == 64 && frame.header.getHeight() == 48 && frame.header.getBitsPerPixel() == 8);
+    CHECK(f.image->disable() == ir::Return::Success); CHECK(frame.buffer->release() == ir::Return::Success);
+    CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(2);
+    const auto next = f.listener->at(1); check_pattern(next);
+    CHECK(next.header.getSensorNavState().empty() && next.header.getSensorInertialState().empty());
+    CHECK(next.header.getSystemTime() > frame.header.getSystemTime() && next.header.getIntegrationTime() == 1ms);
+    CHECK(f.image->disable() == ir::Return::Success);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     test_join::prepare();
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"Navigation acceptance callbacks and attachment sessions", navigation_acceptance_and_sessions},
+        {"Navigation every numeric field and boundary validation", navigation_numeric_validation},
+        {"Navigation callback reentry and exception containment", navigation_callback_reentry_and_exceptions},
+        {"Navigation detach drain and Control lifetime overlap", navigation_detach_and_control_overlap},
+        {"Navigation concurrent reports lifecycle and configuration", navigation_concurrent_reports_and_operations},
+        {"Navigation no backend Health BIT or frame interference", navigation_noninterference},
         {"ModeCmd acknowledgement idempotency and no I/O", mode_acknowledgement_no_io},
         {"ModeCmd state mode and every scan field validation", mode_validation_and_scan},
         {"ModeCmd observed Health and explicit recovery", mode_observed_state_and_recovery},

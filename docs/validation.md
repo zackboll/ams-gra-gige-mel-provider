@@ -1,5 +1,160 @@
 # Bootstrap validation record
 
+## GIGE-MEL-015 partial required navigation reception
+
+**Starting point.** Fresh fetch verified `origin/main` commit
+`c4e40bb18cdb5fbf9ec14339dc7533a877edc9d5`, tree
+`935fd4ed1945ef98940188624ce60390b7349112` (PR #14 merged; no open PRs).
+Work uses clean feature worktree `/home/zboll/git/gige-mel-015`, branch
+`feature/gige-mel-015-navigation-reception`. The independently built detached
+worktree `/home/zboll/git/gige-mel-015-baseline` retains that exact commit/tree
+without tracked changes; its SDK-free suite passes **9/9**.
+
+**Scope.** The [navigation contract](navigation-reception.md) is structural
+consumer-input validation and receipt acknowledgement only. One private latest
+report per Image attachment, positive strictly increasing nanosecond systemTime,
+and ready NavigationReportResp with exact echoed time and zero/unassigned IDs
+do not qualify navigation quality or image association. Frame publication,
+navigation/inertial defaults, buffer ownership, backend interfaces, production
+Aravis invalid timestamps, SDK pins, vendored bytes, exports, CI, CTest targets
+and TSan suppressions are unchanged. No backend or SDK I/O is added.
+
+### Permanent provider evidence: N1–N7
+
+Six new scenario groups extend the existing executable to **86 provider
+scenarios**, preserving all 80 existing cases:
+
+- **Acceptance/session:** Aligning, FreeInertial, GPS, Blended; non-null ready
+  responses with exact echoed time and both IDs zero; matching callback fields
+  and receiving Image identity; no C2 CommandStatus; independent manager state;
+  unregistered acceptance, no historical replay, empty/duplicate registrations;
+  duplicate/backward rejection, invalid high-time input not advancing storage;
+  acquisition enabled/disabled and disable/enable not resetting the clock;
+  detached handles rejected and fresh attachment accepting an earlier timestamp.
+- **Numeric:** all **36 floating fields** (including all 18 covariance fields)
+  independently reject NaN, positive infinity and negative infinity, with named
+  errors and no callbacks; all six negative diagonal variances reject; inclusive
+  geographic boundaries accept, outside values reject; zero/negative/minimum
+  systemTime, negative AttitudeRateTime, NotSet/MaxExclusive and unknown numeric
+  enums reject. Maximum nanosecond time and zero/maximum rate time accept
+  without conversion. These are not PSD/physical-solution proofs.
+- **Callbacks/errors:** local/cross-provider navigation, registration, lifecycle,
+  detach and CameraCommand reentry refused; reentry from Image and C2 callbacks
+  refused too. Consumer exceptions are contained and leave the successful future
+  available. A callback functor that throws `bad_alloc` on the preparation copy
+  forces typed InsufficientLocalResources, no callback and no timestamp commit;
+  retry at the same time succeeds. All error helpers check immediate readiness,
+  typed MEL category and a nonempty description.
+- **Concurrency/lifetime:** gated first navigation callback permits a second
+  report and independent CameraCommand to complete outside provider locks;
+  eight submissions released by one promise accept exactly one common timestamp
+  and reject seven as stale. Start/receive/join/apply gates force submission
+  overlap with enable, disable and CameraCommand. External detach closes
+  admission and demonstrably waits for the held callback; queued/new navigation
+  fails and callback count remains one. Dropping external Control during dispatch
+  proves the command's pin survives until callback completion, followed by actual
+  destruction and InvalidState on the retained handle. Watchdogs report gate
+  expiry; cleanup opens gates on unwind. No guessed sleep selects these schedules.
+- **Noninterference:** counted backend proves no discovery/device/stream calls
+  from idle acceptance/rejection. Actual Health state/details (including
+  configuration generation) and completed BIT time/result/current faults are
+  identical before/after. Diagnostic history is unchanged. Retained frame bytes
+  remain identical after navigation while enabled; full pixel patterns, geometry,
+  exposure and monotonic image times remain valid, and both navigation/inertial
+  vectors are empty before and after restart. Existing adapter/timestamp and
+  publication-admission contracts remain in the suite.
+
+Focused repetitions run the executable with the single substring argument
+`provider_tests Navigation`, three separate processes per selected development
+and sanitizer build (SDK-free and SDK-enabled). Each process runs all six groups.
+The full CTest provider contract also runs every existing ModeCmd,
+Health/BIT/subsystem, configuration, buffer, frame and lifecycle scenario.
+
+### Published-header consumer and unchanged-main control
+
+`tests/public_navigation_demo.hpp` is reused by the existing dlopen loader and
+the separately built installed consumer, with only published MEL headers and no
+SDK dependency. It labels its deterministic GPS sample **TEST DATA**, registers
+the Image response, checks ready non-null future/exact time/zero IDs/matching
+callback, and checks typed stale failure without a second callback. It never
+enables acquisition or registers buffers.
+
+The **same feature-built executable** produces:
+
+```text
+loader_tests <unchanged-starting-main-library> --expect-no-navigation
+PASS: unchanged baseline navigation Unsupported; no Image acquisition
+
+loader_tests <unchanged-starting-main-library> --navigation-only
+FAIL: navigation capability must be Image-only and truthful
+[expected exit 1: baseline lacks the feature, not a factory/load failure]
+
+loader_tests <feature-library> --navigation-only
+PASS: TEST DATA navigation ready echo, zero IDs, matching callback and typed stale rejection; no Image acquisition
+```
+
+The baseline-specific mode also verifies actual callback registration returns
+NotSupported and actual valid send returns ready typed Unsupported, rather than
+inferring absence only from discovery. No baseline library was patched.
+The ordinary native loader still publishes registered Mono8 frames, and
+`mel_capture` writes a real synthetic 64×48 PGM.
+
+### Executed local matrix
+
+Linux x86-64, GCC **14.2.0**, Clang **19.1.7**, pinned Aravis **0.8.36** from
+the existing explicit provision `/tmp/gm13-work/aravis-prefix`. SDK-free and
+SDK-enabled builds use independent external `/tmp/gm15/{free,sdk}-<lane>` trees;
+the latter explicitly sets `GIGE_MEL_BUILD_ARAVIS=ON` and the SDK pkg-config path.
+No camera hardware was used: synthetic, in-process Fake and simulated GigE only.
+
+| Build/check | Result |
+| --- | --- |
+| GCC development, SDK-free | 9/9 CTests |
+| GCC Release, SDK-free | 9/9 CTests |
+| Clang development, SDK-free | 9/9 CTests |
+| GCC ASan/UBSan, SDK-free, leak detection and halt enabled | 9/9 CTests |
+| GCC TSan, SDK-free, halt enabled | 9/9 CTests |
+| GCC development with Aravis | 15/15 CTests |
+| GCC Release with Aravis | 15/15 CTests |
+| Clang development with Aravis | 15/15 CTests |
+| GCC ASan/UBSan with Aravis | 15/15 CTests |
+| GCC TSan with Aravis, unchanged suppressions | 15/15 CTests |
+| Offline upstream and JSON verifiers | 97 upstream and 2 JSON files verified |
+| Package-isolation verifier regressions | 29/29 tests |
+| Real installed isolation + separate consumer | GCC development/Release and Clang passed |
+| SDK-free separately installed consumer | passed, including navigation demonstration |
+| Native loader, before/after controls, synthetic capture | passed; baseline feature-required control intentionally exits 1 |
+| `git diff --check` | clean |
+
+SDK-enabled suites include adapter, stream, timestamp, real-SDK MEL embedding,
+GigE loopback/control-loss/socket-audit and diagnostic contracts. Both suites
+include evidence-collector/offline verifier tests and the 29 package verifier
+tests. Installed isolation checks expected real SDK loading by the adapter,
+no Aravis/GLib provider dependencies, clean installed paths/text/symbols, and
+consumer configure/build/run with `PKG_CONFIG_PATH` removed.
+
+**Validation scheduling correction.** The first complete matrix passed. During
+the final-source rebuild/retest, overlapping local SDK suites attempted to use
+the simulator's fixed UDP port 3956 simultaneously. Three invocations (dev,
+ASan, TSan) failed only the explicit pre-bind check with `Address already in use`;
+all their other tests passed. Those logs were retained, not classified as test
+success or hidden by a skip. Serial reruns of all three affected full suites
+passed **15/15** each, followed by three focused navigation repetitions per
+build. No code, port policy or suppression changed to bypass the check.
+
+The SDK itself is **not sanitizer-instrumented**. Existing TSan handoff `race:`
+patterns and loopback `called_from_lib` suppressions are unchanged and retain
+their documented reporting blind spots, including project/SDK boundary accesses.
+A passing run is not unrestricted SDK callback or buffer-handoff race coverage.
+The simulator's effective-wildcard discovery listener/socket-audit exception is
+unchanged; this is not strict network isolation or physical-camera/NIC evidence.
+
+Final-head push and pull_request workflows are separate hosted checks; their
+head identities, all five existing job conclusions and links belong in the PR
+handoff. No additional CI lane or suppression is introduced. Navigation/image
+clock correlation, calibrated mounting, quality qualification, LOS, UTC/PTP,
+integration-start provenance and selected hardware qualification remain open.
+
 ## GIGE-MEL-014 bounded ModeCmd
 
 **Starting point.** Freshly fetched `origin/main` was commit

@@ -48,6 +48,14 @@ ctest --test-dir build/make --output-on-failure
 
 ## What is implemented
 
+[Partial required Image navigation receipt](docs/navigation-reception.md)
+structurally validates consumer-supplied reports, retains one latest accepted
+report per Image attachment with strictly increasing time, and returns ready
+acknowledgements plus an optional Image callback. Response time exactly echoes
+input nanoseconds; commandID/reqId are zero/unassigned. No acquisition is needed.
+This is **not navigation integration**: no GPS/INS truth, shared clocks, LOS,
+image association or frame navigation/inertial population is established.
+
 [Bounded C2 ModeCmd](docs/mode-command.md) acknowledges only an already-observed
 `Standby/Unused` with default/unset ScanParam: ready `Unused` and correlated
 Accepted CommandStatus. It performs no backend I/O, Image stop, configuration or
@@ -79,7 +87,7 @@ camera connection probe.
 | Buffers | Consumer-owned Host memory, affinity and overlap checks, explicit release, bounded registration count |
 | Images | Mono8, one band, tightly packed rows; padding in a backend frame is copied out |
 | Camera configuration | Complete ROI/exposure/integer-frame-rate CameraCommand through C2 or Image; versioned JSON ConfigSet through C2; disabled acquisition required |
-| Metadata | Communications replies, Image camera-command replies, correlated C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT catalogue, C2/Health BIT results and current software faults |
+| Metadata | Communications replies, Image camera-command and partial navigation-receipt replies, correlated C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT catalogue, C2/Health BIT results and current software faults |
 | Backend seam | SDK-independent discovery/device/stream interfaces and move-only retained frame leases |
 | Synthetic backend | Deterministic images, bounded native pool, cancellation, validated readback, generation and time metadata |
 | Diagnostics | Partial Health MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp periodic current snapshots plus project C++ counters and last error; no invented MEL Instrumentation fields |

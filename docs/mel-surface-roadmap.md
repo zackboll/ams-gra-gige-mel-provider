@@ -132,7 +132,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | Command → response | Upstream annotation | Bootstrap | Priority |
 | --- | --- | --- | --- |
 | `CameraCommand` → `CameraCommandResp` | Required if camera control | Supported for the initial profile | P0, shared implementation with C2 |
-| `NavigationReport` → `NavigationReportResp` | Required | Unsupported | P1: define accepted navigation frames/timing and how reports associate with imagery |
+| `NavigationReport` → `NavigationReportResp` | Required | **PARTIAL**: [validated receipt](navigation-reception.md), one latest report per Image attachment, ready exact time echo and zero/unassigned IDs | P1: independently qualified image association remains unimplemented |
 
 | Callback payload | Upstream annotation | Bootstrap | Priority and data source |
 | --- | --- | --- | --- |
@@ -142,7 +142,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | `LineOfSightQuaternion` | Required if quaternion LOS | NotSupported | P4 if that coordinate representation is supported |
 | `LineOfSightEuler` | Required | NotSupported | P1: mounting/pointing/navigation model |
 | `CameraCommandResp` | Required if camera control | Supported | P0: emit correlated responses through the shared camera-command path |
-| `NavigationReportResp` | Required | NotSupported | P1 alongside navigation input |
+| `NavigationReportResp` | Required | Supported for partial receipt profile only | Image-only synchronous acknowledgement, no historical replay; no LOS or frame navigation population |
 | `LOS3D_KinematicsType` | Optional | NotSupported | P4: navigation/pointing integration |
 | `CandidateObjectMessage` | Required if candidate detection | NotSupported | P5: actual detector output, not an image counter |
 | `CandidateObjectPreProcMessage` | Optional | NotSupported | P5: detector/preprocessing product |

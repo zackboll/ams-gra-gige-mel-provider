@@ -205,8 +205,9 @@ and communications requests with their correlated replies remain supported.
 Lifecycle and configuration mutations are rejected from **any provider callback
 on the current thread**, including callbacks of another provider instance and
 nested callbacks. This includes enable/disable, buffer registration and
-unregistration, supported metadata callback registration, camera configuration,
-Control initialization, channel attachment/detachment, and Control lookup/creation.
+unregistration, supported metadata callback registration, navigation submission,
+camera configuration, Control initialization, channel attachment/detachment, and
+Control lookup/creation.
 The existing API failure forms apply: Fail, InvalidState for camera requests,
 or an empty shared pointer for pointer-returning operations. Unsupported surfaces
 remain unsupported.
@@ -260,6 +261,17 @@ still retained by a consumer-created cycle.
 
 ## Unsupported surfaces and diagnostics
 
+The [partial required navigation receipt profile](navigation-reception.md)
+validates consumer-supplied Aligning/FreeInertial/GPS/Blended reports, retains
+one latest accepted report per Image attachment and requires strictly increasing
+positive nanosecond systemTime. Disable/enable does not reset the session.
+Ready NavigationReportResp futures and Image-only callbacks echo that exact time
+with commandID/reqId zero (unassigned). Rejections do not change stored state or
+emit callbacks. This is structural validation, not navigation quality or image
+association: FrameHeader sensorNavState/sensorInertialState remain empty, with
+no time conversion, LOS transformation or backend I/O. It is **PARTIAL required
+navigation support**, not full navigation integration or MEL conformance.
+
 [ModeCmd's bounded subset](mode-command.md) is a synchronous, idempotent
 `Standby/Unused/default-ScanParam` acknowledgement of initialized, valid, idle
 observed provider state, with correlated terminal CommandStatus. It performs no
@@ -287,8 +299,8 @@ association, not camera reachability.
 Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
-documented BIT_Command and ModeCmd subsets, Image
-NavigationReport, and metadata other than communications, Image camera responses
+documented BIT_Command and ModeCmd subsets, and metadata other than communications,
+Image camera/navigation receipt responses
 and C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT_Configuration/BIT_Status or Health
 MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
 return unsupported.
