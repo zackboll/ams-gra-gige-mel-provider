@@ -86,7 +86,42 @@ FAIL: BadPixelList discovery must be truthful and Image-only
 The last command's exit **1** is the required expected negative-control result;
 factory resolution/loading succeeds and the explicit unsupported mode separately
 exercises actual registration, not just advertisement. Baseline sources are
-unchanged. The normal loader still checks registered Mono8 delivery and teardown.
+The normal loader still checks registered Mono8 delivery and teardown.
+
+### Executed matrix and package checks
+
+All ten full existing CTest configurations passed, without exclusions:
+
+| Configuration | SDK-free | Pinned-Aravis-enabled |
+| --- | --- | --- |
+| GCC Debug | **9/9** | **15/15** |
+| GCC Release | **9/9** | **15/15** |
+| Clang Debug | **9/9** | **15/15** |
+| GCC ASan/UBSan (leaks and halt enabled) | **9/9** | **15/15** |
+| GCC TSan (halt enabled; existing SDK suppressions unchanged) | **9/9** | **15/15** |
+
+Every lane also ran all four BadPixelList groups in three separate processes.
+No environmental sanitizer failure or verified sanitizer defect occurred in
+these runs; no test was masked, skipped or weakened. The new detach test's first
+development run hit its watchdog because it attempted a synchronous registration
+while detach held operations waiting for the gated callback. The test now queues
+that attempt on another thread, opens the gate, and asserts Fail after detach;
+the corrected test and repeated/full suites pass. This was a test orchestration
+error, not evidence of a provider defect.
+
+The installed upstream-header consumer and a real synthetic 64×48 PGM capture
+passed. `verify_package_isolation.py` passed every check: exact provisioned SDK
+resolution in the adapter test, no SDK stack dependency in the common provider,
+no forbidden installed names/text/symbols, and a separately configured/built/run
+consumer with `PKG_CONFIG_PATH` removed. Offline vendor checks passed **97/97**
+upstream files and **2/2** private JSON files. The standalone package verifier's
+regressions and offline camera-evidence tests remain in every full suite.
+
+Hosted checks are separate from local evidence. The unchanged workflow runs all
+five lanes on both SDK configurations for the pushed PR head. Final-head hosted
+run URLs, conclusions, HEAD/tree identifiers and readiness are recorded in PR
+[#16](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/16), rather than
+embedding a self-referential commit identifier here.
 
 ### Qualification environment and limits
 
