@@ -86,7 +86,7 @@ FAIL: BadPixelList discovery must be truthful and Image-only
 The last command's exit **1** is the required expected negative-control result;
 factory resolution/loading succeeds and the explicit unsupported mode separately
 exercises actual registration, not just advertisement. Baseline sources are
-The normal loader still checks registered Mono8 delivery and teardown.
+unchanged. The normal loader still checks registered Mono8 delivery and teardown.
 
 ### Executed matrix and package checks
 
