@@ -375,3 +375,7 @@ This profile is unchanged: Aravis frames still carry `FrameTimestamp{}` and are
 rejected. Positive MEL delivery of the camera's pixels used only the test-only
 virtual clock in an opt-in hardware test. No timing item, optics calibration or
 BadPixelList source is qualified. See the [camera record](cognex-cic-5000r.md).
+GIGE-MEL-018R2 requalified the camera on a 1 Gb/s link. With the production
+adapter, 2, 5 and 10 Hz were sustained with every frame complete. The camera
+cannot represent 14 Hz exactly (it reads back 14.000112 Hz), so 14 Hz is
+unsupported under the unchanged integer-Hz contract.

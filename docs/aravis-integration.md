@@ -38,7 +38,7 @@ and [Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1).
 | --- | --- | --- |
 | In-process Aravis Fake (`ArvFakeInterface`/`ArvFakeStream`) | Completed software tests (GIGE-MEL-008 to -010) | No GVCP, no GVSP, no sockets |
 | Loopback `ArvGvFakeCamera` (GIGE-MEL-011) | Simulated network camera; actual GigE Vision discovery, GVCP control and GVSP image transport over UDP on 127.0.0.1 | No physical NIC, switch or camera qualification |
-| Physical GigE camera: Cognex CIC-5000R, firmware V3.7-1 (GIGE-MEL-018) | Real discovery, inspection, Mono8 capture, GVSP statistics and opt-in test-only MEL delivery under a documented temporary arrangement ([record](cognex-cic-5000r.md)) | Not hardware or timestamp qualification; power-on configuration unsupported |
+| Physical GigE camera: Cognex CIC-5000R, firmware V3.7-1 (GIGE-MEL-018) | Real discovery, inspection, Mono8 capture, GVSP statistics and opt-in test-only MEL delivery under a documented temporary arrangement ([record](cognex-cic-5000r.md)). GIGE-MEL-018R2 tested on a 1 Gb/s link: 2, 5 and 10 Hz full-frame sustained with every frame complete | Not hardware or timestamp qualification; power-on configuration unsupported; 14 Hz unsupported (reads back 14.000112 Hz) |
 | Timestamps | Raw SDK values observed; production descriptors remain invalid (`FrameTimestamp{}`); virtual time used only by tests | No integration-start, PTP or UTC claim |
 
 > **Superseded status (GIGE-MEL-008 text below).** Passages written for

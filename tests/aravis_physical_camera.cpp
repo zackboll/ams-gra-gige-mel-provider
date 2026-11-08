@@ -319,11 +319,21 @@ void delivery_standby_restart() {
     CHECK(second.buffer->release() == ir::Return::Success);
     s.listener->auto_release = true;
     CHECK(s.image->enable() == ir::Return::Success);
-    s.listener->wait_count(4);
-    const auto restarted = s.listener->at(3);
-    check_published(restarted, model, c, 2);
-    CHECK(restarted.source->original.stream_generation != first.source->original.stream_generation);
+    // Sustained second run: every published frame is fully checked, its source
+    // frame IDs strictly increase, and it belongs to the new stream generation.
+    constexpr std::size_t restart_frames = 10;
+    s.listener->wait_count(2 + restart_frames);
     CHECK(s.image->disable() == ir::Return::Success);
+    const auto restarted = s.listener->at(2);
+    std::uint64_t previous_id = 0;
+    for (std::size_t i = 2; i < s.listener->count(); ++i) {
+        const auto d = s.listener->at(i);
+        check_published(d, model, c, 2);
+        CHECK(d.source->original.stream_generation == restarted.source->original.stream_generation);
+        CHECK(d.source->original.native_frame_id > previous_id);
+        previous_id = d.source->original.native_frame_id;
+    }
+    CHECK(restarted.source->original.stream_generation != first.source->original.stream_generation);
     CHECK(s.ledger->wait_outstanding(0, bound));
     CHECK(s.no_new_frames());
     const auto stats = s.stats();
@@ -333,6 +343,8 @@ void delivery_standby_restart() {
               << first.header.getFrameID() << ',' << second.header.getFrameID() << ", " << stats.dropped_no_buffer
               << " dropped while held; Standby accepted (command 1801); stream generation "
               << first.source->original.stream_generation << " -> " << restarted.source->original.stream_generation
+              << " with " << s.listener->count() - 2 << " checked frames (source IDs " << restarted.header.getFrameID()
+              << ".." << previous_id << ", " << s.ledger->frames() << " source frames in total)"
               << "; non-sentinel bytes in first destination " << first.non_sentinel << '/' << first.bytes.size()
               << "; systemTime is a TEST MODEL value\n";
 }

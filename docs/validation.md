@@ -1,5 +1,47 @@
 # Bootstrap validation record
 
+## GIGE-MEL-018R2 Cognex CIC-5000R 1 Gb/s requalification
+
+**Starting point.** PR #18 head `a8439b3ae4789cfca05efac577315dcffd65f322`
+(tree `f7e226e5…`), hosted CI green on that head (10/10 checks). Same branch,
+SDK prefix and camera (`COGNEX-CIC-5000R-21874533`, firmware V3.7-1, Aravis
+0.8.36), now on a Gigabit switch port.
+
+**Hardware results.** These are recorded in the
+[camera record](cognex-cic-5000r.md#1-gbs-requalification-gige-mel-018r2):
+
+- `GevLinkSpeed` was 1000 in all 45 camera snapshots across 21 sessions, and
+  the host carrier did not change (`carrier_changes` stayed 1, at 10 Gb/s).
+- Production-adapter sustained runs gave 2.0025, 4.9999, 9.9998 and 10.000 fps
+  (41, 151, 600 and 600 frames), every frame complete with no ID gaps or SDK
+  timeouts.
+- 14 Hz reads back 14.000112000896006 Hz, so it is **unsupported** and fails
+  closed.
+- 14 Hz raw-SDK characterization: run 1 had 823/840 frames complete under
+  heavy host load; run 2 had 840/840.
+- Packet loss matched kernel `UdpRcvbufErrors` in every run.
+- The opt-in MEL test passed 3/3 at 2 Hz and 10 Hz.
+- Every session's writable camera state was verified as restored.
+
+**Code change.** Only the opt-in hardware test changed:
+`tests/aravis_physical_camera.cpp` now checks 10 restarted frames (full
+validation, strictly increasing source frame IDs within the new generation)
+instead of 1. No production code changed: the 14 Hz rejection is the
+documented integer-Hz contract, not a defect. Raw evidence stays outside Git.
+
+**Regression (executed locally, fresh `build/018r2-*` trees, 2026-11-08
+06:10–06:29Z).** All 14 configurations built.
+
+- SDK-free GCC Debug, GCC Release, Clang Debug, ASan/UBSan and TSan: 9/9 each.
+- Aravis GCC Debug, GCC Release, Clang Debug, ASan/UBSan and TSan: 15/15 each.
+- Hardware-enabled trees (GCC, Clang, ASan, TSan) running the default suite
+  with `-LE hardware`: 15/15 each. These confirm the opt-in target builds under
+  every toolchain without changing the default suite.
+- Package isolation verified on three Aravis builds.
+- `vendor_upstream.py --verify`: 97 files.
+- The physical test itself ran only in the separate Debug opt-in tree.
+  Hardware tests were not run under sanitizers.
+
 ## GIGE-MEL-018 first physical camera (Cognex CIC-5000R)
 
 **Starting point.** `feature/gige-mel-018-cognex-hardware` was created
