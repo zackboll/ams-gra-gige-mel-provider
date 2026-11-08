@@ -1,5 +1,118 @@
 # Bootstrap validation record
 
+## GIGE-MEL-017 commanded Standby
+
+**Starting point.** Fetch verified `origin/main` exactly at
+`cb070729039677f29f65a564be0cc5fe1ad483df`, tree
+`aa0ddf826cc705388a43a7ec713fbec3e6ee5e2b`, before creating
+`feature/gige-mel-017-commanded-standby` directly from main (not the previous
+feature branch). A separately built, detached, unchanged worktree at
+`/tmp/gm17/baseline` passed **9/9** SDK-free tests. The feature-built loader against
+that library proves **active** Standby returns ready InvalidState and correlated
+Rejected/StateOrSettings without stopping the acquisition; the same loader's
+positive case accepts and restarts. Baseline sources remain unchanged.
+
+### Contract and permanent coverage
+
+Valid Standby/Unused/default-ScanParam uses the existing private Image shutdown
+implementation under operations, with Control/C2/Image lifetime pins and no
+state/callback mutex held across cancellation, join or stream stop. Success is
+ready Unused and Accepted/NotSet/empty description only after logical shutdown.
+Idle acknowledgement still performs no backend I/O or Health/BIT/configuration
+mutation. Image remains attached and disabled, preserving registrations and
+consumer-held bytes until explicit release. Faulted ownership receives explicit
+cleanup, not historical diagnostic clearing or a new BIT recovery policy.
+
+The existing provider executable now has **95 scenarios** (90 retained, five
+new groups). ModeCmd-focused selection runs **12 groups**, including the existing
+BadPixelList noninterference group. Coverage includes:
+
+- cancellation observed before releasing a watchdog-gated receive, actual
+  pthread join entry, worker thread-exit notification before Accepted, and no
+  delivery after completion; repeated Standby creates no stream or extra stop;
+- active/faulted Health Operate/Degraded to Standby, explicit re-enable,
+  retained bytes, explicit release, failed BIT completion preservation and
+  ordinary current-fault retirement on later observation;
+- every existing state/mode/ScanParam validation case against an owned stream,
+  including all nonfinite floating inputs, exact IDs 0 and UINT32_MAX, and no
+  rejected-command stream/configuration/buffer mutation. The receive is gated
+  when counting I/O so legitimate worker receive calls cannot confound it;
+- watchdog-ordered overlap with enable, disable, CameraCommand, ConfigSet,
+  Image/C2 detach, Control lifetime release/destruction, terminal source failure,
+  plus eight simultaneous Standby requests. Both operation orderings are tested;
+- Image and cross-provider callback reentry rejection without recursive status
+  dispatch/self-join; throwing Accepted callbacks cannot undo shutdown; existing
+  detached/closing admission precedence and callback-drain policy;
+- retained navigation receipt/stale rejection, BadPixelList registration,
+  unchanged configuration generation, empty frame navigation/inertial state.
+
+The shared portability executable runs **14 shared scenario executions** (seven
+against each of synthetic and the independent contract fixture), plus **two**
+fixture-only checks. The added scenario verifies active/repeated/faulted Standby,
+retention, release/restart, generation/configuration and history. Its test-only
+stream observer forwards only supported cancellation/stop operations; no backend
+interface changed. The Aravis timestamp executable has **18 scenarios**, adding
+real SDK Fake pixels under the existing test-only clock, retained bytes,
+AcquisitionStart/AcquisitionStop-only command history, stopped native acquisition,
+ready correlated Accepted and restart. Production timestamp publication remains
+gated; no physical camera was tested.
+
+The shared public-header-only demonstration is used by the unchanged loader and
+installed-consumer build targets: attach Image/C2, register, enable/receive/hold,
+Standby, verify future/status/observed idle and disabled Image, release, restart
+capture, disable/unregister/detach. It also retains idle acknowledgement and
+typed Operate/TaskSched rejection checks. No provider headers are used; the
+loader receives its Buffer through the existing dynamically resolved factory.
+
+### Qualification procedure and evidence location
+
+Builds/logs are outside the repository under `/tmp/gm17`. The five lanes are GCC
+Debug, GCC Release, Clang Debug, GCC ASan/UBSan and GCC TSan, each SDK-free
+(**9 CTests**) and pinned-Aravis-enabled (**15 CTests**), with no exclusions.
+Each lane additionally repeats all 12 focused provider groups and both shared
+backend Standby cases in three processes; each SDK lane repeats its Fake
+Standby case three times. Final-head executed counts, results, HEAD/tree and
+both hosted push/PR workflow conclusions are recorded in
+[PR #17](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/17), rather
+than embedding a self-referential commit identifier or claiming pending CI.
+Readiness requires successful final-head qualification, not merely configured
+CI or green earlier intermediate builds.
+
+Additional executed checks: offline upstream **97/97**, private JSON **2/2**,
+native dynamic loader, independent installed consumer, synthetic **64×48 Mono8**
+PGM capture, `git diff --check`, and the package-isolation verifier. The latter
+resolves the exact provisioned SDK, checks the common provider dependencies and
+installed names/text/symbols/links, then independently configures/builds/runs a
+consumer with `PKG_CONFIG_PATH` removed. Package checks are repeated at final head.
+
+Development evidence is not hidden: an intermediate loader link failed because
+the public demo directly called getBuffer; it now uses the loader-resolved
+factory's Buffer. An intermediate Clang run hit a test-only null dereference
+from a temporary gate reset followed by its check; the reset was removed and
+GDB localized that failure to the test. An initial TSan focused repeat exposed
+the ungated receive/no-I/O measurement described above, now explicitly gated.
+Strict GCC warnings also caught a copied loop binding and an optimized temporary
+range-vector comparison; reference binding and direct byte comparison fixed
+them without disabling warnings. Those intermediate failures are not final-head
+qualification results; no assertion, test or sanitizer setting was relaxed.
+
+Local environment: Linux 6.12.113, GCC **14.2.0**, Clang **19.1.7**, CMake **3.31.6**,
+Ninja, Python **3.13.16**. SDK-enabled lanes use existing explicitly provisioned
+Aravis **0.8.36** at `/tmp/gm13-work/aravis-prefix`; the release archive rehash is
+`246deaa0042a387ff1bc00332d0fb80537ce14abde2c28d1a54c91f17adc51bf`, matching
+the unchanged pin. ASan uses `detect_leaks=1:halt_on_error=1`, UBSan
+`halt_on_error=1:print_stacktrace=1`, TSan `halt_on_error=1`. The uninstrumented
+SDK, existing SDK-handoff suppressions/blind spots and simulator wildcard
+discovery-listener exception are unchanged. No suppressions were added.
+
+**Limits.** This is logical provider acquisition Standby, not physical standby,
+power management, reconnection, hardware health, calibration, NUC, LOS, scanning,
+scheduling, tracking or full MEL conformance. Long-running consumer callbacks
+remain a source of shutdown latency. No public provider API/factory/C ABI,
+upstream/SDK change, CI restructuring, worker, queue or timer is introduced.
+Separately, pinned metadata capabilities lack DiscreteStatus and
+MFA_SecurityAuditRecord entries; neither callback is implemented or advertised.
+
 ## GIGE-MEL-016 synthetic known-empty Image BadPixelList
 
 **Starting point.** Fetch verified `origin/main` at
