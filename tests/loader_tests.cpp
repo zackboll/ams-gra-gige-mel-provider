@@ -219,7 +219,7 @@ void run(const char* library_path, const std::string& mode) {
     if (mode == "--navigation-only") { demonstrate_navigation(session.control); return; }
     std::cout << "Loaded provider: " << library_path << '\n';
     if (mode == "--mode-only" || mode == "--expect-no-mode") {
-        demonstrate_mode(session.control, mode == "--expect-no-mode"); return;
+        demonstrate_mode(session.control, buffer_factory("synthetic", session.manager), mode == "--expect-no-mode"); return;
     }
     if (mode == "--bit-only" || mode == "--expect-no-bit") {
         demonstrate_bit(session.control, mode == "--expect-no-bit"); return;
@@ -231,7 +231,7 @@ void run(const char* library_path, const std::string& mode) {
     if (!mode.empty()) return;
     demonstrate_bit(session.control);
     demonstrate_subsystem(session.control);
-    demonstrate_mode(session.control);
+    demonstrate_mode(session.control, buffer_factory("synthetic", session.manager));
     demonstrate_navigation(session.control);
     demonstrate_bad_pixels(session.control);
 
@@ -292,8 +292,8 @@ int main(int argc, char** argv) {
             mode == "--bad-pixels-only" ? "PASS: public MEL Image BadPixelList one-shot zero-byte zero-entry payload without acquisition\n" :
             mode == "--expect-no-navigation" ? "PASS: unchanged baseline navigation Unsupported; no Image acquisition\n" :
             mode == "--navigation-only" ? "PASS: TEST DATA navigation ready echo, zero IDs, matching callback and typed stale rejection; no Image acquisition\n" :
-            mode == "--expect-no-mode" ? "PASS: unchanged baseline Standby Unsupported; no Image acquisition\n" :
-            mode == "--mode-only" ? "PASS: public MEL Standby acknowledgement, correlated statuses, typed Operate rejection; no Image acquisition\n" :
+            mode == "--expect-no-mode" ? "PASS: unchanged starting main rejects active Standby; explicit disable/release/restart\n" :
+            mode == "--mode-only" ? "PASS: public MEL active Standby, correlated Accepted, retained buffer, stopped stream and restart\n" :
             mode == "--health-only" ? "PASS: public MEL Health discovery, attachment and both current reports\n" :
             mode == "--expect-no-bit" ? "PASS: baseline BIT metadata/registrations absent; valid initiation Unsupported\n" :
             mode == "--bit-only" ? "PASS: public MEL BIT catalogue, acceptance, completed result and Health faults\n" :

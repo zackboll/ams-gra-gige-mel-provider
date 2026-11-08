@@ -155,7 +155,7 @@ When all MEL slots are held, the provider drops newly received frames and
 increments `dropped_no_buffer`; it never grows an unbounded queue or overwrites
 a held slot. Releasing a slot permits later frames to resume.
 
-`disable()` preserves registered slots and outstanding bytes. Unregistering a
+`disable()` and valid C2 commanded Standby preserve registered slots and outstanding bytes. Unregistering a
 held slot fails. Re-enabling requires all registered slots to be released and
 large enough for the current layout. Detach stops acquisition and unbinds slots;
 held bytes remain readable and `release` remains valid after detach, provided
@@ -299,15 +299,23 @@ association: FrameHeader sensorNavState/sensorInertialState remain empty, with
 no time conversion, LOS transformation or backend I/O. It is **PARTIAL required
 navigation support**, not full navigation integration or MEL conformance.
 
-[ModeCmd's bounded subset](mode-command.md) is a synchronous, idempotent
-`Standby/Unused/default-ScanParam` acknowledgement of initialized, valid, idle
-observed provider state, with correlated terminal CommandStatus. It performs no
-device I/O, Image lifecycle operation, configuration/generation mutation,
-diagnostic clearing, BIT change or task scheduling. Active (including faulted
-but still owned) acquisition rejects Standby. Existing operations/state mutexes
-serialize the snapshot; no commanded state is added and Health's observed-state
-model is unchanged. All other state/mode requests are rejected. This does not
-complete required ModeCmd or task-scheduling conformance.
+[ModeCmd's bounded subset](mode-command.md) synchronously accepts only
+`Standby/Unused/default-ScanParam` with initialized Control and known-valid actual
+configuration. Idle requests retain the idempotent no-I/O/no-Health-or-BIT-change
+acknowledgement. Active requests reuse Image disable's cancellation, worker join,
+stream stop and ownership unpublication before ready Unused/Accepted. Faulted
+but still-owned acquisition receives the same explicit cleanup; cumulative
+diagnostics/history and existing BIT retirement policy survive. Image stays
+disabled and attached, preserving registrations and outstanding consumer-held
+bytes until explicit Buffer release; it can then be re-enabled. Operations
+serialize with lifecycle/configuration; no state/callback mutex spans a join or
+backend stop. Configuration/generation, navigation receipt and BadPixelList
+registration are unchanged. No commanded state variable, worker, queue, timer,
+calibration, NUC or LOS state is added. Health retains its observed-state model.
+All other requests are rejected without stopping acquisition. This is logical
+provider state, not physical camera standby/power/health or full ModeCmd/task
+scheduling. The pinned metadata enum separately lacks DiscreteStatus and
+MFA_SecurityAuditRecord entries; these remain unimplemented and unadvertised.
 
 The [bounded provider-software BIT profile](software-bit.md) supports one
 synchronous C2 observed-state test (numeric ID 1), C2 catalogue/status registration,

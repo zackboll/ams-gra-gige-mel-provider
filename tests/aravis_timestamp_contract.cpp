@@ -31,6 +31,7 @@
 #include <nlohmann/json.hpp>
 
 #include <irmel/library/image/ImageChannel.h>
+#include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/irmel-types/FrameHeader.h>
 #include <irmel/library/irmel-types/ImageListener.h>
 
@@ -1167,6 +1168,46 @@ void positive_publication() {
               << " ns; backend frames " << frames << ", dropped " << stats.dropped_no_buffer << '\n';
 }
 
+// GIGE-MEL-017: logical stop only. Genuine SDK pixels use the existing
+// test-only clock; production timestamp admission remains unchanged.
+void commanded_standby() {
+    Session s(true);
+    const vc::Model model{std::chrono::seconds{2500}, 10ms, 12};
+    s.clock->set_model(model); s.configure(9102, gen1);
+    s.add_buffer(std::size_t{gen1.width} * gen1.height, 250);
+    std::shared_ptr<ir::C2Channel> c2;
+    for (const auto& cap : s.control->getCapabilities()) {
+        if (cap.getChannelTypes() != std::vector{ir::ChannelType::CommandAndControl}) continue;
+        ir::Config config; config.setChanID(cap.getChanID()); config.setChannelType(ir::ChannelType::CommandAndControl);
+        c2 = std::dynamic_pointer_cast<ir::C2Channel>(s.control->attachChannel(config));
+    }
+    CHECK(c2);
+    std::vector<ir::CommandStatus> statuses;
+    bool identity = true;
+    CHECK(c2->registerMetadataCallback(std::function<void(ir::Channel&, const ir::CommandStatus*)>{
+        [&](auto& channel, auto* status) { identity = identity && &channel == c2.get(); statuses.push_back(*status); }
+    }) == ir::Return::Success);
+    CHECK(s.image->enable() == ir::Return::Success); s.listener->wait_count(1);
+    const auto held = s.listener->at(0); check_published(held, model, gen1, 1);
+    ir::ModeCmd command; command.setState(mel::MFA_State::Standby); command.setMode(ir::MFA_Mode::Unused);
+    command.setCommandID(UINT32_MAX);
+    auto future = c2->send(command); CHECK(future.wait_for(0ms) == std::future_status::ready);
+    auto result = future.get(); CHECK(result && *result.get() == ir::MFA_Mode::Unused);
+    CHECK(statuses.size() == 1 && identity && statuses.back().getCommandID() == UINT32_MAX);
+    CHECK(statuses.back().getState() == ir::CommandState::Accepted &&
+        statuses.back().getReasonID() == ir::CannotComply::NotSet && statuses.back().getReasonDescription().empty());
+    CHECK(s.image->enable() == ir::Return::Fail);
+    CHECK(std::equal(held.bytes.begin(), held.bytes.end(), static_cast<const std::byte*>(held.address)));
+    CHECK(acquisition_register(*s.inner()) == 0);
+    CHECK(s.seen->command_log() == (std::vector<std::string>{"AcquisitionStart", "AcquisitionStop"}));
+    CHECK(s.ledger->wait_outstanding(0, bound));
+    CHECK(held.buffer->release() == ir::Return::Success);
+    CHECK(s.image->enable() == ir::Return::Success); s.listener->wait_count(2);
+    CHECK(s.image->disable() == ir::Return::Success);
+    check_published(s.listener->at(1), model, gen1, 2);
+    CHECK(s.control->detachChannel(c2) == ir::Return::Success);
+}
+
 // V2. Backpressure with every registered destination held by the consumer.
 void backpressure_and_release() {
     Session s(true);
@@ -1604,6 +1645,7 @@ int main(int argc, char** argv) {
         {"V0 virtual clock model and checked arithmetic", virtual_clock_model},
         {"V1 positive MEL Image publication of genuine SDK pixels (virtual time)", positive_publication},
         {"V2 backpressure, held buffers and explicit release", backpressure_and_release},
+        {"V2 ModeCmd commanded Standby retained SDK pixels and restart", commanded_standby},
         {"V3 disable, reconfigure and restart generation", disable_and_restart},
         {"N1 unqualified timestamps rejected per frame", rejected_timestamps},
         {"N2 rejected initial frame does not establish the clock baseline", rejected_initial_then_accepted},
