@@ -1286,6 +1286,100 @@ void exposure_selection_query_errors() {
     CHECK(observed->live() == 0);
 }
 
+// GIGE-MEL-018 (observed on a Cognex CIC-5000R, firmware V3.7-1): only the
+// legacy float AcquisitionFrameRateAbs [Hz] is implemented, and
+// DeviceSerialNumber is a GenICam Integer node. Reproduced on the real SDK
+// Fake GenICam tree: the native AcquisitionFrameRate node is made SDK-
+// unimplemented and an Abs float with <Unit>Hz</Unit> is added beside it.
+void gc_add_rate_abs(ArvDevice* d, const char* value) {
+    auto* node = gc_add(d, nullptr, "Float", "AcquisitionFrameRateAbs");
+    gc_add(d, node, "Value", nullptr, value);
+    gc_add(d, node, "Min", nullptr, "0.5");
+    gc_add(d, node, "Max", nullptr, "500.0");
+    gc_add(d, node, "Unit", nullptr, "Hz");
+}
+void legacy_frame_rate_and_integer_identity() {
+    auto observed = std::make_shared<NativeOpens>();
+    std::vector<std::string> attempted;
+    {
+        // SFNC name implemented: it is selected even when the Abs name exists.
+        auto device = open_fake(*arranged_backend(observed, [](ArvDevice* d) { gc_add_rate_abs(d, "7.0"); }));
+        CHECK(device->configuration().value() == fake_initial); // 25 Hz from AcquisitionFrameRate
+        CHECK(device->close());
+    }
+    auto legacy = arranged_backend(
+        observed,
+        [](ArvDevice* d) {
+            gc_add_rate_abs(d, "7.0");
+            gc_set_unimplemented(d, "AcquisitionFrameRate"); // SDK: not implemented, no GError
+        },
+        &attempted);
+    {
+        auto device = open_fake(*legacy);
+        const auto caps = device->capabilities();
+        CHECK(caps.minimum_frame_rate_hz == 1 && caps.maximum_frame_rate_hz == 500); // the Abs bounds
+        auto expected = fake_initial;
+        expected.frame_rate_hz = 7;
+        CHECK(device->configuration().value() == expected);
+        // apply() writes the selected legacy feature, never the absent name.
+        // 7 -> 3 Hz lengthens the period, so the rate is written first; floats
+        // are always written (existing policy).
+        auto request = expected;
+        request.frame_rate_hz = 3;
+        CHECK(device->apply(request).value() == request);
+        CHECK((attempted == std::vector<std::string>{"AcquisitionFrameRateAbs", "ExposureTimeAbs"}));
+        const auto rejected = device->apply({512, 512, 0, 0, 501, 10ms});
+        CHECK(!rejected && contains(rejected.error().message, "AcquisitionFrameRateAbs 501 Hz is outside the native bounds"));
+        CHECK(attempted.size() == 2); // nothing more written
+        CHECK(device->close());
+    }
+    {
+        // Abs declaring a non-Hz unit is unsupported with the selected name.
+        const auto wrong_unit = arranged_backend(observed, [](ArvDevice* d) {
+            auto* node = gc_add(d, nullptr, "Float", "AcquisitionFrameRateAbs");
+            gc_add(d, node, "Value", nullptr, "7.0");
+            gc_add(d, node, "Unit", nullptr, "us");
+            gc_set_unimplemented(d, "AcquisitionFrameRate");
+        })->open(aravis_fake::device_id);
+        CHECK(!wrong_unit && contains(wrong_unit.error().message, "AcquisitionFrameRateAbs declares unit 'us'"));
+    }
+    {
+        // A failed SFNC implementation query never falls back to Abs.
+        const auto broken = arranged_backend(observed, [](ArvDevice* d) {
+            gc_add_rate_abs(d, "7.0");
+            (void)break_implementation_query(d, "AcquisitionFrameRate");
+        })->open(aravis_fake::device_id);
+        CHECK(!broken && contains(broken.error().message, "optional feature 'AcquisitionFrameRate'"));
+        // Neither implemented: explicit unsupported diagnostic.
+        const auto neither = arranged_backend(observed, [](ArvDevice* d) {
+            gc_set_unimplemented(d, "AcquisitionFrameRate");
+        })->open(aravis_fake::device_id);
+        CHECK(!neither && contains(neither.error().message, "neither AcquisitionFrameRate nor AcquisitionFrameRateAbs"));
+    }
+    {
+        // Integer identity node: exact decimal readback, labelled; inspection
+        // and the timing context both report it instead of a type error.
+        auto camera = arranged_backend(observed, [](ArvDevice* d) {
+            gc_add(d, gc_add(d, nullptr, "Integer", "DeviceSerialNumber"), "Value", nullptr, "21874533");
+        });
+        const auto inspection = aravis::inspect(*camera, aravis_fake::device_id);
+        CHECK(inspection && inspection.value().problems.empty());
+        bool serial = false;
+        for (const auto& [name, value] : inspection.value().native)
+            serial = serial || (name == "DeviceSerialNumber" && value == "21874533 (GenICam Integer node)");
+        CHECK(serial);
+        auto device = open_fake(*camera);
+        const auto context = aravis::read_timing_context(*device);
+        CHECK(context);
+        serial = false;
+        for (const auto& [name, value] : context.value().identity)
+            serial = serial || (name == "DeviceSerialNumber" && value == "21874533 (GenICam Integer node)");
+        CHECK(serial);
+        CHECK(device->close());
+    }
+    CHECK(observed->live() == 0);
+}
+
 // R1 (finding C): a failed implementation query is an error, never absence.
 // Every failure is a genuine GError from the pinned SDK evaluating its own
 // GenICam tree (pIsImplemented -> IntReg -> nonexistent pPort); each
@@ -1403,6 +1497,7 @@ int main(int argc, char** argv) {
         {"optional string feature query error is not absence", optional_feature_query_errors},
         {"optional Boolean feature query error is not absence", optional_boolean_query_errors},
         {"exposure feature query error does not fall back", exposure_selection_query_errors},
+        {"legacy AcquisitionFrameRateAbs and Integer identity (GIGE-MEL-018)", legacy_frame_rate_and_integer_identity},
         {"close, destruction and lightweight stream wrapper", close_destruction_and_streaming},
     };
     std::size_t passed = 0;

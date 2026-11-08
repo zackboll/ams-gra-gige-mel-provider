@@ -206,7 +206,7 @@ Status check_preconditions(const NativeSnapshot& n) {
         return unsupported("ExposureAuto is '" + *n.exposure_auto + "'; the profile requires manual exposure");
     if (n.frame_rate_enable && !*n.frame_rate_enable)
         return unsupported("AcquisitionFrameRateEnable is false; the profile requires an enabled frame-rate control");
-    if (auto unit = unit_is(n.frame_rate_hz, frame_rate_feature, {"Hz", "fps"}); !unit) return unit;
+    if (auto unit = unit_is(n.frame_rate_hz, n.frame_rate_feature, {"Hz", "fps"}); !unit) return unit;
     if (auto unit = unit_is(n.exposure_us, n.exposure_feature, {"us", "\xC2\xB5s"}); !unit) return unit;
     return {};
 }
@@ -223,7 +223,7 @@ Status check_limits(const NativeSnapshot& n) {
         {n.offset_y, offset_y_feature, n.sensor_height, true}};
     for (const auto& roi : rois)
         if (auto ok = integer_limits(roi.feature, roi.name, roi.sensor, roi.is_offset); !ok) return ok;
-    if (auto ok = float_limits(n.frame_rate_hz, frame_rate_feature, "Hz", false); !ok) return ok;
+    if (auto ok = float_limits(n.frame_rate_hz, n.frame_rate_feature, "Hz", false); !ok) return ok;
     return float_limits(n.exposure_us, n.exposure_feature, "us", true);
 }
 
@@ -235,7 +235,7 @@ Status check_current(const NativeSnapshot& n) {
     if (auto ok = current_axis(n.width, n.offset_x, n.sensor_width, width_feature, offset_x_feature); !ok) return ok;
     if (auto ok = current_axis(n.height, n.offset_y, n.sensor_height, height_feature, offset_y_feature); !ok) return ok;
     if (!std::isfinite(n.frame_rate_hz.value) || n.frame_rate_hz.value < 0)
-        return fail(ErrorCode::io_error, std::string(frame_rate_feature) + " returned an invalid native value " +
+        return fail(ErrorCode::io_error, n.frame_rate_feature + " returned an invalid native value " +
                                              text(n.frame_rate_hz.value) + " Hz");
     if (!std::isfinite(n.exposure_us.value) || n.exposure_us.value < 0)
         return fail(ErrorCode::io_error,
@@ -260,7 +260,7 @@ Result<CameraCapabilities> capabilities_from(const NativeSnapshot& n) {
     const double low = std::max(1.0, std::ceil(rate.minimum));
     const double high = std::min(std::floor(rate.maximum), static_cast<double>(std::numeric_limits<std::uint32_t>::max()));
     if (high < low)
-        return fail(ErrorCode::unsupported, std::string(frame_rate_feature) + " bounds [" + text(rate.minimum) + ", " +
+        return fail(ErrorCode::unsupported, n.frame_rate_feature + " bounds [" + text(rate.minimum) + ", " +
                                                 text(rate.maximum) + "] Hz contain no integer rate");
     caps.minimum_frame_rate_hz = static_cast<std::uint32_t>(low);
     caps.maximum_frame_rate_hz = static_cast<std::uint32_t>(high);
@@ -282,7 +282,7 @@ Result<CameraConfiguration> configuration_from(const NativeSnapshot& n) {
     const auto y = offset(n.offset_y.value, offset_y_feature);
     for (const auto* r : {&w, &h, &x, &y})
         if (!*r) return r->error();
-    const auto rate = frame_rate_from_native(n.frame_rate_hz.value);
+    const auto rate = frame_rate_from_native(n.frame_rate_hz.value, n.frame_rate_feature);
     if (!rate) return rate.error();
     const auto exposure = exposure_from_native(n.exposure_us.value, n.exposure_feature);
     if (!exposure) return exposure.error();
@@ -386,6 +386,9 @@ Status unchanged_profile(const NativeSnapshot& n, const NativeSnapshot& envelope
                            std::to_string(roi.now.increment));
     if (n.exposure_feature != envelope.exposure_feature)
         return changed("selected exposure feature", "'" + envelope.exposure_feature + "'", "'" + n.exposure_feature + "'");
+    if (n.frame_rate_feature != envelope.frame_rate_feature)
+        return changed("selected frame-rate feature", "'" + envelope.frame_rate_feature + "'",
+                       "'" + n.frame_rate_feature + "'");
     return {};
 }
 
@@ -428,11 +431,11 @@ Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& c, const
     // check at the exposure write. In every other order the fresh exposure
     // maximum is already final and is enforced before any write.
     const bool rate_first = rate.value() < n.frame_rate_hz.value;
-    if (auto ok = float_request(rate.value(), n.frame_rate_hz, frame_rate_feature, "Hz", true); !ok) return ok.error();
+    if (auto ok = float_request(rate.value(), n.frame_rate_hz, n.frame_rate_feature, "Hz", true); !ok) return ok.error();
     if (auto ok = float_request(exposure.value(), n.exposure_us, n.exposure_feature, "us", !rate_first); !ok)
         return ok.error();
 
-    const NativeWrite rate_write{std::string(frame_rate_feature), true, 0, rate.value()};
+    const NativeWrite rate_write{n.frame_rate_feature, true, 0, rate.value()};
     const NativeWrite exposure_write{n.exposure_feature, true, 0, exposure.value()};
     // Floats are always written (no exact-equality shortcut on native floats).
     if (rate_first) {

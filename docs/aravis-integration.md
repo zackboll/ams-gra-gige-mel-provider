@@ -38,7 +38,7 @@ and [Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1).
 | --- | --- | --- |
 | In-process Aravis Fake (`ArvFakeInterface`/`ArvFakeStream`) | Completed software tests (GIGE-MEL-008 to -010) | No GVCP, no GVSP, no sockets |
 | Loopback `ArvGvFakeCamera` (GIGE-MEL-011) | Simulated network camera; actual GigE Vision discovery, GVCP control and GVSP image transport over UDP on 127.0.0.1 | No physical NIC, switch or camera qualification |
-| Physical GigE camera | **Not yet qualified** | — |
+| Physical GigE camera: Cognex CIC-5000R, firmware V3.7-1 (GIGE-MEL-018) | Real discovery, inspection, Mono8 capture, GVSP statistics and opt-in test-only MEL delivery under a documented temporary arrangement ([record](cognex-cic-5000r.md)). GIGE-MEL-018R2 tested on a 1 Gb/s link: 2, 5 and 10 Hz full-frame sustained with every frame complete | Not hardware or timestamp qualification; power-on configuration unsupported; 14 Hz unsupported (reads back 14.000112 Hz) |
 | Timestamps | Raw SDK values observed; production descriptors remain invalid (`FrameTimestamp{}`); virtual time used only by tests | No integration-start, PTP or UTC claim |
 
 > **Superseded status (GIGE-MEL-008 text below).** Passages written for
@@ -226,6 +226,27 @@ It installs only the library, headers and `.pc` file, and records
 ninja, pkg-config, and GLib ≥ 2.52, libxml2 and zlib development files. The SDK
 is **not** sanitizer-instrumented.
 
+### Persistent local SDK prefix (GIGE-MEL-018)
+
+On a Debian 13 workstation, the procedure actually used for the physical-camera
+work keeps the SDK in a persistent per-user prefix rather than `/tmp`, and
+never installs Aravis globally or touches `ldconfig`:
+
+```sh
+sudo apt-get install --no-install-recommends meson libglib2.0-dev clang  # once; libxml2/zlib dev, ninja, pkg-config already present
+scripts/provision_aravis.sh "$HOME/sdk/aravis-0.8.36" --archive "$HOME/sdk/downloads/aravis-0.8.36.tar.xz"
+PKG_CONFIG_PATH="$HOME/sdk/aravis-0.8.36/lib/pkgconfig" pkg-config --modversion aravis-0.8   # 0.8.36
+env -u PKG_CONFIG_SYSROOT_DIR -u PKG_CONFIG_LIBDIR PKG_CONFIG_PATH="$HOME/sdk/aravis-0.8.36/lib/pkgconfig" \
+    cmake --preset dev -B build/aravis-hardware -DGIGE_MEL_BUILD_ARAVIS=ON
+cmake --build build/aravis-hardware --parallel 8
+LD_LIBRARY_PATH="$HOME/sdk/aravis-0.8.36/lib" ldd build/aravis-hardware/gige_mel_aravis_diagnostic
+```
+
+Use a **new** build directory when the SDK location changes: a CMake cache
+from an older prefix or sysroot keeps those absolute library and include
+paths. Diagnostic and test processes need `LD_LIBRARY_PATH` to include the
+prefix's `lib` directory; the build adds no RPATH to the SDK.
+
 ## Build option, targets and diagnostic
 
 ```sh
@@ -250,6 +271,7 @@ exported:
 | `aravis_timestamp_contract_tests` → CTest `aravis_timestamp_contract` | GIGE-MEL-010: native timestamp observation, the time-probe routine against the Fake, and positive/negative MEL publication through the **test-only** virtual clock (`tests/support/aravis_virtual_clock.*`) |
 | `aravis_gige_loopback_contract_tests` → CTest `aravis_gige_loopback_contract` | GIGE-MEL-011: the production GigE backend against the SDK's `ArvGvFakeCamera` (GVCP/GVSP on 127.0.0.1; real discovery, GVCP, GVSP), plus the R1 socket-audit control case. Test-only fixture `tests/support/aravis_gv_loopback.*`. Needs IPv4 loopback with UDP 3956 free; never skipped. **While it runs, the simulator holds a wildcard 255.255.255.255:3956 listener** ([test-only exception](#network-exposure-of-the-simulator-gige-mel-011-r1)) |
 | `gige_mel_aravis_diagnostic` → CTest `aravis_diagnostic_help` | Diagnostic tool (`--help` performs no device I/O) |
+| `aravis_physical_camera_tests` → CTest `aravis_physical_camera` (label `hardware`) | GIGE-MEL-018 **opt-in** physical-camera MEL test; only with `-DGIGE_MEL_ARAVIS_HARDWARE_TESTS=ON -DGIGE_MEL_HARDWARE_DEVICE_ID=ID [-DGIGE_MEL_HARDWARE_INTERFACE=NIC]` (default OFF, never in CI, not counted above). Writes no camera feature; see [Cognex record](cognex-cic-5000r.md#test-only-mel-integration-opt-in) |
 
 ```sh
 build/aravis-dev/gige_mel_aravis_diagnostic --help
@@ -421,7 +443,7 @@ configuration I/O. The interface singleton is requested lazily on the first
 | --- | --- |
 | Sensor extent (read-only) | `SensorWidth`, `SensorHeight` |
 | ROI, read/write, positive 32-bit increment, minimum on its own grid | `Width`, `Height`, `OffsetX`, `OffsetY` (value, min, max, increment) |
-| Frame rate, read/write float, Hz | `AcquisitionFrameRate` |
+| Frame rate, read/write float, Hz | `AcquisitionFrameRate`, else `AcquisitionFrameRateAbs` (GIGE-MEL-018; first implemented, same rule as exposure) |
 | Exposure, read/write float, µs | `ExposureTime`, else `ExposureTimeAbs` |
 | Current format Mono8, entry available | `PixelFormat` |
 | Free-running | `TriggerMode` = `Off` when present; `TriggerSelector` = `FrameStart` when present |
@@ -1883,8 +1905,11 @@ loopback network simulator `ArvGvFakeCamera`. It does **not** establish:
   property is implemented or verified, and owner acceptance of the exception
   is pending.
 
-The first physical-camera qualification and a second real SDK implementation
-remain pending. Sanitizer jobs instrument the project's code only, not the
+GIGE-MEL-018 adds the first physical-camera evidence (Cognex CIC-5000R; see
+the [camera record](cognex-cic-5000r.md)). It is observation and test-only MEL
+delivery under a temporary camera arrangement, not hardware or timestamp
+qualification: physical-camera qualification and a second real SDK
+implementation remain pending. Sanitizer jobs instrument the project's code only, not the
 SDK.
 
 ## Reproducible evidence collection (GIGE-MEL-013)
