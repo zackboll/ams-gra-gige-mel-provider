@@ -20,6 +20,16 @@ operator and is not committed.
 > integer-Hz profile correctly rejects. 14 Hz is therefore **unsupported** by
 > the production adapter; it was characterized only through a raw-SDK probe.
 > See [1 Gb/s requalification](#1-gbs-requalification-gige-mel-018r2).
+>
+> **GVSP receive buffer (GIGE-MEL-019).** The adapter now requests a 4 MiB
+> stream socket buffer and reports whether the kernel granted it. With
+> `net.core.rmem_max` temporarily at 32 MiB and the host heavily loaded, 10 Hz
+> production capture went from 35–241/600 complete frames (SDK default) to
+> 585–598/600. That is a large, repeatable improvement, but **not** 600/600.
+> At the host's default `rmem_max` the request is clamped to 212992 bytes, and
+> the adapter warns once per stream. See
+> [GIGE-MEL-019](#gvsp-receive-buffer-gige-mel-019) and
+> [GVSP receive buffer](gvsp-receive-buffer.md).
 
 ## Identity (observed 2026-11-08)
 
@@ -298,8 +308,17 @@ Classification:
   %, and at 14 Hz A/B gave 0.154 % / 1.748 %. All legs were complete (300/300
   and 420/420). The spread between runs exceeds any effect of the setting.
 
-**Proposed follow-up (not applied).** This is a measured and reversible
-experiment that needs owner approval, because it changes host-wide settings:
+**Proposed follow-up (GIGE-MEL-018R2 text; done in GIGE-MEL-019).** The
+follow-up below was carried out with owner approval and is reported in
+[GVSP receive buffer (GIGE-MEL-019)](#gvsp-receive-buffer-gige-mel-019). Two
+results differ from this proposal:
+
+- The selected policy is `FIXED` 4 MiB, not `AUTO`.
+- The 018R2 process-local `AUTO` result above was correctly identified as no
+  real increase: the kernel granted only 212992 bytes.
+
+The original proposal follows. It is a measured and reversible experiment that
+needed owner approval, because it changes host-wide settings:
 
 1. Run a baseline at the current settings: three 60 s 14 Hz raw-SDK runs and
    three 10 Hz production runs with a recorded host load.
@@ -347,6 +366,46 @@ a verification read raced with the next session's arrangement and saw
 state. No UserSet was saved, and no gain, transport, IP or firmware setting
 was written.
 
+## GVSP receive buffer (GIGE-MEL-019)
+
+Performed 2026-11-08, with the same camera, link (`GevLinkSpeed` 1000 in every
+snapshot), 1500-byte packets, `GevSCPD` 0 and Aravis 0.8.36. The method,
+pinned-SDK analysis, adapter change and every table are in
+[GVSP receive buffer](gvsp-receive-buffer.md). Summary:
+
+- **Kernel limits.** Both `rmem_default` and `rmem_max` were 212992, and
+  `rmem_default` was never changed. With the owner's authorization `rmem_max`
+  was set to 33554432 twice, at runtime only through a guarded procedure, and
+  restored to 212992 both times (verified). No `/etc` file was written.
+- **Kernel-reported grant.** The SDK default reports 212992. With `rmem_max` at
+  32 MiB, `FIXED` 4 MiB reports 8388608, 8 MiB reports 16777216 and `AUTO`
+  reports 10079744 (payload + 1 KiB, doubled). At the default `rmem_max`, the
+  4 MiB request reports only 425984, a grant of 212992 bytes.
+- **Light load** (load1 ≤ 4.5). The tuned policies had no UDP drops in all 12
+  legs; the default policy had drops in 3 of 4 controls. Every leg was
+  complete, so light load showed no frame-level benefit at 14 Hz.
+- **Heavy load** (load1 17–24, host CPU 41–69 %; owner-authorized synthetic
+  load plus the owner's own work). 4 legs per policy, interleaved:
+
+  | Rate | Default: complete frames | Default: UDP drops | 4 MiB: complete frames | 4 MiB: UDP drops |
+  | --- | --- | --- | --- | --- |
+  | 10 Hz production | 35–241/600 | 185k–449k | 585–598/600 | 514–3,552 |
+  | 14 Hz raw SDK | 54–346/840 | 146k–593k | 820–828/840 | 5k–18k |
+
+- **Selected policy.** `FIXED` 4 MiB went into the adapter. It is not
+  qualified: under heavy load it still drops 2–15 frames per minute at 10 Hz.
+- **Unchanged here.** 14 Hz remains raw-SDK only.
+- **Camera restoration.** There were 11 camera sessions: 6 measurement
+  sessions, one smoke check, two ineffective-request checks at the default
+  `rmem_max`, and two physical MEL runs at 10 Hz (before and after a self-review
+  fix).
+  - Each wrote only `AcquisitionFrameRateEnable` and `AcquisitionFrameRateAbs`.
+  - Each restored them to `false` and `10`, and verified every recorded
+    writable feature against the original 019 snapshot (`RESTORE_VERIFIED`
+    11/11).
+  - All 23 camera snapshots reported `GevLinkSpeed` 1000.
+  - No UserSet, gain, transport, IP or firmware setting was written.
+
 ## Limitations
 
 - The camera's power-on configuration is unsupported. The documented
@@ -363,8 +422,13 @@ was written.
 - The original 100 Mb/s link cause is unexplained. The 1 Gb/s link was stable
   throughout R2.
 - Host socket receive-buffer drops (`rmem_default`/`rmem_max` 212,992 bytes)
-  cause resends at a 1500-byte MTU. They are recovered at 2–10 Hz, but under
-  heavy host load at 14 Hz they caused 17/840 failed frames. Tuning is only
-  proposed, not applied.
+  cause resends at a 1500-byte MTU.
+  - In 018R2 they were recovered at 2–10 Hz, but under heavy host load at
+    14 Hz they caused 17/840 failed frames.
+  - GIGE-MEL-019 adds a 4 MiB stream request. It needs the host prerequisite
+    `rmem_max` ≥ 4 MiB, which this project does not apply.
+  - With that prerequisite the request helps greatly under heavy load but does
+    not eliminate loss. Without it the request does nothing and the adapter
+    warns once per stream.
 - No timing item is qualified; optics are virtual; no physical unplug,
   power-loss or heartbeat-timeout test was run.

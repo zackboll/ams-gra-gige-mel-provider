@@ -1,5 +1,102 @@
 # Bootstrap validation record
 
+## GIGE-MEL-019 GVSP socket receive buffer
+
+**Starting point.** `feature/gige-mel-019-gvsp-receive-buffer` was created
+from freshly fetched `origin/main` `8965e15561e657adc8f2a278f51a958930663b38`
+(merge of PR #18). Main had not advanced. The SDK is the unchanged provisioned
+Aravis 0.8.36 (archive SHA-256 `246deaa0…51bf`), and its source was
+re-extracted only to be read.
+
+**Hardware and host evidence.**
+
+- The full record is in [GVSP receive buffer](gvsp-receive-buffer.md) and the
+  [camera record](cognex-cic-5000r.md#gvsp-receive-buffer-gige-mel-019).
+- **Load:** there were 34 measured 60 s legs at light, baseline and heavy load,
+  with A/B controls. The heavy synthetic load was owner-authorized.
+- **Host limit:** `net.core.rmem_max` was changed twice under the owner's
+  authorization, at runtime only through a guarded procedure. It was restored
+  to 212992 both times (verified), and no `/etc` file was written.
+- **Camera:** all 11 camera sessions, including the two physical MEL runs,
+  restored and verified the camera's writable state. All 23 snapshots reported
+  `GevLinkSpeed` 1000.
+- **Excluded from the tables:** a 15 s smoke leg, the ineffective-request legs
+  at the default `rmem_max`, and one harness syntax error that affected no
+  measured leg.
+- Raw evidence is kept outside Git.
+
+**Code change.** The change is limited to the private Aravis adapter:
+
+- `start()` sets `FIXED` 4 MiB on an `ArvGvStream`.
+- The receiving thread measures the kernel's actual `SO_RCVBUF` once per
+  native stream.
+- The adapter exposes a private observation and the diagnostic prints it.
+- Three test-only hooks were added.
+
+No public header under `include/`, no MEL surface, no upstream file and no
+dependency changed. The new code uses only POSIX calls already available to
+the adapter.
+
+**Permanent tests added.** These are scenarios inside existing executables, so
+the CTest counts are unchanged:
+
+- `aravis_adapter`: 24 scenarios, previously 23. Adds the SDK-free assessment.
+- `aravis_stream_contract`: 16 scenarios, previously 15. Adds O, Fake
+  noninterference.
+- `aravis_gige_loopback_contract`: 18 transport scenarios, previously 17, plus
+  the unchanged socket-audit control case. Adds R, a real `ArvGvStream`:
+  sufficient, kernel-clamped insufficient with exactly one warning per native
+  stream across a restart, genuinely unobservable `unknown`, and an
+  independent `getsockopt` cross-check. Every other loopback scenario now runs
+  with the production 4 MiB request against this host's limit, so each
+  prints its one `insufficient` warning per native stream.
+
+The host `rmem_max` is only read by these tests. R2 relies on it being below
+4 MiB, as on Linux defaults and in hosted CI. Otherwise it requests twice
+`rmem_max`, so it still observes a real clamp.
+
+**Regression (executed locally).** Fresh `build/019r-*` trees were built
+2026-11-08 23:38–23:53Z, with `rmem_max` at 212992 (unchanged). All 11
+configurations built.
+
+An earlier complete pass (23:21–23:36Z) had the same results. It was repeated
+after a self-review correction: on the allocation-only exception path of the
+measurement, the popped SDK buffer is now returned to its run with `recycle()`
+instead of being freed, so the pool cannot shrink.
+
+- SDK-free GCC Debug, GCC Release, Clang Debug, ASan/UBSan and TSan: 9/9 each.
+- Aravis GCC Debug, GCC Release, Clang Debug, ASan/UBSan and TSan: 15/15 each.
+  No new TSan suppression was added, and no ThreadSanitizer report occurred.
+- Hardware-enabled GCC Debug tree with `-LE hardware`: 15/15.
+- Package isolation verified on three Aravis builds.
+- `vendor_upstream.py --verify`: 97 files. `third_party/` is unchanged.
+
+**Physical camera (opt-in, GCC Debug hardware tree `build/019r-hw-gcc-dev`,
+10 Hz).** The run used the final code (after the `recycle()` correction), the
+unchanged host `rmem_max` 212992, and the temporary rate arrangement, restored
+and verified afterwards. A run before the correction gave identical results.
+
+- **Diagnostic `capture`:** one genuine full frame, plus the line
+  `receive buffer: insufficient (requested 4194304 bytes, granted 212992 bytes, kernel SO_RCVBUF 425984, net.core.rmem_max 212992)`
+  and exactly one stderr warning.
+- **`aravis_physical_camera`:** 3/3.
+  - G: 3 physical frames were rejected for an invalid timestamp, and the
+    destination was untouched.
+  - V: 12 frames of genuine pixels were written into registered host buffers
+    (5,038,848/5,038,848 bytes non-sentinel), with 2 held and 2 dropped while
+    held. Standby was accepted (1801), held bytes were released explicitly, and
+    the restart produced 10 checked frames.
+  - R: clean release and reopen.
+  - Stderr had exactly three warnings, one per native stream (generations 1, 2
+    and 3), and none per frame.
+- Production timestamps remain invalid. Delivery used only the test-only
+  virtual clock.
+
+**Not executed here.** The physical test was not run under sanitizers or with
+a raised `rmem_max`, where the expected report would be `sufficient`. That
+state is covered by loopback R1 and by the Phase 3 hardware measurements. The
+physical test is not part of hosted CI.
+
 ## GIGE-MEL-018R2 Cognex CIC-5000R 1 Gb/s requalification
 
 **Starting point.** PR #18 head `a8439b3ae4789cfca05efac577315dcffd65f322`

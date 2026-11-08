@@ -72,6 +72,20 @@ struct TestHooks {
     // the SDK buffer, so pixels and ownership stay genuine. Tests that use it
     // must say so.
     std::function<void(aravis_profile::NativeFrameFacts&)> decoded_facts;
+
+    // ---- GVSP socket receive buffer (GIGE-MEL-019).
+    // TEST-ONLY request override, in bytes (1..INT_MAX), in place of
+    // gvsp_receive_buffer_request_bytes. It arranges only the REQUEST: the SDK
+    // and the kernel then grant or clamp it for real, and the production
+    // measurement observes the result.
+    std::optional<std::int64_t> gvsp_receive_buffer_request_bytes;
+    // TEST-ONLY lookup redirection: maps this run's real GVSP port to the port
+    // the production socket lookup searches, to produce a genuinely
+    // unobservable socket. Receiving thread, no adapter lock.
+    std::function<std::uint16_t(std::uint16_t)> receive_buffer_lookup_port;
+    // Observation: the exact warning line, called after it was written to
+    // stderr. Receiving thread, no adapter lock.
+    std::function<void(std::string_view)> receive_buffer_warning;
 };
 
 std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource source, TestHooks hooks = {});

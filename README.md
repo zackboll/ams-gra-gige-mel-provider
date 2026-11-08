@@ -201,7 +201,7 @@ Main CMake options:
 | `GIGE_MEL_WARNINGS_AS_ERRORS` | `ON` | Strict warnings for project code; upstream headers are system includes |
 | `GIGE_MEL_SANITIZERS` | Empty | GCC/Clang sanitizer list, such as `address,undefined` or `thread` |
 | `GIGE_MEL_BUILD_ARAVIS` | `OFF` | Optional internal Aravis 0.8.36 control and acquisition adapter, its SDK tests and diagnostic; requires an explicitly provisioned SDK ([Aravis integration](docs/aravis-integration.md)) |
-| `GIGE_MEL_ARAVIS_HARDWARE_TESTS` | `OFF` | With the Aravis adapter: opt-in physical-camera MEL test (CTest label `hardware`); needs `GIGE_MEL_HARDWARE_DEVICE_ID` and a reachable camera; never run in CI ([Cognex record](docs/cognex-cic-5000r.md)) |
+| `GIGE_MEL_ARAVIS_HARDWARE_TESTS` | `OFF` | With the Aravis adapter: opt-in physical-camera MEL test (CTest label `hardware`); needs `GIGE_MEL_HARDWARE_DEVICE_ID` and a reachable camera; never run in CI ([Cognex record](docs/cognex-cic-5000r.md)). For GigE capture under host load, see the optional host prerequisite in [GVSP receive buffer](docs/gvsp-receive-buffer.md) |
 
 ## Installing and using the package
 
@@ -267,6 +267,12 @@ all MEL channel code.
    and opt-in, test-only-clock MEL delivery under a documented temporary
    camera arrangement. Time mapping and physical-camera qualification are
    pending, and the adapter is not selectable through the exported factories.
+   GIGE-MEL-019 makes the adapter request a 4 MiB GVSP socket receive buffer
+   for GigE streams and report whether the kernel granted it
+   ([GVSP receive buffer](docs/gvsp-receive-buffer.md)). The benefit requires
+   the host setting `net.core.rmem_max` ≥ 4 MiB, which the project never
+   applies. Under heavy host load it cut UDP drops by about 180× at 10 Hz, but
+   it did not make capture loss-free.
    eBUS, vendor SDKs and GenTL consumers remain candidates for the second
    implementation.
 2. Implement `ICameraBackend`, `ICameraDevice`, and `IFrameStream` in an optional

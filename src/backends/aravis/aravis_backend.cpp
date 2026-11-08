@@ -11,12 +11,21 @@
 
 #include <arv.h>
 
+#include <arpa/inet.h>
+#include <dirent.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -486,6 +495,88 @@ profile::NativeFrameFacts decode(ArvBuffer* buffer, std::size_t capacity) {
 }
 
 // ---------------------------------------------------------------------------
+// GVSP socket receive buffer (GIGE-MEL-019); docs/gvsp-receive-buffer.md.
+// Only public SDK accessors and ordinary per-process OS facts are used: the
+// stream's own port, the device's reported interface address, this
+// process's /proc/self/fd entries, getsockname and getsockopt(SO_RCVBUF).
+
+// What a GigE run requests and what the receive path later measures. The
+// identification facts are captured under the device lock in start(), so the
+// receiving thread never touches the ArvDevice.
+struct ReceiveBufferProbe {
+    std::int64_t requested_bytes{0};
+    std::optional<std::int64_t> sdk_property_bytes;
+    std::uint16_t port{0};
+    std::optional<std::uint32_t> interface_ipv4; // network byte order
+    std::string setup_problem;                   // non-empty: unobservable from the start
+};
+
+std::optional<std::int64_t> read_rmem_max() {
+    std::FILE* file = std::fopen("/proc/sys/net/core/rmem_max", "r");
+    if (!file) return std::nullopt;
+    long long value = -1;
+    const bool ok = std::fscanf(file, "%lld", &value) == 1 && value >= 0;
+    std::fclose(file);
+    return ok ? std::optional<std::int64_t>(value) : std::nullopt;
+}
+
+struct SocketLookup {
+    std::optional<std::int64_t> kernel_reported_bytes;
+    std::string problem; // set when kernel_reported_bytes is absent
+};
+
+// Exactly one UDP IPv4 socket of this process bound to address:port.
+// Ambiguity, absence or a failed query is a problem, never a guess.
+SocketLookup lookup_receive_buffer(std::uint32_t address, std::uint16_t port) {
+    SocketLookup result;
+    DIR* directory = opendir("/proc/self/fd");
+    if (!directory) {
+        result.problem = std::string("cannot list /proc/self/fd: ") + std::strerror(errno);
+        return result;
+    }
+    const int own = dirfd(directory);
+    int matches = 0;
+    int value = 0;
+    while (const dirent* entry = readdir(directory)) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+        char* end = nullptr;
+        const long parsed = std::strtol(entry->d_name, &end, 10);
+        if (!end || *end != '\0' || parsed < 0 || parsed > std::numeric_limits<int>::max()) continue;
+        const int fd = static_cast<int>(parsed);
+        if (fd == own) continue;
+        int type = 0, protocol = 0;
+        socklen_t length = sizeof type;
+        if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) != 0 || type != SOCK_DGRAM) continue;
+        length = sizeof protocol;
+        if (getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &protocol, &length) != 0 || protocol != IPPROTO_UDP) continue;
+        sockaddr_in local{};
+        socklen_t local_length = sizeof local;
+        if (getsockname(fd, reinterpret_cast<sockaddr*>(&local), &local_length) != 0 || local.sin_family != AF_INET)
+            continue;
+        if (ntohs(local.sin_port) != port || local.sin_addr.s_addr != address) continue;
+        int reported = 0;
+        length = sizeof reported;
+        if (getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &reported, &length) != 0) {
+            result.problem = std::string("getsockopt(SO_RCVBUF) failed: ") + std::strerror(errno);
+            closedir(directory);
+            return result;
+        }
+        ++matches;
+        value = reported;
+    }
+    closedir(directory);
+    char text[INET_ADDRSTRLEN] = "?";
+    in_addr in{};
+    in.s_addr = address;
+    inet_ntop(AF_INET, &in, text, sizeof text);
+    const std::string where = std::string(text) + ":" + std::to_string(port);
+    if (matches == 1) result.kernel_reported_bytes = value;
+    else if (matches == 0) result.problem = "no UDP IPv4 socket of this process is bound to " + where;
+    else result.problem = std::to_string(matches) + " UDP sockets of this process are bound to " + where + " (ambiguous)";
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // Acquisition ownership (GIGE-MEL-009); docs/aravis-integration.md,
 // "Acquisition ownership and retirement", is the normative description.
 //
@@ -534,6 +625,13 @@ struct Run {
     unsigned waiters{0};             // receive slices inside a native pop
     std::size_t outstanding{0};      // pool buffers held by leases
     bool starved{false};             // current pool-starvation episode already counted
+
+    // GIGE-MEL-019. Written by start() under D before publication, then only
+    // by the receiving thread, which claims the single measurement with
+    // `receive_buffer_claimed`. Readers copy `receive_buffer` under R.
+    ReceiveBufferProbe receive_buffer_probe;              // immutable after start()
+    ReceiveBufferObservation receive_buffer;              // R
+    std::atomic<bool> receive_buffer_claimed{false};      // at most one measurement per native stream
 };
 
 // The FrameLease owner: the Run record plus exactly one popped SDK buffer
@@ -759,6 +857,85 @@ void retire_locked(DeviceCore& core, bool closing, std::optional<Error>* close_f
     stream.reset(); // synchronous SDK finalization (sole strong reference)
 }
 
+// GIGE-MEL-019. Device lock held; the native stream exists and no buffer is
+// queued yet. A non-GigE stream is left completely untouched. For an
+// ArvGvStream: FIXED policy with the request, then the public facts the
+// measurement needs. Nothing here can fail acquisition: a fact that cannot be
+// read makes the later observation `unknown`.
+void configure_receive_buffer(Run& run, ArvDevice* device, const TestHooks& hooks) {
+    ArvStream* stream = run.stream.get();
+    ReceiveBufferObservation& seen = run.receive_buffer;
+    seen.stream_generation = run.stream_generation;
+    if (!ARV_IS_GV_STREAM(stream) || !ARV_IS_GV_DEVICE(device)) {
+        seen.state = ReceiveBufferState::not_applicable;
+        seen.detail = std::string("not a GigE Vision stream (") + G_OBJECT_TYPE_NAME(stream) +
+                      "); no receive-buffer property was set";
+        return;
+    }
+    auto& probe = run.receive_buffer_probe;
+    probe.requested_bytes = hooks.gvsp_receive_buffer_request_bytes.value_or(gvsp_receive_buffer_request_bytes);
+    probe.requested_bytes = std::clamp<std::int64_t>(probe.requested_bytes, 1, std::numeric_limits<gint>::max());
+    g_object_set(stream, "socket-buffer", ARV_GV_STREAM_SOCKET_BUFFER_FIXED, "socket-buffer-size",
+                 static_cast<gint>(probe.requested_bytes), nullptr);
+    gint policy = -1, size = -1;
+    g_object_get(stream, "socket-buffer", &policy, "socket-buffer-size", &size, nullptr);
+    probe.sdk_property_bytes = size;
+    if (policy != ARV_GV_STREAM_SOCKET_BUFFER_FIXED || size != probe.requested_bytes)
+        probe.setup_problem = "the SDK property readback (policy " + std::to_string(policy) + ", size " +
+                              std::to_string(size) + ") differs from the request";
+    probe.port = arv_gv_stream_get_port(ARV_GV_STREAM(stream));
+    GSocketAddress* local = arv_gv_device_get_interface_address(ARV_GV_DEVICE(device)); // transfer none
+    if (local && G_IS_INET_SOCKET_ADDRESS(local)) {
+        GInetAddress* address = g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(local));
+        if (address && g_inet_address_get_family(address) == G_SOCKET_FAMILY_IPV4 &&
+            g_inet_address_get_native_size(address) == sizeof(std::uint32_t)) {
+            std::uint32_t raw = 0;
+            std::memcpy(&raw, g_inet_address_to_bytes(address), sizeof raw);
+            probe.interface_ipv4 = raw;
+        }
+    }
+    if (probe.setup_problem.empty() && !probe.interface_ipv4)
+        probe.setup_problem = "the device reported no IPv4 interface address for the stream socket";
+    if (probe.setup_problem.empty() && probe.port == 0) probe.setup_problem = "the SDK reported stream port 0";
+    seen.state = ReceiveBufferState::pending;
+    seen.requested_bytes = probe.requested_bytes;
+    seen.sdk_property_bytes = probe.sdk_property_bytes;
+    seen.detail = "requested; measured after the first received buffer of this stream";
+}
+
+// Receiving thread, NO adapter lock held, at most once per native stream
+// (after the first popped buffer, when the pinned SDK has applied the size).
+// The stream is pinned for the call by the caller's waiter count.
+void measure_receive_buffer(Run& run, const TestHooks& hooks) {
+    if (run.receive_buffer_claimed.exchange(true)) return;
+    const auto& probe = run.receive_buffer_probe;
+    {
+        std::lock_guard lock(run.mutex);
+        if (run.receive_buffer.state != ReceiveBufferState::pending) return; // not GigE
+    }
+    std::optional<std::int64_t> reported;
+    std::string problem = probe.setup_problem;
+    if (problem.empty()) {
+        std::uint16_t port = probe.port;
+        if (hooks.receive_buffer_lookup_port) port = hooks.receive_buffer_lookup_port(port);
+        auto found = lookup_receive_buffer(*probe.interface_ipv4, port);
+        reported = found.kernel_reported_bytes;
+        problem = found.problem;
+    }
+    auto observation = assess_receive_buffer(run.stream_generation, probe.requested_bytes, probe.sdk_property_bytes,
+                                             reported, read_rmem_max(), problem);
+    const auto warning = receive_buffer_warning(observation);
+    observation.warned = !warning.empty();
+    {
+        std::lock_guard lock(run.mutex);
+        run.receive_buffer = observation;
+    }
+    if (!warning.empty()) {
+        std::cerr << warning << std::endl;
+        if (hooks.receive_buffer_warning) hooks.receive_buffer_warning(warning);
+    }
+}
+
 // Admission refusal while an acquisition-command outcome is uncertain (device
 // lock held). Built only on the refusal path; `what` says what was refused.
 Error uncertain_refusal(const DeviceCore& core, const std::string& what) {
@@ -830,6 +1007,14 @@ public:
         } catch (...) {
             // Allocation failure while describing the error: still uncertain.
         }
+    }
+
+    // GIGE-MEL-019: copy of the most recent run's observation (no I/O).
+    Result<ReceiveBufferObservation> receive_buffer() const {
+        const auto run = current();
+        if (!run) return fail(ErrorCode::stopped, "Aravis stream has not been started");
+        std::lock_guard lock(run->mutex);
+        return run->receive_buffer;
     }
 
     StreamStatistics statistics() const override {
@@ -984,6 +1169,9 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
     };
     try {
         if (core.hooks->after_stream_created) core.hooks->after_stream_created(run->stream.get());
+        // GIGE-MEL-019: receive-buffer policy, after creation and before any
+        // buffer is queued, on a GigE Vision stream only.
+        configure_receive_buffer(*run, device, *core.hooks);
         for (std::size_t i = 0; i < run->buffer_count; ++i) {
             GObjectPtr<ArvBuffer> buffer(arv_buffer_new_allocate(run->buffer_bytes));
             if (!buffer) {
@@ -1087,6 +1275,22 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
             }
             const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(slice).count();
             popped = arv_stream_timeout_pop_buffer(stream, static_cast<guint64>(std::max<std::int64_t>(micros, 1)));
+        }
+        // GIGE-MEL-019: one bounded measurement per native stream, while this
+        // slice's waiter count still pins the stream (and so its socket)
+        // against retirement. No adapter lock is held across the lookup. It
+        // can throw only on allocation; the popped buffer is then returned to
+        // its run exactly like a decoded_facts exception (requeued while
+        // active, freed after retirement), so the pool never shrinks.
+        if (popped && !run->receive_buffer_claimed.load()) {
+            try {
+                measure_receive_buffer(*run, *hooks);
+            } catch (...) {
+                { std::lock_guard lock(run->mutex); --run->waiters; }
+                run->idle.notify_all();
+                recycle(*run, popped);
+                throw;
+            }
         }
         bool starved_now = false;
         {
@@ -1547,6 +1751,76 @@ Result<ObservedFrame> receive_with_native_timestamps(IFrameStream& stream, std::
     auto received = concrete->receive_observed(timeout, &native);
     if (!received) return received.error();
     return ObservedFrame{std::move(received).value(), native};
+}
+
+std::string_view receive_buffer_state_name(ReceiveBufferState state) {
+    switch (state) {
+    case ReceiveBufferState::not_applicable: return "not_applicable";
+    case ReceiveBufferState::pending: return "pending";
+    case ReceiveBufferState::sufficient: return "sufficient";
+    case ReceiveBufferState::insufficient: return "insufficient";
+    case ReceiveBufferState::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+ReceiveBufferObservation assess_receive_buffer(std::uint64_t stream_generation, std::int64_t requested_bytes,
+                                               std::optional<std::int64_t> sdk_property_bytes,
+                                               std::optional<std::int64_t> kernel_reported_bytes,
+                                               std::optional<std::int64_t> rmem_max_bytes,
+                                               const std::string& lookup_problem) {
+    ReceiveBufferObservation o;
+    o.stream_generation = stream_generation;
+    o.requested_bytes = requested_bytes;
+    o.sdk_property_bytes = sdk_property_bytes;
+    o.kernel_reported_bytes = kernel_reported_bytes;
+    o.rmem_max_bytes = rmem_max_bytes;
+    if (requested_bytes <= 0) {
+        o.state = ReceiveBufferState::unknown;
+        o.kernel_reported_bytes.reset();
+        o.detail = "no positive receive-buffer request was recorded";
+        return o;
+    }
+    if (!kernel_reported_bytes || *kernel_reported_bytes <= 0) {
+        o.state = ReceiveBufferState::unknown;
+        o.kernel_reported_bytes.reset();
+        o.detail = lookup_problem.empty() ? std::string("the GVSP socket's SO_RCVBUF could not be observed")
+                                          : "the GVSP socket's SO_RCVBUF could not be observed: " + lookup_problem;
+        return o;
+    }
+    // Linux doubles the requested value for its own bookkeeping (socket(7)).
+    o.granted_bytes = *kernel_reported_bytes / 2;
+    const bool enough = *kernel_reported_bytes / 2 >= requested_bytes;
+    o.state = enough ? ReceiveBufferState::sufficient : ReceiveBufferState::insufficient;
+    o.detail = "kernel SO_RCVBUF " + std::to_string(*kernel_reported_bytes) + " (" +
+               std::to_string(*o.granted_bytes) + " bytes granted, Linux reports twice the grant) " +
+               (enough ? ">= " : "< ") + std::to_string(requested_bytes) + " bytes requested";
+    if (!enough && rmem_max_bytes && *rmem_max_bytes < requested_bytes)
+        o.detail += "; net.core.rmem_max " + std::to_string(*rmem_max_bytes) + " is below the request";
+    return o;
+}
+
+std::string receive_buffer_warning(const ReceiveBufferObservation& o) {
+    if (o.state != ReceiveBufferState::insufficient && o.state != ReceiveBufferState::unknown) return {};
+    const auto bytes = [](const std::optional<std::int64_t>& v) {
+        return v ? std::to_string(*v) : std::string("unknown");
+    };
+    std::string text = "gige_mel aravis WARNING: GVSP receive buffer " +
+                       std::string(receive_buffer_state_name(o.state)) + " for stream generation " +
+                       std::to_string(o.stream_generation) + ": requested " + std::to_string(o.requested_bytes) +
+                       " bytes, granted " + bytes(o.granted_bytes) + " bytes (kernel SO_RCVBUF " +
+                       bytes(o.kernel_reported_bytes) + "), net.core.rmem_max " + bytes(o.rmem_max_bytes) + "; " +
+                       o.detail + ". Acquisition continues; packet loss under host load is more likely";
+    if (o.state == ReceiveBufferState::insufficient)
+        text += ". See docs/gvsp-receive-buffer.md for the host prerequisite";
+    return text;
+}
+
+Result<ReceiveBufferObservation> receive_buffer_observation(IFrameStream& stream) {
+    auto* concrete = dynamic_cast<AravisStream*>(&stream);
+    if (!concrete)
+        return fail(ErrorCode::invalid_argument, "receive-buffer observation requires a stream created by the Aravis adapter");
+    return concrete->receive_buffer();
 }
 
 Result<TimingContext> read_timing_context(ICameraDevice& device) {

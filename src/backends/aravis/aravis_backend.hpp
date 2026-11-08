@@ -47,6 +47,68 @@ struct Inspection {
 };
 Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id);
 
+// ---------------------------------------------------------------------------
+// GVSP socket receive buffer (GIGE-MEL-019). See docs/gvsp-receive-buffer.md.
+//
+// For a GigE Vision stream (ArvGvStream only) start() requests a FIXED SDK
+// socket receive buffer of gvsp_receive_buffer_request_bytes, after the native
+// stream exists and before any pool buffer is queued. Other streams (Fake,
+// anything else) are never touched and report not_applicable.
+//
+// A successful property setter is not evidence of an allocation, and the
+// pinned SDK reports a clamped request only on its own debug channel. The
+// adapter therefore reads the kernel's SO_RCVBUF of THIS run's GVSP socket
+// itself, once per native stream, on the receiving thread after the first
+// popped buffer (the pinned SDK applies the size when a frame begins). The
+// socket is found with public facts only: the stream port
+// (arv_gv_stream_get_port) and the interface address the device reports; a
+// UDP IPv4 socket of this process bound to exactly that address and port.
+// If it cannot be identified unambiguously, the state is `unknown`.
+//
+// Linux stores twice the requested byte count after setsockopt(SO_RCVBUF)
+// (socket(7)), so the kernel-reported value is compared with twice the
+// request and granted_bytes is reported / 2. net.core.rmem_max is recorded
+// for diagnostics only; it never substitutes for the measurement.
+// Acquisition is never refused because of the result; insufficient and
+// unknown are reported once per native stream on stderr (never per frame).
+inline constexpr std::int64_t gvsp_receive_buffer_request_bytes = 4 * 1024 * 1024;
+
+enum class ReceiveBufferState {
+    not_applicable, // not a GigE Vision stream: no property set, nothing measured
+    pending,        // GigE: requested; not measured yet (no buffer popped in this run)
+    sufficient,     // kernel SO_RCVBUF >= 2 x requested
+    insufficient,   // kernel SO_RCVBUF <  2 x requested (typically net.core.rmem_max too low)
+    unknown,        // the actual allocation could not be observed reliably
+};
+std::string_view receive_buffer_state_name(ReceiveBufferState state);
+
+struct ReceiveBufferObservation {
+    ReceiveBufferState state{ReceiveBufferState::not_applicable};
+    std::uint64_t stream_generation{0};
+    std::int64_t requested_bytes{0};                    // FIXED socket-buffer-size requested; 0 if not applicable
+    std::optional<std::int64_t> sdk_property_bytes;     // SDK property readback: the setter's record, NOT an allocation
+    std::optional<std::int64_t> kernel_reported_bytes;  // getsockopt(SO_RCVBUF) on this run's GVSP socket
+    std::optional<std::int64_t> granted_bytes;          // kernel_reported_bytes / 2 (Linux accounting)
+    std::optional<std::int64_t> rmem_max_bytes;         // /proc/sys/net/core/rmem_max, diagnostic only
+    std::string detail;                                 // why, in words (never empty once measured)
+    bool warned{false};                                 // the one per-stream warning was emitted
+};
+
+// The SDK-free assessment used by the adapter (exposed for its own tests).
+// `lookup_problem` explains an absent kernel_reported value.
+ReceiveBufferObservation assess_receive_buffer(std::uint64_t stream_generation, std::int64_t requested_bytes,
+                                               std::optional<std::int64_t> sdk_property_bytes,
+                                               std::optional<std::int64_t> kernel_reported_bytes,
+                                               std::optional<std::int64_t> rmem_max_bytes,
+                                               const std::string& lookup_problem);
+// The exact one-line warning for an insufficient or unknown observation;
+// empty for every other state.
+std::string receive_buffer_warning(const ReceiveBufferObservation& observation);
+// The most recent run's observation of a stream created by this adapter
+// (invalid_argument otherwise; stopped if never started). Safe to call from
+// any thread; it copies under the run's lock and performs no I/O.
+Result<ReceiveBufferObservation> receive_buffer_observation(IFrameStream& stream);
+
 // Bounded direct capture used by the diagnostic `capture` command and, with
 // the private Fake backend, by tests (the SAME routine). Opens exactly
 // device_id on `backend`, uses the current supported and representable
@@ -65,6 +127,7 @@ struct CaptureReport {
     bool timestamp_valid{false};        // always false in GIGE-MEL-009
     std::size_t pgm_bytes{0};           // total file size written
     StreamStatistics statistics;
+    std::optional<ReceiveBufferObservation> receive_buffer; // GIGE-MEL-019, read after the frame
 };
 struct CaptureOutcome {
     std::optional<CaptureReport> report; // set when a frame was captured and written

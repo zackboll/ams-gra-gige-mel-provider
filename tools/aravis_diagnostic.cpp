@@ -179,6 +179,18 @@ int capture(backend::ICameraBackend& camera, std::string_view id, const std::str
                   << r.statistics.incomplete_frames << ", timeouts " << r.statistics.timeout_count << ", pool starvation "
                   << r.statistics.pool_starvation_events << "\n  wrote " << output << " (" << r.pgm_bytes
                   << " bytes, tightly packed P5)\n";
+        if (r.receive_buffer) {
+            const auto& b = *r.receive_buffer;
+            const auto text = [](const std::optional<std::int64_t>& v) {
+                return v ? std::to_string(*v) : std::string("unknown");
+            };
+            std::cout << "  receive buffer: " << aravis::receive_buffer_state_name(b.state);
+            if (b.state != aravis::ReceiveBufferState::not_applicable)
+                std::cout << " (requested " << b.requested_bytes << " bytes, granted " << text(b.granted_bytes)
+                          << " bytes, kernel SO_RCVBUF " << text(b.kernel_reported_bytes) << ", net.core.rmem_max "
+                          << text(b.rmem_max_bytes) << ")";
+            std::cout << "\n    " << b.detail << '\n';
+        }
     }
     if (outcome.error) status = report(*outcome.error);
     if (outcome.cleanup_error) {
