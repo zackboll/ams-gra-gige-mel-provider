@@ -26,6 +26,11 @@ inline constexpr std::string_view height_feature = "Height";
 inline constexpr std::string_view offset_x_feature = "OffsetX";
 inline constexpr std::string_view offset_y_feature = "OffsetY";
 inline constexpr std::string_view frame_rate_feature = "AcquisitionFrameRate";
+// GIGE-MEL-018: the first IMPLEMENTED name is used, exactly like the exposure
+// selection below. Both are read/write float Hz features: the current SFNC
+// name and its legacy "Abs" name (observed on a Cognex CIC-5000R, which
+// implements only AcquisitionFrameRateAbs, declared <Unit>Hz</Unit>).
+inline constexpr std::string_view frame_rate_features[] = {frame_rate_feature, "AcquisitionFrameRateAbs"};
 // The first implemented name is used; both are SFNC microsecond features.
 inline constexpr std::string_view exposure_features[] = {"ExposureTime", "ExposureTimeAbs"};
 
@@ -50,8 +55,9 @@ struct NativeSnapshot {
     std::int64_t sensor_width{0};
     std::int64_t sensor_height{0};
     IntegerFeature width, height, offset_x, offset_y;
-    FloatFeature frame_rate_hz;  // AcquisitionFrameRate, Hz
+    FloatFeature frame_rate_hz;  // frame_rate_feature, Hz
     FloatFeature exposure_us;    // exposure_feature, microseconds
+    std::string frame_rate_feature{aravis_profile::frame_rate_feature}; // selected frame_rate_features entry
     std::string exposure_feature;
     std::string pixel_format;
     bool mono8_available{false};

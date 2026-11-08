@@ -99,6 +99,27 @@ if(BUILD_TESTING)
   # another process that binds it (ctest -j).
   set_tests_properties(aravis_gige_loopback_contract PROPERTIES TIMEOUT 600 RESOURCE_LOCK gige_gvcp_loopback_3956)
 
+  # GIGE-MEL-018: OPT-IN physical-camera MEL test. Default OFF; hosted CI
+  # never enables it. Needs a reachable camera that already satisfies the
+  # profile; the test writes no camera feature.
+  option(GIGE_MEL_ARAVIS_HARDWARE_TESTS "Build and register the opt-in physical GigE camera test (needs hardware)" OFF)
+  if(GIGE_MEL_ARAVIS_HARDWARE_TESTS)
+    set(GIGE_MEL_HARDWARE_DEVICE_ID "" CACHE STRING "Exact Aravis device ID of the physical camera")
+    set(GIGE_MEL_HARDWARE_INTERFACE "" CACHE STRING "Optional GigE Vision discovery interface for the physical camera")
+    if(GIGE_MEL_HARDWARE_DEVICE_ID STREQUAL "")
+      message(FATAL_ERROR "GIGE_MEL_ARAVIS_HARDWARE_TESTS=ON requires -DGIGE_MEL_HARDWARE_DEVICE_ID=<exact device ID>")
+    endif()
+    add_executable(aravis_physical_camera_tests tests/aravis_physical_camera.cpp
+      tests/support/aravis_virtual_clock.cpp tests/support/tsan_gige_loopback_sdk.cpp)
+    target_link_libraries(aravis_physical_camera_tests PRIVATE gige_mel_provider gige_mel_aravis
+      gige_mel_build_options Threads::Threads)
+    target_include_directories(aravis_physical_camera_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
+    add_test(NAME aravis_physical_camera COMMAND aravis_physical_camera_tests
+      ${GIGE_MEL_HARDWARE_DEVICE_ID} ${GIGE_MEL_HARDWARE_INTERFACE})
+    set_tests_properties(aravis_physical_camera PROPERTIES TIMEOUT 300 LABELS hardware
+      RESOURCE_LOCK gige_physical_camera)
+  endif()
+
   # --help must succeed without device I/O (no network discovery is started).
   add_test(NAME aravis_diagnostic_help COMMAND gige_mel_aravis_diagnostic --help)
   set_tests_properties(aravis_adapter aravis_mel_embedding aravis_stream_contract aravis_diagnostic_help

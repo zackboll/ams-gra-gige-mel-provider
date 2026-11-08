@@ -281,6 +281,36 @@ Result<std::string> exposure_feature_name(ArvDevice* device) {
     return fail(ErrorCode::unsupported, "neither ExposureTime nor ExposureTimeAbs is implemented");
 }
 
+// GIGE-MEL-018: the same first-implemented rule for the frame-rate feature
+// (AcquisitionFrameRate, else the legacy AcquisitionFrameRateAbs). A failed
+// implementation query stops the selection; it never falls through.
+Result<std::string> frame_rate_feature_name(ArvDevice* device) {
+    for (const auto name : profile::frame_rate_features) {
+        const auto exists = present(device, name);
+        if (!exists) return exists.error();
+        if (exists.value()) return std::string(name);
+    }
+    return fail(ErrorCode::unsupported, "neither AcquisitionFrameRate nor AcquisitionFrameRateAbs is implemented");
+}
+
+// GIGE-MEL-018: read-only identity text. String and enumeration nodes give
+// their value; an Integer node (e.g. the Cognex CIC-5000R declares
+// DeviceSerialNumber as an Integer SwissKnife) gives its exact decimal
+// readback, labelled with its node type so it is never mistaken for a string
+// identity. Absence and query failures follow read_optional_string().
+Result<std::optional<std::string>> read_optional_identity(ArvDevice* device, std::string_view name) {
+    const auto exists = present(device, name);
+    if (!exists) return exists.error();
+    if (!exists.value()) return std::optional<std::string>{};
+    ArvGcNode* node = arv_device_get_feature(device, std::string(name).c_str());
+    if (node && ARV_IS_GC_INTEGER(node) && !ARV_IS_GC_ENUMERATION(node)) {
+        const auto value = read_integer(device, name, false);
+        if (!value) return value.error();
+        return std::optional<std::string>{std::to_string(value.value()) + " (GenICam Integer node)"};
+    }
+    return read_optional_string(device, name);
+}
+
 // Complete native snapshot; any failure is reported, never defaulted.
 Result<profile::NativeSnapshot> read_snapshot(ArvDevice* device) {
     profile::NativeSnapshot n;
@@ -301,7 +331,10 @@ Result<profile::NativeSnapshot> read_snapshot(ArvDevice* device) {
     auto exposure_name = exposure_feature_name(device);
     if (!exposure_name) return exposure_name.error();
     n.exposure_feature = std::move(exposure_name).value();
-    auto rate = read_float_feature(device, profile::frame_rate_feature);
+    auto rate_name = frame_rate_feature_name(device);
+    if (!rate_name) return rate_name.error();
+    n.frame_rate_feature = std::move(rate_name).value();
+    auto rate = read_float_feature(device, n.frame_rate_feature);
     if (!rate) return rate.error();
     n.frame_rate_hz = std::move(rate).value();
     auto exposure = read_float_feature(device, n.exposure_feature);
@@ -1330,7 +1363,7 @@ public:
                                                                 : NativeInterface::other;
         for (const char* name : {"DeviceVendorName", "DeviceModelName", "DeviceSerialNumber", "DeviceVersion",
                                  "DeviceFirmwareVersion", "DeviceManufacturerInfo", "DeviceID"}) {
-            auto value = read_optional_string(device, name);
+            auto value = read_optional_identity(device, name);
             if (!value) return fail(value.error().code, "timing context: " + value.error().message);
             if (value.value()) context.identity.emplace_back(name, *value.value());
         }
@@ -1532,8 +1565,9 @@ Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id) 
     result.interface_protocol = concrete->interface_name();
     ArvDevice* device = native.value().device.get();
     // Identity strings (read-only features; absence is reported, not fatal).
-    for (const char* name : {"DeviceVendorName", "DeviceModelName", "DeviceSerialNumber", "DeviceID", "DeviceVersion"}) {
-        auto value = read_optional_string(device, name);
+    for (const char* name : {"DeviceVendorName", "DeviceModelName", "DeviceSerialNumber", "DeviceID", "DeviceVersion",
+                             "DeviceFirmwareVersion", "DeviceManufacturerInfo"}) {
+        auto value = read_optional_identity(device, name);
         if (!value) {
             // A failed query is reported, not shown as absence.
             result.native.emplace_back(name, "<error: " + value.error().message + ">");
@@ -1554,7 +1588,7 @@ Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id) 
     result.native.emplace_back("Height", integer_text(n.height));
     result.native.emplace_back("OffsetX", integer_text(n.offset_x));
     result.native.emplace_back("OffsetY", integer_text(n.offset_y));
-    result.native.emplace_back("AcquisitionFrameRate", float_text(n.frame_rate_hz));
+    result.native.emplace_back(n.frame_rate_feature, float_text(n.frame_rate_hz));
     result.native.emplace_back(n.exposure_feature, float_text(n.exposure_us));
     result.native.emplace_back("PixelFormat", n.pixel_format + (n.mono8_available ? " (Mono8 available)" : " (Mono8 unavailable)"));
     result.native.emplace_back("TriggerSelector", n.trigger_selector.value_or("<absent>"));
