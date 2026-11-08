@@ -201,6 +201,7 @@ Main CMake options:
 | `GIGE_MEL_WARNINGS_AS_ERRORS` | `ON` | Strict warnings for project code; upstream headers are system includes |
 | `GIGE_MEL_SANITIZERS` | Empty | GCC/Clang sanitizer list, such as `address,undefined` or `thread` |
 | `GIGE_MEL_BUILD_ARAVIS` | `OFF` | Optional internal Aravis 0.8.36 control and acquisition adapter, its SDK tests and diagnostic; requires an explicitly provisioned SDK ([Aravis integration](docs/aravis-integration.md)) |
+| `GIGE_MEL_ARAVIS_HARDWARE_TESTS` | `OFF` | With the Aravis adapter: opt-in physical-camera MEL test (CTest label `hardware`); needs `GIGE_MEL_HARDWARE_DEVICE_ID` and a reachable camera; never run in CI ([Cognex record](docs/cognex-cic-5000r.md)) |
 
 ## Installing and using the package
 
@@ -261,9 +262,13 @@ all MEL channel code.
    and owner acceptance is pending; run it only where that exposure is
    accepted or in an independently isolated network environment
    ([details](docs/aravis-integration.md#network-exposure-of-the-simulator-gige-mel-011-r1)).
-   Time mapping and physical-camera qualification are pending, and the adapter
-   is not selectable through the exported factories. eBUS, vendor SDKs and
-   GenTL consumers remain candidates for the second implementation.
+   GIGE-MEL-018 records the first physical camera, a Cognex CIC-5000R
+   ([record](docs/cognex-cic-5000r.md)): discovery, inspection, Mono8 capture
+   and opt-in, test-only-clock MEL delivery under a documented temporary
+   camera arrangement. Time mapping and physical-camera qualification are
+   pending, and the adapter is not selectable through the exported factories.
+   eBUS, vendor SDKs and GenTL consumers remain candidates for the second
+   implementation.
 2. Implement `ICameraBackend`, `ICameraDevice`, and `IFrameStream` in an optional
    target. Keep SDK types private. Reuse the normal registered-host copy path.
 3. Map a characterized camera profile to the typed configuration. Validate

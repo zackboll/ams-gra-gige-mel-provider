@@ -1,5 +1,58 @@
 # Bootstrap validation record
 
+## GIGE-MEL-018 first physical camera (Cognex CIC-5000R)
+
+**Starting point.** `feature/gige-mel-018-cognex-hardware` was created
+directly from freshly fetched `origin/main` at `a3c61aa` (merge of PR #17).
+The SDK was provisioned with the unchanged `scripts/provision_aravis.sh` into
+`$HOME/sdk/aravis-0.8.36` from the archive with the pinned SHA-256
+`246deaa0…51bf`; `pkg-config --modversion aravis-0.8` reports 0.8.36. A new
+build tree was configured with `PKG_CONFIG_SYSROOT_DIR`/`PKG_CONFIG_LIBDIR`
+unset; its cache contains no reference to the obsolete `/tmp/gm8` prefix or
+sysroot, and `ldd` of the diagnostic resolves `libaravis-0.8.so.0` from the
+prefix with no missing library.
+
+**Hardware.** The observations, the two adapter compatibility fixes, the
+temporary camera arrangement and its verified restoration, the capture and
+GVSP statistics, and the opt-in MEL results are recorded in the
+[camera record](cognex-cic-5000r.md). Raw evidence stays outside Git.
+
+**Permanent coverage.** `aravis_adapter` adds "legacy AcquisitionFrameRateAbs
+and Integer identity (GIGE-MEL-018)" against the real SDK Fake GenICam tree:
+the SFNC name wins when implemented; the Abs feature is selected, bounded,
+written (and never the absent name) when `AcquisitionFrameRate` is
+SDK-unimplemented; a non-Hz Abs unit is unsupported; a failed SFNC
+implementation query does not fall back; neither name is an explicit error;
+and an Integer `DeviceSerialNumber` is reported exactly by `inspect()` and the
+timing context. The opt-in `aravis_physical_camera` test is not registered
+unless `GIGE_MEL_ARAVIS_HARDWARE_TESTS=ON`; with the default, the Aravis build
+still registers 15 tests and `ctest -L hardware` selects none.
+
+**Regression (executed locally, 2026-11-08, Debian 13, GCC 14.2, Clang 19.1).**
+Fresh trees `build/018r1-*`:
+
+| Configuration | SDK-free CTest | Aravis-enabled CTest |
+| --- | --- | --- |
+| GCC Debug (`dev`) | 9/9 | 15/15 |
+| GCC Release | 9/9 | 15/15 |
+| Clang Debug (`dev`, `CXX=clang++`) | 9/9 | 15/15 |
+| ASan/UBSan | 9/9 | 15/15 |
+| TSan | 9/9 | 15/15 |
+
+Aravis-enabled builds run the 9 SDK-free tests plus `aravis_adapter`,
+`aravis_mel_embedding`, `aravis_stream_contract`, `aravis_timestamp_contract`,
+`aravis_gige_loopback_contract` and `aravis_diagnostic_help`. Sanitizer
+options were those of CI (`detect_leaks=1:halt_on_error=1`, UBSan
+`halt_on_error=1`, TSan `halt_on_error=1`); the SDK itself is not
+instrumented. `scripts/verify_package_isolation.py` passed for the GCC Debug,
+GCC Release and Clang Debug Aravis builds (installed package and separately
+built consumer free of Aravis/GLib), and `scripts/vendor_upstream.py --verify`
+verified 97 pinned upstream files.
+
+The physical test itself passed 3/3 scenarios on the camera, both directly and
+via `ctest -L hardware` (opt-in tree only). Hosted CI was not changed and was
+not executed as part of this record.
+
 ## GIGE-MEL-017 commanded Standby
 
 **Starting point.** Fetch verified `origin/main` exactly at

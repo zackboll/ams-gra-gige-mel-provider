@@ -361,3 +361,17 @@ admission. It wraps existing inspect/capture/time-probe diagnostics and records
 unqualified observations, not camera qualification. All selected-physical-camera
 timing gates remain open. The diagnostic's explicit, default-off discovery-NIC
 option changes only that diagnostic process, not the production backend policy.
+
+## First physical camera (GIGE-MEL-018)
+
+Tested combination: Aravis 0.8.36 with a Cognex CIC-5000R (firmware
+`106349-08;U;CIC-5000R;V3.7-1;0`, serial 21874533), full-frame 2592×1944 Mono8,
+2 Hz, 35 ms, over the host's existing wired NIC. The adapter accepts the legacy
+`AcquisitionFrameRateAbs` name when `AcquisitionFrameRate` is not implemented,
+and reports Integer-typed identity nodes. The camera's power-on state
+(`AcquisitionFrameRateEnable` false) remains **unsupported**. Tests used a
+documented, volatile, owner-approved arrangement that was restored afterwards.
+This profile is unchanged: Aravis frames still carry `FrameTimestamp{}` and are
+rejected. Positive MEL delivery of the camera's pixels used only the test-only
+virtual clock in an opt-in hardware test. No timing item, optics calibration or
+BadPixelList source is qualified. See the [camera record](cognex-cic-5000r.md).
