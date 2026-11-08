@@ -120,6 +120,9 @@ struct WatchdogGate {
 // provider observed. It is neither an implementation under test nor a
 // production interface.
 struct ProbeLog {
+    std::atomic<unsigned> creations{0}, cancellations{0}, stops{0};
+    std::atomic<std::uint64_t> generation{0};
+    std::atomic<bool> fail_receive{false}; // Test-only terminal source failure.
     std::mutex mutex;
     std::vector<std::string> opens;
     unsigned enumerations{0}, applies{0};
@@ -133,6 +136,27 @@ struct ProbeLog {
         CHECK(last_readback);
         return *last_readback;
     }
+};
+
+class ProbeStream final : public backend::IFrameStream {
+public:
+    ProbeStream(std::unique_ptr<backend::IFrameStream> inner, std::shared_ptr<ProbeLog> log)
+        : inner_(std::move(inner)), log_(std::move(log)) {}
+    backend::Status start(std::uint64_t generation) override {
+        log_->generation = generation;
+        return inner_->start(generation);
+    }
+    backend::Result<backend::FrameLease> receive(std::chrono::milliseconds timeout) override {
+        if (log_->fail_receive.load())
+            return backend::Error{backend::ErrorCode::io_error, "injected independent source failure"};
+        return inner_->receive(timeout);
+    }
+    void request_stop() noexcept override { ++log_->cancellations; inner_->request_stop(); }
+    void stop() noexcept override { ++log_->stops; inner_->stop(); }
+    backend::StreamStatistics statistics() const override { return inner_->statistics(); }
+private:
+    std::unique_ptr<backend::IFrameStream> inner_;
+    std::shared_ptr<ProbeLog> log_;
 };
 
 class ProbeDevice final : public backend::ICameraDevice {
@@ -151,7 +175,13 @@ public:
         { std::lock_guard lock(log_->mutex); ++log_->applies; }
         return inner_->apply(config);
     }
-    backend::Result<std::unique_ptr<backend::IFrameStream>> create_stream() override { return inner_->create_stream(); }
+    backend::Result<std::unique_ptr<backend::IFrameStream>> create_stream() override {
+        auto stream = inner_->create_stream();
+        if (!stream) return stream.error();
+        ++log_->creations;
+        std::unique_ptr<backend::IFrameStream> result = std::make_unique<ProbeStream>(std::move(stream).value(), log_);
+        return result;
+    }
     backend::Status close() override { return inner_->close(); }
 
 private:
@@ -849,6 +879,51 @@ bool has_pass_completion(const mel::BIT_Status& report) {
            report.getCompletedBITs().front().getResult() == mel::BIT_Result::Pass;
 }
 
+void commanded_standby(const BackendCase& kase) {
+    Reports<ir::CommandStatus> statuses;
+    Session s(kase);
+    CHECK(s.c2->registerMetadataCallback(statuses.callback()) == ir::Return::Success);
+    s.add_buffers(1); s.listener->retain_next(2);
+    CHECK(s.image->enable() == ir::Return::Success); s.listener->wait_for(1);
+    const auto held = s.listener->at(0);
+    const auto generation = s.log->generation.load();
+    const auto configuration = s.log->readback();
+    const auto applies = s.log->apply_count();
+    ir::ModeCmd command;
+    command.setState(mel::MFA_State::Standby); command.setMode(ir::MFA_Mode::Unused); command.setCommandID(UINT32_MAX);
+    CHECK(*response(s.c2->send(command)) == ir::MFA_Mode::Unused);
+    CHECK(statuses.count() == 1); check_status(statuses.last(), UINT32_MAX, ir::CannotComply::NotSet);
+    CHECK(s.log->cancellations == 1 && s.log->creations == 1 && s.log->stops >= 2);
+    CHECK(s.image->enable() == ir::Return::Fail);
+    s.listener->require_quiet();
+    CHECK(std::equal(held.copy.begin(), held.copy.end(), static_cast<const std::byte*>(held.buffer->getImageAddress())));
+    const auto stops = s.log->stops.load();
+    command.setCommandID(0);
+    CHECK(*response(s.c2->send(command)) == ir::MFA_Mode::Unused);
+    CHECK(statuses.count() == 2); check_status(statuses.last(), 0, ir::CannotComply::NotSet);
+    CHECK(s.log->stops == stops && s.log->creations == 1 && s.log->cancellations == 1);
+    CHECK(held.buffer->release() == ir::Return::Success);
+    CHECK(s.image->enable() == ir::Return::Success); s.listener->wait_for(2);
+    CHECK(s.log->generation == generation && s.log->readback() == configuration && s.log->apply_count() == applies);
+    CHECK(s.image->disable() == ir::Return::Success);
+    CHECK(s.buffers.front()->release() == ir::Return::Success);
+    const auto failures = gige_mel::provider_statistics(s.manager).stream_failures;
+    const auto stops_before_failure = s.log->stops.load();
+    s.log->fail_receive = true;
+    CHECK(s.image->enable() == ir::Return::Success);
+    eventually([&] { return gige_mel::provider_statistics(s.manager).stream_failures == failures + 1; });
+    eventually([&] { return s.log->stops > stops_before_failure; }); // Diagnostic committed before worker cleanup.
+    CHECK(s.image->enable() == ir::Return::Fail); // Terminal failure still owns acquisition.
+    const auto history = gige_mel::provider_statistics(s.manager).last_error;
+    CHECK(*response(s.c2->send(command)) == ir::MFA_Mode::Unused);
+    CHECK(statuses.count() == 3); check_status(statuses.last(), 0, ir::CannotComply::NotSet);
+    CHECK(gige_mel::provider_statistics(s.manager).last_error == history);
+    CHECK(gige_mel::provider_statistics(s.manager).stream_failures == failures + 1);
+    s.log->fail_receive = false;
+    CHECK(s.image->enable() == ir::Return::Success); s.listener->wait_for(3);
+    CHECK(s.image->disable() == ir::Return::Success);
+}
+
 void health_bit_and_subsystem(const BackendCase& kase) {
     Reports<mel::MFA_Status> statuses; // collectors outlive the Session's Health drain
     Reports<mel::MFA_StatusDetailed> details;
@@ -1115,6 +1190,7 @@ int main(int argc, char** argv) {
         {"image publication and row repacking", publication_and_repacking},
         {"destination retention, release and restart", retention_release_and_restart},
         {"Health, BIT and Subsystem state", health_bit_and_subsystem},
+        {"ModeCmd commanded Standby retained bytes and restart", commanded_standby},
         {"disable drains admitted image callback", disable_drains_admitted_image_callback},
     };
     const std::vector<std::pair<const char*, void (*)()>> fixture_only{

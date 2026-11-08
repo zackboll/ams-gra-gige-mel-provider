@@ -148,6 +148,7 @@ bool unset_scan(const ir::ScanParam& scan) {
 
 class ChannelCore;
 class ControlImpl;
+class C2ChannelImpl;
 struct StreamState;
 
 struct Runtime {
@@ -820,6 +821,10 @@ protected:
     std::mutex callback_mutex_;
 
 private:
+    // C2 Standby is the only command allowed to stop the attached Image.
+    // The caller pins Control, C2 and Image, rejects callback reentry, validates
+    // the request, and holds Runtime::operations (never state/callback mutexes).
+    friend class C2ChannelImpl;
     void stop_locked() {
         const bool owned_stream = static_cast<bool>(stream_state_);
         if (stream_state_) {
@@ -1205,15 +1210,31 @@ public:
             else if (state == mel::MFA_State::Standby && !unset_scan(command.getScanParameters()))
                 reject(backend::ErrorCode::invalid_argument, "Standby requires every ScanParam field at its upstream default");
             else if (state != mel::MFA_State::Standby)
-                reject(backend::ErrorCode::unsupported, "only an already-observed Standby/Unused acknowledgement is implemented");
+                reject(backend::ErrorCode::unsupported, "only Standby/Unused is implemented");
             else {
-                // The same core facts used by Health MFA_Status. No snapshot
-                // preparation here: it may commit BIT observations. No I/O or
-                // state changes, including for a faulted but still owned stream.
-                std::lock_guard lock(runtime_->state_mutex);
-                if (!runtime_->initialized || !runtime_->configuration_valid || runtime_->image_active)
-                    reject(backend::ErrorCode::invalid_state, "Standby acknowledgement requires initialized, valid, idle provider state");
-                else outcome.success = true;
+                bool valid, active;
+                {
+                    // Do not prepare a Health snapshot: it may commit BIT
+                    // observations. Readiness and ownership are stable against
+                    // lifecycle/configuration changes under operations.
+                    std::lock_guard lock(runtime_->state_mutex);
+                    valid = runtime_->initialized && runtime_->configuration_valid;
+                    active = runtime_->image_active;
+                }
+                if (!valid)
+                    reject(backend::ErrorCode::invalid_state, "Standby requires initialized provider and known-valid configuration");
+                else if (active) {
+                    const auto image_pin = runtime_->image_channel.lock();
+                    if (!image_pin || image_pin->is_detached())
+                        reject(backend::ErrorCode::invalid_state, "owned Image acquisition is unavailable for shutdown");
+                    else {
+                        // Reuse disable's Image implementation, not disable()
+                        // itself: operations is already held. No buffer release,
+                        // unbinding, detach or diagnostic-history reset.
+                        image_pin->stop_locked();
+                        outcome.success = true;
+                    }
+                } else outcome.success = true; // Idempotent, no backend I/O.
             }
         }
         auto result = outcome.error ? failed<ir::MFA_Mode>(map_error(outcome.error->code), outcome.description)
@@ -1383,7 +1404,7 @@ private:
             s.active ? "Image acquisition is logically owned without an observed terminal failure" :
             "Idle with known valid configuration; explicit Image enable may be attempted (not a physical connection probe)";
         mel::MFA_Status status(state, description,
-            "Experimental Mono8 image-stream profile with provider-software BIT; no task scheduling, scanning, hardware BIT, calibration or ModeCmd",
+            "Experimental Mono8 image-stream profile with provider-software BIT and bounded Standby ModeCmd; no task scheduling, scanning, hardware BIT or calibration",
             mel::StateTransitionStatus::NotTransitioning,
             mel::About(std::string(ProviderSoftware::name) + " (software provider)", "", ProviderSoftware::version_text, "", ""), {});
         mel::MFA_StatusDetailed detailed;

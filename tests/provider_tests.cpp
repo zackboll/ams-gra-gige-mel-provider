@@ -868,7 +868,7 @@ struct ReceivePlan {
     std::size_t frames_before_error{0};
     std::size_t timeouts_before_frame{0};
     bool inject_terminal{true};
-    std::atomic<unsigned> creations{0}, starts{0}, timeouts{0};
+    std::atomic<unsigned> creations{0}, starts{0}, timeouts{0}, cancellations{0}, stops{0};
     std::atomic<std::uint64_t> last_generation{0};
     std::mutex mutex;
     std::condition_variable changed;
@@ -907,6 +907,7 @@ public:
         return inner_->start(generation);
     }
     void request_stop() noexcept override {
+        if (plan_) ++plan_->cancellations;
         inner_->request_stop();
         if (plan_ && scripted_) {
             { std::lock_guard lock(plan_->mutex); plan_->stop_requested = true; }
@@ -914,6 +915,7 @@ public:
         }
     }
     void stop() noexcept override {
+        if (plan_) ++plan_->stops;
         inner_->stop();
         // The worker's final cleanup arms a one-shot thread-exit notification.
         // Unlike a signal before receive returns (or the failure counter), this
@@ -1704,15 +1706,25 @@ void mode_acknowledgement_no_io() {
 
 void mode_validation_and_scan() {
     auto counted = std::make_shared<CountingBackend>();
+    auto plan = std::make_shared<ReceivePlan>(); plan->frames_before_error = 1;
+    counted->inner = std::make_shared<TransformBackend>(Transform::none, plan);
     Fixture f(true, counted);
+    TestCleanup receive_cleanup{[&] { plan->open(); }};
     std::vector<ir::CommandStatus> statuses;
     CHECK(f.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto* s) { statuses.push_back(*s); }}) == ir::Return::Success);
+    f.add_buffer();
+    CHECK(f.image->enable() == ir::Return::Success);
+    f.listener->wait_for(1); // Run every rejected payload against actual ownership.
+    plan->wait_for(&ReceivePlan::entered); // Exclude legitimate receive I/O from the count.
+    const auto held = f.storage.front();
     const auto calls = counted->calls->load();
     const auto reject = [&](ir::ModeCmd command, mel::ErrorCode error, ir::CannotComply reason) {
         const auto count = statuses.size();
         expect_error(f.c2->send(command), error);
         CHECK(statuses.size() == count + 1);
         check_status(statuses.back(), command.getCommandID(), reason);
+        CHECK(f.image->enable() == ir::Return::Success); // Still enabled, no new stream.
+        CHECK(f.storage.front() == held);
     };
     for (std::uint32_t s = 1; s < static_cast<std::uint32_t>(mel::MFA_State::MaxExclusive); ++s) {
         const auto state = static_cast<mel::MFA_State>(s);
@@ -1761,8 +1773,11 @@ void mode_validation_and_scan() {
         auto command = standby_command(); command.setScanParameters(scan);
         reject(command, mel::ErrorCode::InvalidParameters, ir::CannotComply::InvalidInputParameter);
     }
-    CHECK(counted->calls->load() == calls && f.listener->count() == 0);
-    CHECK(*response(f.c2->send(standby_command())) == ir::MFA_Mode::Unused);
+    CHECK(counted->calls->load() == calls && f.listener->count() == 1);
+    auto stop = std::async(std::launch::async, [&] { return f.c2->send(standby_command()); });
+    TestCleanup stop_cleanup{[&] { plan->open(); }};
+    plan->wait_for(&ReceivePlan::stop_requested); plan->open();
+    CHECK(*response(stop.get()) == ir::MFA_Mode::Unused);
 }
 
 void mode_observed_state_and_recovery() {
@@ -1778,20 +1793,26 @@ void mode_observed_state_and_recovery() {
     f.add_buffer(); CHECK(f.image->enable() == ir::Return::Success);
     plan->wait_for(&ReceivePlan::entered);
     reports.state(mel::MFA_State::Operate);
-    expect_error(f.c2->send(standby_command()), mel::ErrorCode::InvalidState);
-    check_status(statuses.back(), 42, ir::CannotComply::StateOrSettings);
     CHECK(plan->creations == 1 && plan->starts == 1);
-    { std::lock_guard lock(plan->mutex); CHECK(!plan->stop_requested); }
     plan->open(); plan->wait_for_exit(); reports.state(mel::MFA_State::Degraded);
-    expect_error(f.c2->send(standby_command()), mel::ErrorCode::InvalidState);
-    check_status(statuses.back(), 42, ir::CannotComply::StateOrSettings);
     CHECK(f.image->enable() == ir::Return::Fail && plan->creations == 1);
-    CHECK(f.image->disable() == ir::Return::Success);
+    const auto history = gige_mel::provider_statistics(f.manager);
+    CHECK(history.stream_failures == 1);
     CHECK(*response(f.c2->send(standby_command())) == ir::MFA_Mode::Unused);
+    CHECK(statuses.size() == 1); check_status(statuses.back(), 42);
+    CHECK(gige_mel::provider_statistics(f.manager).stream_failures == history.stream_failures);
+    CHECK(gige_mel::provider_statistics(f.manager).last_error == history.last_error);
     reports.state(mel::MFA_State::Standby);
     CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(1);
-    expect_error(f.c2->send(standby_command()), mel::ErrorCode::InvalidState);
     reports.state(mel::MFA_State::Operate);
+    const auto held = f.storage.front();
+    CHECK(*response(f.c2->send(standby_command(UINT32_MAX))) == ir::MFA_Mode::Unused);
+    check_status(statuses.back(), UINT32_MAX);
+    reports.state(mel::MFA_State::Standby);
+    CHECK(f.storage.front() == held);
+    CHECK(f.image->enable() == ir::Return::Fail); // Outstanding lease not implicitly released.
+    CHECK(f.buffers.front()->release() == ir::Return::Success);
+    CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(2);
     CHECK(f.image->disable() == ir::Return::Success);
 
     auto probe = std::make_shared<ConfigurationProbe>();
@@ -1826,11 +1847,16 @@ void mode_callbacks_and_lifetime() {
     CHECK(calls == 1 && completed == 1 && other_calls == 0);
     CHECK(gige_mel::provider_statistics(f.manager).callback_failures == 1);
     f.add_buffer();
-    f.listener->hook = [&] { expect_error(f.c2->send(standby_command()), mel::ErrorCode::InvalidState); };
+    f.listener->hook = [&] {
+        expect_error(f.c2->send(standby_command()), mel::ErrorCode::InvalidState);
+        expect_error(other.c2->send(standby_command()), mel::ErrorCode::InvalidState);
+    };
     CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(1);
-    expect_error(f.c2->send(standby_command()), mel::ErrorCode::InvalidState);
+    CHECK(*response(f.c2->send(standby_command())) == ir::MFA_Mode::Unused);
     CHECK(calls == 2 && completed == 2);
-    // A throwing rejection-status consumer must not stop the owned acquisition.
+    // A throwing Accepted consumer cannot undo completed shutdown or release.
+    CHECK(f.image->enable() == ir::Return::Fail);
+    f.release_buffers();
     CHECK(f.image->enable() == ir::Return::Success);
     CHECK(f.image->disable() == ir::Return::Success);
     CHECK(calls == 2 && gige_mel::provider_statistics(f.manager).callback_failures == 2);
@@ -1855,28 +1881,42 @@ void mode_serialized_lifecycle_and_configuration() {
     mode_started.get_future().wait();
     plan->starting->open();
     CHECK(enabled.get() == ir::Return::Success);
-    auto result = mode.get(); CHECK(!result && result.getError().getCode() == mel::ErrorCode::InvalidState);
-    plan->wait_for(&ReceivePlan::entered);
+    plan->open();
+    auto result = mode.get(); CHECK(result && *result.get() == ir::MFA_Mode::Unused);
+    CHECK(f.image->enable() == ir::Return::Success);
+    f.listener->wait_for(1);
+    WatchdogGate delivery;
+    TestCleanup delivery_cleanup{[&] { delivery.open(); (void)f.image->disable(); }};
+    CHECK(f.image->disable() == ir::Return::Success);
+    f.release_buffers();
+    f.listener->hook = [&] { delivery.enter_and_wait(); };
+    CHECK(f.image->enable() == ir::Return::Success);
+    delivery.wait_for_entry();
     std::atomic<bool> joining{false};
     auto disabled = std::async(std::launch::async, [&] {
         test_join::Observe observe(joining); return f.image->disable();
     });
-    TestCleanup disable_cleanup{[&] { plan->open(); }};
+    TestCleanup disable_cleanup{[&] { delivery.open(); }};
     eventually([&] { return joining.load(); }); // disable holds operations until receive exits
     std::promise<void> idle_started;
     auto idle = std::async(std::launch::async, [&] { idle_started.set_value(); return f.c2->send(standby_command()).get(); });
-    TestCleanup idle_cleanup{[&] { plan->open(); }};
+    TestCleanup idle_cleanup{[&] { delivery.open(); }};
     idle_started.get_future().wait();
-    plan->open();
+    delivery.open();
     CHECK(disabled.get() == ir::Return::Success);
     auto accepted = idle.get(); CHECK(accepted && *accepted.get() == ir::MFA_Mode::Unused);
+    delivery.check();
     plan->starting->check();
 
-    for (bool valid : {false, true}) {
+    for (const auto& [config_set, valid] : {std::pair{false, false}, std::pair{false, true},
+                                          std::pair{true, false}, std::pair{true, true}}) {
         auto probe = std::make_shared<ConfigurationProbe>();
         Fixture configured(true, std::make_shared<TransformBackend>(Transform::none, nullptr, probe));
         probe->applying = std::make_shared<WatchdogGate>(); probe->fail_readback = !valid;
-        auto change = std::async(std::launch::async, [&] { return configured.c2->send(camera_command()).get(); });
+        auto change = std::async(std::launch::async, [&] {
+            if (config_set) return static_cast<bool>(configured.c2->send(config_command()).get());
+            return static_cast<bool>(configured.c2->send(camera_command()).get());
+        });
         TestCleanup change_cleanup{[&] { probe->applying->open(); }};
         probe->applying->wait_for_entry();
         std::promise<void> ack_started;
@@ -1884,7 +1924,7 @@ void mode_serialized_lifecycle_and_configuration() {
         TestCleanup ack_cleanup{[&] { probe->applying->open(); }};
         ack_started.get_future().wait();
         probe->applying->open();
-        auto changed = change.get(); CHECK(static_cast<bool>(changed) == valid);
+        CHECK(change.get() == valid);
         auto acknowledged = ack.get(); CHECK(static_cast<bool>(acknowledged) == valid);
         if (!valid) CHECK(acknowledged.getError().getCode() == mel::ErrorCode::InvalidState);
         probe->applying->check();
@@ -1893,6 +1933,7 @@ void mode_serialized_lifecycle_and_configuration() {
 
 void mode_detach_and_control_overlap() {
     Fixture f;
+    f.add_buffer(); CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(1);
     WatchdogGate gate;
     std::atomic<unsigned> calls{0};
     CHECK(f.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) { ++calls; gate.enter_and_wait(); }}) == ir::Return::Success);
@@ -1918,6 +1959,7 @@ void mode_detach_and_control_overlap() {
     CHECK(calls == 1); gate.check();
 
     Fixture pinned;
+    pinned.add_buffer(); CHECK(pinned.image->enable() == ir::Return::Success); pinned.listener->wait_for(1);
     WatchdogGate held;
     CHECK(pinned.c2->registerMetadataCallback(StatusCallback{[&](auto&, auto*) { held.enter_and_wait(); }}) == ir::Return::Success);
     std::weak_ptr<ir::Control> weak = pinned.control;
@@ -1929,6 +1971,8 @@ void mode_detach_and_control_overlap() {
     CHECK(pending.get()); CHECK(weak.expired()); held.check();
     expect_error(pinned.c2->send(standby_command()), mel::ErrorCode::InvalidState);
 }
+
+#include "provider_standby_tests.inc"
 
 using NavigationCallback = std::function<void(ir::Channel&, const ir::NavigationReportResp*)>;
 
@@ -2307,6 +2351,11 @@ int main(int argc, char** argv) {
         {"Navigation concurrent reports lifecycle and configuration", navigation_concurrent_reports_and_operations},
         {"Navigation no backend Health BIT or frame interference", navigation_noninterference},
         {"ModeCmd acknowledgement idempotency and no I/O", mode_acknowledgement_no_io},
+        {"ModeCmd active cancellation join and repeated acknowledgement", mode_active_cancel_join_and_repeat},
+        {"ModeCmd shutdown competing operation serializations", mode_shutdown_serializations},
+        {"ModeCmd active lifetime and simultaneous requests", mode_active_lifetime_and_simultaneous},
+        {"ModeCmd active navigation and defect registration noninterference", mode_active_noninterference},
+        {"ModeCmd fault cleanup preserves BIT completion and retirement policy", mode_fault_bit_retirement},
         {"ModeCmd state mode and every scan field validation", mode_validation_and_scan},
         {"ModeCmd observed Health and explicit recovery", mode_observed_state_and_recovery},
         {"ModeCmd callback reentry exceptions and closed channels", mode_callbacks_and_lifetime},

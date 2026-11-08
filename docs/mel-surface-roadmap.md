@@ -109,7 +109,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | `CameraProtectCmd` → `CameraProtectCmdResp` | Required if camera protection | Unsupported | P4 if sensor supports it: define safe actuation/state and actual response; never inherit default OK for unsupported hardware |
 | `EraseCommand` → `EraseCommandType` | Optional | Unsupported | P4 only with a defined target and lifecycle semantics |
 | `SystemTrackDataResponse` → `CommandStatus` | Optional | Unsupported | P5 or earlier pointing integration; distinct from the same-named TrackChannel operation |
-| `ModeCmd` → `MFA_Mode` | Required | Partial: already-observed Standby/Unused/default-scan acknowledgement only | [Bounded contract](mode-command.md); no I/O, transition, Image stop or scheduling. P1: operational state machine and real task admission/execution/status/cancellation remain required |
+| `ModeCmd` → `MFA_Mode` | Required | Partial: Standby/Unused/default-scan idle acknowledgement or active/faulted Image cleanup | [Bounded contract](mode-command.md); synchronous cancel/join/stop preserves registered and held buffers, configuration and diagnostic history; logical state only, no physical standby/power or scheduling. P1: operational state machine and real task admission/execution/status/cancellation remain required |
 | `ConfigSetCommand` → `Return` | Required | Supported for provider-defined camera schema v1 | [Exact configuration/status profile](configuration.md); other configuration domains remain future work |
 
 ### C2 metadata

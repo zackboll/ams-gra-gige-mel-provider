@@ -68,11 +68,17 @@ input nanoseconds; commandID/reqId are zero/unassigned. No acquisition is needed
 This is **not navigation integration**: no GPS/INS truth, shared clocks, LOS,
 image association or frame navigation/inertial population is established.
 
-[Bounded C2 ModeCmd](docs/mode-command.md) acknowledges only an already-observed
-`Standby/Unused` with default/unset ScanParam: ready `Unused` and correlated
-Accepted CommandStatus. It performs no backend I/O, Image stop, configuration or
-Health/BIT change, or task scheduling. Other states/modes are rejected; this is
-not complete required ModeCmd conformance or a physical-camera health probe.
+[Bounded C2 ModeCmd](docs/mode-command.md) accepts `Standby/Unused` with default/unset
+ScanParam: ready `Unused` and correlated Accepted **after** any provider-owned Image
+acquisition has cancelled, joined and stopped. Image stays attached; registered
+buffers and held bytes survive until explicit release. Faulted ownership can be
+cleaned up without clearing diagnostic history. Idle requests retain the no-I/O,
+no-Health/BIT-change idempotent acknowledgement. Configuration/generation is
+unchanged. Other states/modes are rejected without stopping acquisition. This is
+logical acquisition state, not physical standby, power management, hardware
+health or complete ModeCmd/task-scheduling conformance. Separately, the pinned
+metadata enum lacks DiscreteStatus and MFA_SecurityAuditRecord entries; neither
+callback is added here.
 
 [Partial Health reporting](docs/health-status.md) exposes current provider
 readiness/acquisition state and cumulative diagnostics through the pinned public
