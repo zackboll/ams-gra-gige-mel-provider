@@ -387,3 +387,9 @@ cannot be observed. The MEL surface, the profile and the timestamp rules are
 unchanged. Tested combination: the same camera at 10 Hz (production) and 14 Hz
 (raw SDK only), 1 Gb/s, 1500-byte packets, with `net.core.rmem_max` at both
 212992 and a temporary 33554432 ([GVSP receive buffer](gvsp-receive-buffer.md)).
+
+GIGE-MEL-020 changes no capability. A temporary camera inter-packet delay
+(`GevSCPD` 250/500/750 ticks = 2/4/6 µs) was measured on the same camera
+under heavy load, with the result INCONCLUSIVE. The adapter neither reads nor
+writes `GevSCPD`, and nothing advertises it
+([GVSP packet spacing](gvsp-packet-spacing.md)).

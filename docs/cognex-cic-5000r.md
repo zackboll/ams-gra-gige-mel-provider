@@ -30,6 +30,13 @@ operator and is not committed.
 > the adapter warns once per stream. See
 > [GIGE-MEL-019](#gvsp-receive-buffer-gige-mel-019) and
 > [GVSP receive buffer](gvsp-receive-buffer.md).
+>
+> **Inter-packet delay (GIGE-MEL-020): INCONCLUSIVE.** With the 4 MiB buffer
+> in place and the host heavily loaded, a temporary `GevSCPD` of 2, 4 or 6 µs
+> (250/500/750 ticks of 8 ns) gave no repeatable improvement under comparable
+> load and never reached 600/600 or 840/840. The adapter does not program
+> `GevSCPD`. See [GIGE-MEL-020](#inter-packet-delay-gige-mel-020) and
+> [GVSP packet spacing](gvsp-packet-spacing.md).
 
 ## Identity (observed 2026-11-08)
 
@@ -406,6 +413,33 @@ pinned-SDK analysis, adapter change and every table are in
   - All 23 camera snapshots reported `GevLinkSpeed` 1000.
   - No UserSet, gain, transport, IP or firmware setting was written.
 
+## Inter-packet delay (GIGE-MEL-020)
+
+Performed 2026-11-09, with the same camera, link, 1500-byte packets and
+Aravis 0.8.36, and `FIXED` 4 MiB granted in every leg. The full record is in
+[GVSP packet spacing](gvsp-packet-spacing.md). Summary:
+
+- **Feature.** `GevSCPD` is register 0xd08, RW, original value 0. It has no
+  unit, increment or lock in the XML, and its max follows the link.
+  `GevSCPDA` is absent.
+  - **Unit:** 1 tick = 8 ns, confirmed from the `GevSCBWA` readback.
+  - **Rate limit:** above 750 ticks (6 µs) the camera lowers the 14 Hz rate.
+- **Heavy load.** There were 26 legs of 60 s: 13 at 10 Hz (production
+  adapter) and 13 at 14 Hz (raw SDK), with `GevSCPD` 0 controls between paced
+  legs.
+  - At 10 Hz, complete frames were 569–599/600.
+  - At 14 Hz, complete frames were 295–827/840.
+  - No leg was loss-free.
+  - Only one comparable bracket per rate favoured pacing: 250 ticks at 10 Hz
+    and 500 ticks at 14 Hz. Neither was repeated.
+  - Host load drifted, partly above the agreed band.
+  - **Disposition: INCONCLUSIVE.** No setting is recommended.
+- **Camera writes.** The work wrote only `AcquisitionFrameRateEnable`,
+  `AcquisitionFrameRateAbs` and `GevSCPD`, each restored and verified
+  (`RESTORE_VERIFIED` 5/5). All 12 snapshots reported `GevLinkSpeed` 1000.
+- **Physical MEL test.** The opt-in test passed 3/3 at 10 Hz with `GevSCPD` 0
+  and the default `rmem_max`.
+
 ## Limitations
 
 - The camera's power-on configuration is unsupported. The documented
@@ -430,5 +464,7 @@ pinned-SDK analysis, adapter change and every table are in
   - With that prerequisite the request helps greatly under heavy load but does
     not eliminate loss. Without it the request does nothing and the adapter
     warns once per stream.
+  - GIGE-MEL-020: an inter-packet delay of 2–6 µs did not reliably reduce the
+    remaining loss ([packet spacing](gvsp-packet-spacing.md)).
 - No timing item is qualified; optics are virtual; no physical unplug,
   power-loss or heartbeat-timeout test was run.
