@@ -1650,6 +1650,169 @@ void control_loss_provider() {
 }
 
 // ===========================================================================
+// R. GVSP socket receive buffer (GIGE-MEL-019) through the PRODUCTION start()
+// and receive path on a real ArvGvStream. The kernel decides every grant: the
+// host's net.core.rmem_max is read, never changed. Only the REQUEST size or
+// the lookup port is arranged through the private test hooks; the
+// measurement itself is the production code's.
+std::int64_t host_rmem_max() {
+    std::ifstream in("/proc/sys/net/core/rmem_max");
+    std::int64_t value = -1;
+    in >> value;
+    CHECK(in && value > 0);
+    return value;
+}
+// SO_RCVBUF of this process's UDP socket bound to 127.0.0.1:port, read
+// independently of the adapter (a second, test-owned observation).
+std::int64_t independent_rcvbuf(std::uint32_t port) {
+    for (const auto& s : lb::owned_udp_sockets()) {
+        if (s.ipv6 || s.address != lb::loopback_address || s.port != port || s.fd < 0) continue;
+        int value = 0;
+        socklen_t length = sizeof value;
+        CHECK(getsockopt(s.fd, SOL_SOCKET, SO_RCVBUF, &value, &length) == 0);
+        return value;
+    }
+    throw std::runtime_error("no owned UDP socket on 127.0.0.1:" + std::to_string(port));
+}
+struct WarningLog {
+    std::mutex mutex;
+    std::vector<std::string> lines;
+    std::vector<std::string> taken() { std::lock_guard lock(mutex); return lines; }
+};
+// `restarts` production acquisitions of one wrapper, 6 complete frames each,
+// with the given REQUEST size and lookup redirection. Checks the invariants
+// that hold for every state and returns the last run's observation.
+aravis::ReceiveBufferObservation buffer_runs(WarningLog& log, std::optional<std::int64_t> request,
+                                             std::function<std::uint16_t(std::uint16_t)> lookup, std::uint64_t tag,
+                                             int restarts = 1) {
+    lb::Simulator sim;
+    Observer seen;
+    auto hooks = seen.hooks();
+    hooks.gvsp_receive_buffer_request_bytes = request;
+    hooks.receive_buffer_lookup_port = std::move(lookup);
+    hooks.receive_buffer_warning = [&](std::string_view w) {
+        std::lock_guard lock(log.mutex);
+        log.lines.emplace_back(w);
+    };
+    auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, hooks);
+    (void)sim.discover(*camera);
+    auto device = open_configured(sim, *camera);
+    auto stream = std::move(device->create_stream()).value();
+    CHECK(aravis::receive_buffer_observation(*stream).error().code == backend::ErrorCode::stopped);
+    aravis::ReceiveBufferObservation last;
+    for (int r = 0; r < restarts; ++r) {
+        const auto generation_tag = tag + static_cast<std::uint64_t>(r);
+        CHECK(stream->start(generation_tag));
+        CHECK(seen.types().size() == static_cast<std::size_t>(r + 1) && seen.types().back() == "ArvGvStream");
+        const auto pending = aravis::receive_buffer_observation(*stream).value(); // nothing popped yet
+        CHECK(pending.state == aravis::ReceiveBufferState::pending);
+        CHECK(!pending.kernel_reported_bytes && !pending.granted_bytes && !pending.warned);
+        CHECK(pending.requested_bytes == request.value_or(aravis::gvsp_receive_buffer_request_bytes));
+        CHECK(pending.sdk_property_bytes == pending.requested_bytes); // the setter's record only
+        for (int i = 0; i < 6; ++i) {
+            auto frame = receive_ok(*stream);
+            check_frame(frame, oracle, generation_tag);
+        }
+        last = aravis::receive_buffer_observation(*stream).value();
+        CHECK(last.state != aravis::ReceiveBufferState::pending);
+        CHECK(last.state != aravis::ReceiveBufferState::not_applicable);
+        CHECK(!last.detail.empty() && last.rmem_max_bytes == host_rmem_max());
+        CHECK(stream->statistics().delivered_frames == static_cast<std::uint64_t>(6 * (r + 1)));
+        stream->stop();
+        CHECK(sim.acquisition_status() == 0);
+    }
+    CHECK(device->close());
+    CHECK(seen.live_buffers() == 0 && seen.live_streams() == 0 && seen.live_devices() == 0);
+    stream.reset();
+    device.reset();
+    sim.finish();
+    return last;
+}
+void receive_buffer_policy() {
+    const auto rmem_max = host_rmem_max();
+    std::cout << "  host net.core.rmem_max " << rmem_max << " (read only; never changed by this test)\n";
+    // R1 sufficient: a request the unchanged host limit can grant in full.
+    {
+        WarningLog log;
+        const std::int64_t small = std::min<std::int64_t>(65536, rmem_max);
+        const auto o = buffer_runs(log, small, nullptr, 1901);
+        CHECK(o.state == aravis::ReceiveBufferState::sufficient);
+        CHECK(o.kernel_reported_bytes == 2 * small && o.granted_bytes == small); // Linux doubles the value
+        CHECK(!o.warned && log.taken().empty() && aravis::receive_buffer_warning(o).empty());
+        std::cout << "  R1 sufficient: requested " << small << ", kernel SO_RCVBUF " << *o.kernel_reported_bytes
+                  << " (granted " << *o.granted_bytes << "); no warning\n";
+    }
+    // R2 insufficient: a request above the host limit. When rmem_max is below
+    // 4 MiB (the Linux default 212992) this is the PRODUCTION request itself.
+    // The kernel clamps it, acquisition continues, and there is exactly one
+    // warning per native stream across 12 frames and an explicit restart.
+    {
+        WarningLog log;
+        std::optional<std::int64_t> request;
+        if (rmem_max >= aravis::gvsp_receive_buffer_request_bytes) request = 2 * rmem_max;
+        const auto large = request.value_or(aravis::gvsp_receive_buffer_request_bytes);
+        const auto o = buffer_runs(log, request, nullptr, 1911, 2);
+        CHECK(o.state == aravis::ReceiveBufferState::insufficient);
+        CHECK(o.requested_bytes == large && o.sdk_property_bytes == large); // the setter "succeeded"
+        CHECK(o.kernel_reported_bytes == 2 * rmem_max && o.granted_bytes == rmem_max); // the measured clamp
+        CHECK(o.warned);
+        const auto lines = log.taken();
+        CHECK(lines.size() == 2); // one per native stream, never per frame
+        for (const auto& text : lines) {
+            CHECK(contains(text, "GVSP receive buffer insufficient"));
+            CHECK(contains(text, "requested " + std::to_string(large) + " bytes"));
+            CHECK(contains(text, "granted " + std::to_string(rmem_max) + " bytes"));
+            CHECK(contains(text, "kernel SO_RCVBUF " + std::to_string(2 * rmem_max)));
+            CHECK(contains(text, "net.core.rmem_max " + std::to_string(rmem_max)));
+            CHECK(contains(text, "Acquisition continues"));
+        }
+        CHECK(lines[1] == aravis::receive_buffer_warning(o));
+        std::cout << "  R2 insufficient: requested " << large << ", kernel SO_RCVBUF " << *o.kernel_reported_bytes
+                  << " (granted " << *o.granted_bytes << "); 12 frames over 2 runs, exactly 2 warnings\n";
+    }
+    // R3 unknown: the lookup searches a port no socket of this process is
+    // bound to, so the allocation is genuinely unobservable. The adapter must
+    // report `unknown` once, never assume success.
+    {
+        WarningLog log;
+        const auto o = buffer_runs(log, std::int64_t{65536}, [](std::uint16_t p) {
+            return static_cast<std::uint16_t>(p == 65535 ? 65534 : p + 1);
+        }, 1921);
+        CHECK(o.state == aravis::ReceiveBufferState::unknown);
+        CHECK(!o.kernel_reported_bytes && !o.granted_bytes && o.warned);
+        CHECK(contains(o.detail, "could not be observed") && contains(o.detail, "no UDP IPv4 socket"));
+        const auto lines = log.taken();
+        CHECK(lines.size() == 1 && contains(lines[0], "GVSP receive buffer unknown"));
+        CHECK(contains(lines[0], "granted unknown bytes"));
+        std::cout << "  R3 unknown: " << o.detail << "; one warning\n";
+    }
+    // R4 the adapter's value equals an independent getsockopt on the live socket.
+    {
+        lb::Simulator sim;
+        Observer seen;
+        auto hooks = seen.hooks();
+        hooks.gvsp_receive_buffer_request_bytes = std::min<std::int64_t>(65536, rmem_max);
+        auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, hooks);
+        (void)sim.discover(*camera);
+        auto device = open_configured(sim, *camera);
+        auto stream = std::move(device->create_stream()).value();
+        CHECK(stream->start(1931));
+        {
+            auto frame = receive_ok(*stream);
+            const auto o = aravis::receive_buffer_observation(*stream).value();
+            CHECK(o.state == aravis::ReceiveBufferState::sufficient);
+            CHECK(o.kernel_reported_bytes == independent_rcvbuf(sim.stream_port()));
+            std::cout << "  R4 independent getsockopt on 127.0.0.1:" << sim.stream_port() << " = "
+                      << *o.kernel_reported_bytes << " (matches the adapter)\n";
+        }
+        stream->stop();
+        CHECK(device->close());
+        stream.reset();
+        device.reset();
+        sim.finish();
+    }
+}
+// ===========================================================================
 // L. SIMULATED packet loss: a fresh simulator with the pinned construct
 // property gvsp-lost-ratio (0.0: normal delivery; 1.0: the simulator drops
 // every outgoing GVSP packet before sendto). Not a switch or NIC loss test;
@@ -1927,6 +2090,7 @@ int main(int argc, char** argv) {
         {"M1 positive MEL publication of network pixels (TEST-ONLY virtual time)", positive_publication},
         {"M2 negative control: production timestamps rejected", negative_publication},
         {"L  SIMULATED GVSP packet loss (gvsp-lost-ratio 0.0 / 1.0)", packet_loss},
+        {"R  GVSP socket receive buffer: sufficient, insufficient (kernel clamp) and unknown", receive_buffer_policy},
         {"Q1 confirmed control loss: blocked receive, sticky refusal and explicit recovery", control_loss_active},
         {"Q2 confirmed control loss: no writes/streams, exact source lease cleanup", control_loss_lifetime},
         {"Q3 confirmed control loss: concurrent close and actual SDK emission", control_loss_close_overlap},

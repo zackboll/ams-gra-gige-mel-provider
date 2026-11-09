@@ -1,5 +1,9 @@
 # Optional Aravis adapter: camera control (GIGE-MEL-008), source acquisition (GIGE-MEL-009) and timestamp provenance (GIGE-MEL-010)
 
+> **GIGE-MEL-019.** GigE Vision streams now request a 4 MiB socket receive
+> buffer and report whether the kernel actually granted it. See
+> [GVSP socket receive buffer](#gvsp-socket-receive-buffer-gige-mel-019).
+
 This is the project's first integration with a real camera SDK. It is an
 **internal, optional, uninstalled** adapter built on the existing
 `ICameraBackend`/`ICameraDevice`/`IFrameStream` contracts. GIGE-MEL-008
@@ -39,7 +43,39 @@ and [Network exposure](#network-exposure-of-the-simulator-gige-mel-011-r1).
 | In-process Aravis Fake (`ArvFakeInterface`/`ArvFakeStream`) | Completed software tests (GIGE-MEL-008 to -010) | No GVCP, no GVSP, no sockets |
 | Loopback `ArvGvFakeCamera` (GIGE-MEL-011) | Simulated network camera; actual GigE Vision discovery, GVCP control and GVSP image transport over UDP on 127.0.0.1 | No physical NIC, switch or camera qualification |
 | Physical GigE camera: Cognex CIC-5000R, firmware V3.7-1 (GIGE-MEL-018) | Real discovery, inspection, Mono8 capture, GVSP statistics and opt-in test-only MEL delivery under a documented temporary arrangement ([record](cognex-cic-5000r.md)). GIGE-MEL-018R2 tested on a 1 Gb/s link: 2, 5 and 10 Hz full-frame sustained with every frame complete | Not hardware or timestamp qualification; power-on configuration unsupported; 14 Hz unsupported (reads back 14.000112 Hz) |
+| GVSP socket receive buffer (GIGE-MEL-019) | GigE streams only: `FIXED` 4 MiB requested before buffers are queued; the kernel's actual `SO_RCVBUF` measured once per stream; `insufficient`/`unknown` warned once ([details](gvsp-receive-buffer.md)) | Needs host `net.core.rmem_max` ≥ 4 MiB (not applied); not loss-free under heavy load; Fake streams untouched |
 | Timestamps | Raw SDK values observed; production descriptors remain invalid (`FrameTimestamp{}`); virtual time used only by tests | No integration-start, PTP or UTC claim |
+
+## GVSP socket receive buffer (GIGE-MEL-019)
+
+**When the policy is applied.** In `start()`, after `arv_device_create_stream()`
+succeeds and before any pool buffer is queued, the adapter checks that the
+stream is an `ArvGvStream` (with an `ArvGvDevice`). Only then does it set the
+pinned SDK properties `socket-buffer = FIXED` and
+`socket-buffer-size = 4194304`. Every other stream type is left untouched.
+
+**What it changes, and what it doesn't.**
+
+- Nothing in this policy can fail `start()`. Creation failure, partial-setup
+  retirement, compensation, cancellation, leases, Standby, restart and control
+  loss behave as before.
+- No public or MEL API changed. The new observation is adapter-private and
+  SDK-free (`aravis::receive_buffer_observation()`).
+- The diagnostic `capture` command prints a `receive buffer:` line.
+
+**How the grant is checked.** The pinned SDK reports a clamped request only on
+its debug channel and retries it on every frame. So the adapter does its own
+check, once per native stream, on the receiving thread after the first popped
+buffer:
+
+- It locates the socket from the stream's public port and the device's
+  reported interface address.
+- It reads the kernel's `SO_RCVBUF` and halves it (Linux doubles the value).
+- It classifies the result as `sufficient`, `insufficient` or `unknown`.
+  `insufficient` and `unknown` produce one stderr line per stream.
+
+Measurements, the host prerequisite and its restoration, and the tests are in
+[GVSP receive buffer](gvsp-receive-buffer.md).
 
 > **Superseded status (GIGE-MEL-008 text below).** Passages written for
 > GIGE-MEL-008 that say `create_stream()` returns `unsupported`, that Image

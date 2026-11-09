@@ -82,6 +82,8 @@ CaptureOutcome capture_one(ICameraBackend& backend, std::string_view device_id, 
     report.timestamp_valid = d.timestamp.valid;
     report.pgm_bytes = written.value();
     report.statistics = stream->statistics();
+    // GIGE-MEL-019: measured on the receiving thread after the first buffer.
+    if (auto buffer = receive_buffer_observation(*stream)) report.receive_buffer = buffer.value();
     outcome.report = std::move(report);
     cleanup(); // the lease outlives stop/close by contract; released after
     return outcome;

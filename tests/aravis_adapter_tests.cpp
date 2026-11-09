@@ -506,6 +506,57 @@ void native_fact_validation() {
 // comparison and "close and reopen" diagnostic as apply(); dynamic maxima,
 // truthful readback and the existing recovery cases are not turned into
 // rejections. Real SDK arrangements live in aravis_stream_contract.
+// GIGE-MEL-019: the SDK-free receive-buffer assessment, with exact values.
+// Linux reports twice the granted byte count (socket(7)).
+void receive_buffer_assessment() {
+    using S = aravis::ReceiveBufferState;
+    const std::int64_t mib4 = aravis::gvsp_receive_buffer_request_bytes;
+    CHECK(mib4 == 4194304);
+    // Sufficient: the 4 MiB grant measured on the physical host at rmem_max 32 MiB.
+    auto o = aravis::assess_receive_buffer(7, mib4, mib4, 8388608, 33554432, "");
+    CHECK(o.state == S::sufficient && o.granted_bytes == mib4 && o.kernel_reported_bytes == 8388608);
+    CHECK(o.stream_generation == 7 && o.rmem_max_bytes == 33554432 && o.sdk_property_bytes == mib4);
+    CHECK(aravis::receive_buffer_warning(o).empty());
+    // Exactly at the boundary is sufficient; one byte short is not.
+    CHECK(aravis::assess_receive_buffer(1, 1000, 1000, 2000, std::nullopt, "").state == S::sufficient);
+    CHECK(aravis::assess_receive_buffer(1, 1000, 1000, 1999, std::nullopt, "").state == S::insufficient);
+    // A kernel value that only EQUALS the request is a half grant: insufficient.
+    CHECK(aravis::assess_receive_buffer(1, mib4, mib4, mib4, 33554432, "").state == S::insufficient);
+    // Insufficient: the clamp measured on the unchanged host (rmem_max 212992).
+    o = aravis::assess_receive_buffer(3, mib4, mib4, 425984, 212992, "");
+    CHECK(o.state == S::insufficient && o.granted_bytes == 212992);
+    CHECK(contains(o.detail, "net.core.rmem_max 212992 is below the request"));
+    const auto warning = aravis::receive_buffer_warning(o);
+    CHECK(contains(warning, "GVSP receive buffer insufficient for stream generation 3"));
+    CHECK(contains(warning, "requested 4194304 bytes, granted 212992 bytes (kernel SO_RCVBUF 425984)"));
+    CHECK(contains(warning, "net.core.rmem_max 212992") && contains(warning, "Acquisition continues"));
+    CHECK(warning.find('\n') == std::string::npos); // one line
+    // Insufficient with an unreadable rmem_max: still insufficient, limit "unknown".
+    o = aravis::assess_receive_buffer(4, mib4, mib4, 425984, std::nullopt, "");
+    CHECK(o.state == S::insufficient && contains(aravis::receive_buffer_warning(o), "net.core.rmem_max unknown"));
+    // Unknown: no value, a zero/negative value, or no request. Never a guess.
+    for (const std::optional<std::int64_t> reported : {std::optional<std::int64_t>{}, std::optional<std::int64_t>{0},
+                                                       std::optional<std::int64_t>{-1}}) {
+        o = aravis::assess_receive_buffer(5, mib4, mib4, reported, 33554432, "no UDP IPv4 socket of this process");
+        CHECK(o.state == S::unknown && !o.kernel_reported_bytes && !o.granted_bytes);
+        CHECK(contains(o.detail, "could not be observed: no UDP IPv4 socket"));
+        CHECK(contains(aravis::receive_buffer_warning(o), "GVSP receive buffer unknown"));
+        CHECK(contains(aravis::receive_buffer_warning(o), "granted unknown bytes"));
+    }
+    o = aravis::assess_receive_buffer(6, 0, std::nullopt, 8388608, 33554432, "");
+    CHECK(o.state == S::unknown && !o.granted_bytes);
+    // Not applicable and pending never warn.
+    aravis::ReceiveBufferObservation quiet;
+    CHECK(quiet.state == S::not_applicable && aravis::receive_buffer_warning(quiet).empty());
+    quiet.state = S::pending;
+    CHECK(aravis::receive_buffer_warning(quiet).empty());
+    CHECK(aravis::receive_buffer_state_name(S::sufficient) == "sufficient");
+    CHECK(aravis::receive_buffer_state_name(S::insufficient) == "insufficient");
+    CHECK(aravis::receive_buffer_state_name(S::unknown) == "unknown");
+    CHECK(aravis::receive_buffer_state_name(S::not_applicable) == "not_applicable");
+    CHECK(aravis::receive_buffer_state_name(S::pending) == "pending");
+}
+
 void acquisition_preflight_profile() {
     const auto open_time = snapshot_model();
     CHECK(profile::acquisition_preflight(open_time, open_time).value() ==
@@ -1481,6 +1532,7 @@ int main(int argc, char** argv) {
         {"native fact validation and overflow-safe planning", native_fact_validation},
         {"fresh native constraints in prevalidation", fresh_constraints},
         {"acquisition preflight profile table (SDK-free)", acquisition_preflight_profile},
+        {"GVSP receive-buffer assessment and warning text (SDK-free, GIGE-MEL-019)", receive_buffer_assessment},
         {"fresh ROI maxima by write order", roi_maxima_by_write_order},
         {"construction without I/O and copied discovery", construction_and_discovery},
         {"exact device selection", exact_selection},

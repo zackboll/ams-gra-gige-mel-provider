@@ -379,3 +379,11 @@ GIGE-MEL-018R2 requalified the camera on a 1 Gb/s link. With the production
 adapter, 2, 5 and 10 Hz were sustained with every frame complete. The camera
 cannot represent 14 Hz exactly (it reads back 14.000112 Hz), so 14 Hz is
 unsupported under the unchanged integer-Hz contract.
+
+GIGE-MEL-019 adds an internal adapter behaviour, not a MEL capability. GigE
+Vision streams request a 4 MiB socket receive buffer. The adapter measures the
+kernel's actual grant once per stream and warns once if the grant is short or
+cannot be observed. The MEL surface, the profile and the timestamp rules are
+unchanged. Tested combination: the same camera at 10 Hz (production) and 14 Hz
+(raw SDK only), 1 Gb/s, 1500-byte packets, with `net.core.rmem_max` at both
+212992 and a temporary 33554432 ([GVSP receive buffer](gvsp-receive-buffer.md)).

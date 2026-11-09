@@ -265,6 +265,61 @@ void real_pixels_and_descriptors() {
     CHECK(device->close());
 }
 
+// O. GIGE-MEL-019 noninterference: the receive-buffer policy is GigE Vision
+// only. On the in-process ArvFakeStream nothing is set (the Fake type has no
+// such property, and setting one would raise a GLib warning, which is fatal
+// here), nothing is measured and no warning is written, across a restart.
+// The private hooks are present and armed to prove they are never consulted.
+void receive_buffer_fake_noninterference() {
+    Observer seen;
+    std::atomic<int> lookups{0}, warnings{0};
+    auto hooks = seen.hooks();
+    hooks.gvsp_receive_buffer_request_bytes = 1 << 20;
+    hooks.receive_buffer_lookup_port = [&](std::uint16_t port) { lookups.fetch_add(1); return port; };
+    hooks.receive_buffer_warning = [&](std::string_view) { warnings.fetch_add(1); };
+    std::vector<std::string> types;
+    auto created = hooks.after_stream_created;
+    hooks.after_stream_created = [&](ArvStream* s) {
+        created(s);
+        types.emplace_back(G_OBJECT_TYPE_NAME(s));
+        CHECK(!ARV_IS_GV_STREAM(s));
+        CHECK(!g_object_class_find_property(G_OBJECT_GET_CLASS(s), "socket-buffer"));
+    };
+    auto camera = aravis_fake::make_backend(hooks);
+    auto device = open_oracle(*camera);
+    auto stream = std::move(device->create_stream()).value();
+    CHECK(aravis::receive_buffer_observation(*stream).error().code == backend::ErrorCode::stopped);
+    for (std::uint64_t run = 0; run < 2; ++run) {
+        CHECK(stream->start(1950 + run));
+        for (int i = 0; i < 3; ++i) {
+            auto frame = receive_ok(*stream);
+            check_descriptor(frame, 1950 + run);
+            CHECK(pixels_match(frame));
+        }
+        const auto o = aravis::receive_buffer_observation(*stream).value();
+        CHECK(o.state == aravis::ReceiveBufferState::not_applicable);
+        CHECK(o.requested_bytes == 0 && !o.sdk_property_bytes && !o.kernel_reported_bytes && !o.granted_bytes);
+        CHECK(!o.rmem_max_bytes && !o.warned && aravis::receive_buffer_warning(o).empty());
+        CHECK(contains(o.detail, "not a GigE Vision stream (ArvFakeStream)"));
+        stream->stop();
+    }
+    CHECK((types == std::vector<std::string>{"ArvFakeStream", "ArvFakeStream"}));
+    CHECK(lookups == 0 && warnings == 0);
+    CHECK(device->close());
+    CHECK(seen.live_streams() == 0 && seen.live_buffers() == 0);
+    // A stream not created by this adapter is refused, not guessed.
+    struct Foreign final : backend::IFrameStream {
+        backend::Status start(std::uint64_t) override { return {}; }
+        backend::Result<backend::FrameLease> receive(std::chrono::milliseconds) override {
+            return backend::Error{backend::ErrorCode::stopped, "foreign"};
+        }
+        void request_stop() noexcept override {}
+        void stop() noexcept override {}
+        backend::StreamStatistics statistics() const override { return {}; }
+    } foreign;
+    CHECK(aravis::receive_buffer_observation(foreign).error().code == backend::ErrorCode::invalid_argument);
+}
+
 // C. Held pixels, bounded pool exhaustion, release restores delivery.
 void pool_and_release() {
     Observer seen;
@@ -1254,6 +1309,7 @@ int main(int argc, char** argv) {
         {"L uncertain outcome then close without a native stream", uncertain_close},
         {"M recovery ownership across wrappers and the lease rule", recovery_ownership},
         {"N fresh acquisition preflight before side effects", fresh_preflight},
+        {"O GVSP receive-buffer policy does not touch the Fake stream (GIGE-MEL-019)", receive_buffer_fake_noninterference},
     };
     std::size_t passed = 0;
     for (const auto& [name, run] : tests) {
