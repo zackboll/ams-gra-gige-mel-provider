@@ -1,5 +1,58 @@
 # Bootstrap validation record
 
+## GIGE-MEL-020 GVSP inter-packet delay (`GevSCPD`)
+
+**Starting point.** `feature/gige-mel-020-packet-spacing` was created from
+freshly fetched `origin/main` `cf0ed83b01b2e3329e88c910e318d2c59b6d4dc2`
+(merge of PR #19). Main had not advanced. The SDK is the unchanged
+provisioned Aravis 0.8.36.
+
+**Disposition: INCONCLUSIVE.** The full record is in
+[GVSP packet spacing](gvsp-packet-spacing.md) and the
+[camera record](cognex-cic-5000r.md#inter-packet-delay-gige-mel-020).
+
+- **Measured legs.** 26 heavy-load legs of 60 s: 13 at 10 Hz on the
+  production adapter and 13 at 14 Hz on the raw SDK. `GevSCPD` was 0, 250,
+  500 or 750 ticks (8 ns each, confirmed on the device), with 0 controls
+  between paced legs.
+- **Receive buffer.** `FIXED` 4 MiB was granted in every leg (kernel
+  `SO_RCVBUF` 8388608).
+- **Outcome.** Every leg completed. None was loss-free. No value gave a
+  repeatable improvement in comparable brackets.
+- **Load excursion.** The host load partly exceeded the agreed 41–69 % band,
+  which is recorded there as a deviation.
+- **Short checks.** A 10 Hz units check (15 s legs) and a 14 Hz rate
+  readback are not part of the comparison.
+- **Raw evidence.** Kept outside Git.
+
+**Host and camera restoration.**
+
+- **`rmem_max`.** Changed once under the owner's authorization, at runtime
+  only through the guarded procedure. Set to 33554432 at 02:31:15Z and
+  restored to 212992 at 03:08:28Z within the unextended 90-minute limit
+  (`RESTORED_OK`, independently re-read). `rmem_default` was unchanged, and no
+  `/etc` file was written.
+- **Synthetic load.** Stopped, with no process remaining.
+- **Camera.** All five camera sessions ended `RESTORE_VERIFIED`: `GevSCPD` 0,
+  `AcquisitionFrameRateEnable` false, `AcquisitionFrameRateAbs` 10, and every
+  recorded writable feature equal to the original. All 12 snapshots reported
+  `GevLinkSpeed` 1000.
+
+**Code change.** None. No source, test, build file, public header, MEL
+surface, adapter default or upstream file changed. The adapter still neither
+reads nor writes `GevSCPD`. This change only adds documentation.
+
+**Physical camera (opt-in, GCC Debug hardware tree `build/020-hw-gcc-dev`
+built from `cf0ed83`, 10 Hz, `GevSCPD` 0, `rmem_max` 212992).**
+
+- **Diagnostic `capture`:** one full frame, plus
+  `receive buffer: insufficient (requested 4194304 bytes, granted 212992 bytes, kernel SO_RCVBUF 425984, net.core.rmem_max 212992)`
+  and exactly one stderr warning.
+- **`aravis_physical_camera`:** 3/3 (G, V, R), with exactly three
+  receive-buffer warnings, one per native stream. The results match
+  GIGE-MEL-019.
+- Production timestamps remain invalid.
+
 ## GIGE-MEL-019 GVSP socket receive buffer
 
 **Starting point.** `feature/gige-mel-019-gvsp-receive-buffer` was created

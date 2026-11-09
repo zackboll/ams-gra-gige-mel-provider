@@ -272,7 +272,11 @@ all MEL channel code.
    ([GVSP receive buffer](docs/gvsp-receive-buffer.md)). The benefit requires
    the host setting `net.core.rmem_max` ≥ 4 MiB, which the project never
    applies. Under heavy host load it cut UDP drops by about 180× at 10 Hz, but
-   it did not make capture loss-free.
+   it did not make capture loss-free. GIGE-MEL-020 tested a temporary camera
+   inter-packet delay (`GevSCPD` 2–6 µs) on top of it. The result was
+   **inconclusive**, with no repeatable benefit under comparable load
+   ([GVSP packet spacing](docs/gvsp-packet-spacing.md)). The adapter does
+   not program `GevSCPD`.
    eBUS, vendor SDKs and GenTL consumers remain candidates for the second
    implementation.
 2. Implement `ICameraBackend`, `ICameraDevice`, and `IFrameStream` in an optional

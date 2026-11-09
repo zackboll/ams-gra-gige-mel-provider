@@ -181,8 +181,11 @@ owner's own workload also ran and was neither started nor stopped. Default and
   repeatable improvement under comparable heavy load. It is about 83 % of one
   frame (`AUTO` would request 5.04 MB).
 - **Not qualified:** it does **not** meet 600/600 or 840/840 under that load.
-  Packet spacing (`GevSCPD`), jumbo frames and CPU affinity were not tested and
-  each needs a separate owner decision.
+  Jumbo frames and CPU affinity were not tested, and each needs a separate
+  owner decision.
+- **Packet spacing:** GIGE-MEL-020 tested `GevSCPD` of 2, 4 and 6 µs on top of
+  this policy, and the result was INCONCLUSIVE. See
+  [GVSP packet spacing](gvsp-packet-spacing.md).
 
 ## Host prerequisite (not applied by this project)
 
@@ -246,7 +249,9 @@ instead, so that it still observes a real kernel clamp.
 - **Not hardware qualification.** One camera, one host and one switch port
   were tested, with synthetic and incidental host load.
 - **Heavy load:** 4 MiB still loses 1–3 % of frames at 10 Hz and 1.4–2.4 % at
-  14 Hz (raw SDK). The cause of the remaining loss was not identified.
+  14 Hz (raw SDK). The cause of the remaining loss was not identified. A
+  camera inter-packet delay did not reliably reduce it
+  ([GIGE-MEL-020](gvsp-packet-spacing.md)).
 - **Host dependency:** the benefit requires `rmem_max` ≥ 4 MiB. On an
   unprepared host the adapter warns once per stream and otherwise behaves as
   before.
