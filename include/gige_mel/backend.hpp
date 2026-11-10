@@ -1,5 +1,7 @@
 #pragma once
 
+#include <gige_mel/navigation.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -221,6 +223,23 @@ public:
     virtual void request_stop() noexcept = 0;
     virtual void stop() noexcept = 0;
     virtual StreamStatistics statistics() const = 0;
+};
+
+// Optional interface implemented alongside ICameraDevice. Absence preserves
+// receipt-only behavior; an implemented sink's unsupported result is a failure,
+// not permission to silently fall back to receipt. Calls are synchronous and
+// serialized with device lifecycle/configuration, but may overlap frame receive.
+// A sink must not call provider/consumer code, must bound its work, and must own
+// any data it retains after return. Success means backend acceptance only, not
+// processing completion. Ordinary failures return Error; no retry is automatic.
+// A timeout means acceptance is uncertain, not definitive rejection. Other
+// uncertain outcomes must use timeout with diagnostic text, not claim rejection.
+// Implementations must return within a documented finite bound on every call,
+// including error paths; never wait for work requiring provider operations.
+class INavigationSink {
+public:
+    virtual ~INavigationSink() = default;
+    virtual Status submit_navigation(NavigationReport report) = 0;
 };
 
 class ICameraDevice {

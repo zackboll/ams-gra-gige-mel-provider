@@ -2,6 +2,14 @@
 
 ## Starting point
 
+GIGE-MEL-023 adds an optional `INavigationSink` interface alongside
+`ICameraDevice`, using project-owned navigation values. No sink means unchanged
+receipt-only behavior; an implemented sink must explicitly accept submission or
+return a failure. Calls are synchronous, bounded and serialized with device
+operations; do not call provider or consumer code from a sink. See
+[navigation backend forwarding](navigation-backend-forwarding.md) for data,
+failure, lifetime and test contracts. No production navigation transport exists.
+
 GIGE-MEL-022 adds explicit CameraCapabilities.pixel_format selection and
 PixelFormat::mono12, not a CameraConfiguration selector. See
 [Mono12](mono12-image-profile.md): checked two-byte layouts, LSB alignment,

@@ -305,7 +305,12 @@ Ready NavigationReportResp futures and Image-only callbacks echo that exact time
 with commandID/reqId zero (unassigned). Rejections do not change stored state or
 emit callbacks. This is structural validation, not navigation quality or image
 association: FrameHeader sensorNavState/sensorInertialState remain empty, with
-no time conversion, LOS transformation or backend I/O. It is **PARTIAL required
+no time conversion or LOS transformation. Optional
+[backend-independent forwarding](navigation-backend-forwarding.md) submits all
+fields to an implemented backend navigation sink before committing acceptance.
+Absent sinks preserve receipt-only behavior; sink errors, including unsupported,
+return typed failures without callback or retained-report update. No production
+navigation transport is implemented. It is **PARTIAL required
 navigation support**, not full navigation integration or MEL conformance.
 
 [ModeCmd's bounded subset](mode-command.md) synchronously accepts only

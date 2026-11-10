@@ -2118,6 +2118,278 @@ void mode_detach_and_control_overlap() {
 
 using NavigationCallback = std::function<void(ir::Channel&, const ir::NavigationReportResp*)>;
 
+struct NavigationProbe {
+    std::vector<backend::NavigationReport> reports;
+    std::optional<backend::ErrorCode> error;
+    bool throw_failure{false}, throw_allocation{false};
+    std::shared_ptr<WatchdogGate> submitting;
+    std::function<void()> reentry;
+};
+
+class NavigationDevice final : public backend::ICameraDevice, public backend::INavigationSink {
+public:
+    NavigationDevice(std::shared_ptr<backend::ICameraDevice> inner, std::shared_ptr<NavigationProbe> probe)
+        : inner_(std::move(inner)), probe_(std::move(probe)) {}
+    backend::CameraCapabilities capabilities() const override { return inner_->capabilities(); }
+    backend::Result<backend::CameraConfiguration> configuration() const override { return inner_->configuration(); }
+    backend::Result<backend::CameraConfiguration> apply(const backend::CameraConfiguration& value) override {
+        return inner_->apply(value);
+    }
+    backend::Result<std::unique_ptr<backend::IFrameStream>> create_stream() override { return inner_->create_stream(); }
+    backend::Status close() override { return inner_->close(); }
+    backend::Status submit_navigation(backend::NavigationReport report) override {
+        if (probe_->submitting) probe_->submitting->enter_and_wait();
+        if (probe_->reentry) probe_->reentry();
+        probe_->reports.push_back(report);
+        if (probe_->throw_allocation) throw std::bad_alloc{};
+        if (probe_->throw_failure) throw std::runtime_error("injected navigation submission exception");
+        if (probe_->error) return backend::Error{*probe_->error, "injected navigation submission failure"};
+        return {};
+    }
+private:
+    std::shared_ptr<backend::ICameraDevice> inner_;
+    std::shared_ptr<NavigationProbe> probe_;
+};
+
+class NavigationBackend final : public backend::ICameraBackend {
+public:
+    explicit NavigationBackend(std::shared_ptr<NavigationProbe> probe) : probe_(std::move(probe)) {}
+    std::string_view id() const noexcept override { return "recording-navigation"; }
+    backend::Result<std::vector<backend::DeviceInfo>> enumerate() override { return inner_->enumerate(); }
+    backend::Result<std::shared_ptr<backend::ICameraDevice>> open(std::string_view id) override {
+        auto opened = inner_->open(id);
+        if (!opened) return opened.error();
+        std::shared_ptr<backend::ICameraDevice> device =
+            std::make_shared<NavigationDevice>(std::move(opened).value(), probe_);
+        return device;
+    }
+private:
+    std::shared_ptr<backend::ICameraBackend> inner_{backend::make_synthetic_backend()};
+    std::shared_ptr<NavigationProbe> probe_;
+};
+
+void navigation_backend_forwarding() {
+    auto probe = std::make_shared<NavigationProbe>();
+    Fixture f{true, std::make_shared<NavigationBackend>(probe)};
+    Fixture receipt_only;
+    unsigned sink_reentry_checks = 0;
+    probe->reentry = [&] {
+        expect_error(f.image->send(navigation_test_data(100ns)), mel::ErrorCode::InvalidState);
+        expect_error(receipt_only.image->send(navigation_test_data(100ns)), mel::ErrorCode::InvalidState);
+        expect_error(f.image->send(ir::ChannelCommsTestReq{}), mel::ErrorCode::InvalidState);
+        CHECK(f.image->disable() == ir::Return::Fail);
+        CHECK(f.control->detachChannel(f.image) == ir::Return::Fail);
+        ++sink_reentry_checks;
+    };
+    unsigned calls = 0;
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto& channel, auto* reply) {
+        CHECK(&channel == f.image.get() && reply && reply->getCommandID() == 0 && reply->getReqId() == 0);
+        CHECK(reply->getSystemTime() == probe->reports.back().system_time);
+        expect_error(f.image->send(navigation_test_data(100ns)), mel::ErrorCode::InvalidState);
+        expect_error(receipt_only.image->send(navigation_test_data(100ns)), mel::ErrorCode::InvalidState);
+        ++calls;
+    }}) == ir::Return::Success);
+
+    backend::NavigationReport expected;
+    expected.latitude = 0.5; expected.longitude = -1.0; expected.altitude = 1234.5;
+    expected.altitude_msl = 1200.25;
+    expected.attitude = {0.1, -0.2, 0.3};
+    expected.attitude_rate = {{0.01, -0.02, 0.03}, 7ns};
+    expected.speed = {10, -20, 30}; expected.acceleration = {-1, 2, -3};
+    expected.wander_angle = -0.1; expected.magnetic_heading = 0.7;
+    expected.position_velocity_covariance_uncertainty = {
+        1, -0.1, 0.2, 2, -0.3, 3, -0.4, 0.5, -0.6, 0.7, -0.8, 0.9, 4, -1, 1.1, 5, -1.2, 6};
+    const std::pair<mel::PositionSolutionState, backend::NavigationSolutionState> states[]{
+        {mel::PositionSolutionState::Aligning, backend::NavigationSolutionState::aligning},
+        {mel::PositionSolutionState::FreeInertial, backend::NavigationSolutionState::free_inertial},
+        {mel::PositionSolutionState::GPS, backend::NavigationSolutionState::gps},
+        {mel::PositionSolutionState::Blended, backend::NavigationSolutionState::blended}};
+    auto time = 123456789012345ns;
+    for (const auto& [source, target] : states) {
+        auto report = navigation_test_data(time);
+        report.setState(source);
+        expected.system_time = time;
+        expected.state = target;
+        CHECK(response(f.image->send(report))->getSystemTime() == time);
+        CHECK(probe->reports.back() == expected);
+        ++time;
+    }
+    CHECK(calls == 4 && probe->reports.size() == 4 && sink_reentry_checks == 4);
+    expect_error(f.image->send(navigation_test_data(time - 1ns)), mel::ErrorCode::InvalidState);
+    auto invalid = navigation_test_data(time);
+    invalid.setLatitude(2);
+    expect_error(f.image->send(invalid), mel::ErrorCode::InvalidParameters);
+    CHECK(calls == 4 && probe->reports.size() == 4);
+    CHECK(response(receipt_only.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+
+    auto maximum = navigation_test_data(std::chrono::nanoseconds::max());
+    maximum.setAttitudeRate(mel::AttitudeRate{mel::Euler{0.01, -0.02, 0.03}, std::chrono::nanoseconds::max()});
+    CHECK(response(f.image->send(maximum))->getSystemTime() == std::chrono::nanoseconds::max());
+    CHECK(probe->reports.back().attitude_rate.attitude_rate_time == std::chrono::nanoseconds::max());
+    CHECK(probe->reports.back().system_time == std::chrono::nanoseconds::max());
+    auto old = f.image;
+    CHECK(f.control->detachChannel(f.image) == ir::Return::Success);
+    f.image = std::dynamic_pointer_cast<ir::ImageChannel>(f.control->attachChannel(f.config(ir::ChannelType::IRSTImage)));
+    CHECK(f.image);
+    expect_error(old->send(navigation_test_data(1ns)), mel::ErrorCode::InvalidState);
+    CHECK(response(f.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(probe->reports.size() == 6 && calls == 5);
+
+    f.add_buffer();
+    CHECK(f.image->enable() == ir::Return::Success);
+    f.listener->wait_for(1);
+    const auto frame = f.listener->at(0);
+    check_pattern(frame);
+    const auto retained = copy_image(frame);
+    eventually([&] { return gige_mel::provider_statistics(f.manager).dropped_no_buffer > 0; });
+    CHECK(response(f.image->send(navigation_test_data(2ns)))->getSystemTime() == 2ns);
+    CHECK(copy_image(frame) == retained);
+    CHECK(frame.header.getSensorNavState().empty() && frame.header.getSensorInertialState().empty());
+    CHECK(f.image->disable() == ir::Return::Success);
+    CHECK(frame.buffer->release() == ir::Return::Success);
+    CHECK(probe->reports.size() == 7);
+}
+
+void navigation_backend_failures() {
+    auto probe = std::make_shared<NavigationProbe>();
+    Fixture f{true, std::make_shared<NavigationBackend>(probe)};
+    unsigned calls = 0;
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) { ++calls; }}) == ir::Return::Success);
+    CHECK(response(f.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    const std::pair<backend::ErrorCode, mel::ErrorCode> errors[]{
+        {backend::ErrorCode::unsupported, mel::ErrorCode::Unsupported},
+        {backend::ErrorCode::invalid_argument, mel::ErrorCode::InvalidParameters},
+        {backend::ErrorCode::not_found, mel::ErrorCode::InvalidId},
+        {backend::ErrorCode::invalid_state, mel::ErrorCode::InvalidState},
+        {backend::ErrorCode::busy, mel::ErrorCode::InvalidState},
+        {backend::ErrorCode::timeout, mel::ErrorCode::InvalidState},
+        {backend::ErrorCode::stopped, mel::ErrorCode::InvalidState},
+        {backend::ErrorCode::resource_exhausted, mel::ErrorCode::InsufficientLocalResources},
+        {backend::ErrorCode::disconnected, mel::ErrorCode::InsufficientRemoteResources},
+        {backend::ErrorCode::io_error, mel::ErrorCode::InsufficientRemoteResources}};
+    for (const auto& [source, target] : errors) {
+        probe->error = source;
+        auto result = f.image->send(navigation_test_data(100ns)).get();
+        CHECK(!result && result.getError().getCode() == target);
+        if (source == backend::ErrorCode::timeout)
+            CHECK(result.getError().getDescription().find("uncertain") != std::string::npos);
+        CHECK(calls == 1);
+    }
+    probe->error.reset();
+    probe->throw_failure = true;
+    expect_error(f.image->send(navigation_test_data(100ns)), mel::ErrorCode::InsufficientRemoteResources);
+    probe->throw_failure = false;
+    probe->throw_allocation = true;
+    expect_error(f.image->send(navigation_test_data(100ns)), mel::ErrorCode::InsufficientLocalResources);
+    probe->throw_allocation = false;
+    CHECK(calls == 1);
+    CHECK(response(f.image->send(navigation_test_data(2ns)))->getSystemTime() == 2ns);
+    CHECK(response(f.image->send(navigation_test_data(100ns)))->getSystemTime() == 100ns);
+    CHECK(calls == 3 && probe->reports.size() == 15);
+
+    struct PreparationFailure {
+        std::shared_ptr<bool> fail;
+        explicit PreparationFailure(std::shared_ptr<bool> value) : fail(std::move(value)) {}
+        PreparationFailure(const PreparationFailure& other) : fail(other.fail) { if (*fail) throw std::bad_alloc{}; }
+        void operator()(ir::Channel&, const ir::NavigationReportResp*) const {}
+    };
+    auto preparation_probe = std::make_shared<NavigationProbe>();
+    Fixture preparation{true, std::make_shared<NavigationBackend>(preparation_probe)};
+    auto fail = std::make_shared<bool>(false);
+    CHECK(preparation.image->registerMetadataCallback(NavigationCallback{PreparationFailure{fail}}) == ir::Return::Success);
+    *fail = true;
+    expect_error(preparation.image->send(navigation_test_data(1ns)), mel::ErrorCode::InsufficientLocalResources);
+    CHECK(preparation_probe->reports.empty());
+    *fail = false;
+    CHECK(response(preparation.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(preparation_probe->reports.size() == 1);
+
+    auto throwing_probe = std::make_shared<NavigationProbe>();
+    Fixture throwing{true, std::make_shared<NavigationBackend>(throwing_probe)};
+    CHECK(throwing.image->registerMetadataCallback(NavigationCallback{[](auto&, auto*) {
+        throw std::runtime_error("injected navigation callback exception");
+    }}) == ir::Return::Success);
+    CHECK(response(throwing.image->send(navigation_test_data(1ns)))->getSystemTime() == 1ns);
+    CHECK(gige_mel::provider_statistics(throwing.manager).callback_failures == 1);
+    expect_error(throwing.image->send(navigation_test_data(1ns)), mel::ErrorCode::InvalidState);
+    CHECK(throwing_probe->reports.size() == 1);
+}
+
+void navigation_backend_submission_and_detach() {
+    auto probe = std::make_shared<NavigationProbe>();
+    probe->submitting = std::make_shared<WatchdogGate>();
+    Fixture f{true, std::make_shared<NavigationBackend>(probe)};
+    WatchdogGate callback;
+    std::atomic<unsigned> calls{0};
+    CHECK(f.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto*) {
+        ++calls;
+        callback.enter_and_wait();
+    }}) == ir::Return::Success);
+    auto sent = std::async(std::launch::async, [&] { return f.image->send(navigation_test_data(1ns)); });
+    TestCleanup sent_cleanup{[&] { probe->submitting->open(); callback.open(); }};
+    probe->submitting->wait_for_entry();
+    CHECK(calls == 0 && sent.wait_for(0ns) == std::future_status::timeout);
+    auto competing = std::async(std::launch::async, [&] { return f.image->send(navigation_test_data(1ns)); });
+    TestCleanup competing_cleanup{[&] { probe->submitting->open(); callback.open(); }};
+    CHECK(competing.wait_for(20ms) == std::future_status::timeout);
+    std::promise<void> starting;
+    auto started = starting.get_future();
+    auto detached = std::async(std::launch::async, [&] {
+        starting.set_value();
+        return f.control->detachChannel(f.image);
+    });
+    TestCleanup detach_cleanup{[&] { probe->submitting->open(); callback.open(); }};
+    started.wait();
+    CHECK(detached.wait_for(20ms) == std::future_status::timeout);
+    probe->submitting->open();
+    callback.wait_for_entry();
+    eventually([&] { return !f.image->sendKeepAliveRep().get(); });
+    CHECK(detached.wait_for(0ns) == std::future_status::timeout);
+    callback.open();
+    CHECK(response(sent.get())->getSystemTime() == 1ns);
+    CHECK(detached.get() == ir::Return::Success);
+    expect_error(competing.get(), mel::ErrorCode::InvalidState);
+    expect_error(f.image->send(navigation_test_data(2ns)), mel::ErrorCode::InvalidState);
+    CHECK(calls == 1 && probe->reports.size() == 1);
+    probe->submitting->check(); callback.check();
+
+    auto ordered_probe = std::make_shared<NavigationProbe>();
+    Fixture ordered{true, std::make_shared<NavigationBackend>(ordered_probe)};
+    WatchdogGate first_callback;
+    std::atomic<unsigned> ordered_calls{0};
+    CHECK(ordered.image->registerMetadataCallback(NavigationCallback{[&](auto&, auto* reply) {
+        ++ordered_calls;
+        if (reply->getSystemTime() == 1ns) first_callback.enter_and_wait();
+    }}) == ir::Return::Success);
+    auto first = std::async(std::launch::async, [&] { return ordered.image->send(navigation_test_data(1ns)); });
+    TestCleanup first_cleanup{[&] { first_callback.open(); }};
+    first_callback.wait_for_entry();
+    auto second = std::async(std::launch::async, [&] { return ordered.image->send(navigation_test_data(2ns)); });
+    TestCleanup second_cleanup{[&] { first_callback.open(); }};
+    CHECK(second.wait_for(2s) == std::future_status::ready);
+    CHECK(response(second.get())->getSystemTime() == 2ns);
+    CHECK(ordered_calls == 2 && ordered_probe->reports.size() == 2);
+    CHECK(ordered_probe->reports[0].system_time == 1ns && ordered_probe->reports[1].system_time == 2ns);
+    first_callback.open();
+    CHECK(response(first.get())->getSystemTime() == 1ns);
+    first_callback.check();
+
+    auto pinned_probe = std::make_shared<NavigationProbe>();
+    pinned_probe->submitting = std::make_shared<WatchdogGate>();
+    Fixture pinned{true, std::make_shared<NavigationBackend>(pinned_probe)};
+    std::weak_ptr<ir::Control> weak = pinned.control;
+    auto pending = std::async(std::launch::async, [&] { return pinned.image->send(navigation_test_data(1ns)); });
+    TestCleanup pending_cleanup{[&] { pinned_probe->submitting->open(); }};
+    pinned_probe->submitting->wait_for_entry();
+    pinned.control.reset();
+    CHECK(!weak.expired());
+    pinned_probe->submitting->open();
+    CHECK(response(pending.get())->getSystemTime() == 1ns);
+    CHECK(weak.expired() && pinned_probe->reports.size() == 1);
+    expect_error(pinned.image->send(navigation_test_data(2ns)), mel::ErrorCode::InvalidState);
+    pinned_probe->submitting->check();
+}
+
 void navigation_acceptance_and_sessions() {
     Fixture f, other;
     unsigned calls = 0, other_calls = 0, statuses = 0;
@@ -2489,6 +2761,9 @@ int main(int argc, char** argv) {
         {"BadPixelList detach drain registration race and lifetime pins", bad_pixels_detach_and_lifetime},
         {"BadPixelList no backend Health BIT ModeCmd or generation interference", bad_pixels_noninterference},
         {"Navigation acceptance callbacks and attachment sessions", navigation_acceptance_and_sessions},
+        {"Navigation backend exact forwarding and receipt-only fallback", navigation_backend_forwarding},
+        {"Navigation backend errors exceptions retry and preparation", navigation_backend_failures},
+        {"Navigation backend submission ordering and detach drain", navigation_backend_submission_and_detach},
         {"Navigation every numeric field and boundary validation", navigation_numeric_validation},
         {"Navigation callback reentry and exception containment", navigation_callback_reentry_and_exceptions},
         {"Navigation detach drain and Control lifetime overlap", navigation_detach_and_control_overlap},

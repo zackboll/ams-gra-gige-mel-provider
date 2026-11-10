@@ -2,6 +2,14 @@
 
 ## Status
 
+**GIGE-MEL-023:** [backend-independent navigation forwarding](navigation-backend-forwarding.md)
+adds project-owned navigation values and an optional device-side C++ navigation
+sink. The existing Image operation prepares acknowledgement before synchronous
+submission under the operation lock, then commits only on backend acceptance.
+Callbacks remain outside locks and detach drains them. Without a sink the
+receipt-only path is unchanged. No navigation transport or image association is
+implemented, and no MEL declaration or factory signature changes.
+
 **GIGE-MEL-022:** the shared image path supports default Mono8 and explicitly
 selected unpacked Mono12 (12 significant/16 storage bits, one band,
 little-endian LSB-aligned words). Format belongs to the backend/device profile,

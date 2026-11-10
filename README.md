@@ -74,6 +74,10 @@ structurally validates consumer-supplied reports, retains one latest accepted
 report per Image attachment with strictly increasing time, and returns ready
 acknowledgements plus an optional Image callback. Response time exactly echoes
 input nanoseconds; commandID/reqId are zero/unassigned. No acquisition is needed.
+An optional [backend navigation sink](docs/navigation-backend-forwarding.md)
+receives all validated fields and must explicitly accept submission before the
+provider acknowledges it. Devices without a sink preserve receipt-only behavior.
+Backend errors produce typed failures without callback or retained-report update.
 This is **not navigation integration**: no GPS/INS truth, shared clocks, LOS,
 image association or frame navigation/inertial population is established.
 
