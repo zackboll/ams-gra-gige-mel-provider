@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -75,6 +76,35 @@ struct CameraConfiguration {
     bool operator==(const CameraConfiguration&) const = default;
 };
 
+// Mono12 profile: PFNC 0x01100005, unsigned LSB-aligned words, high nibble
+// zero. This project's selected layout is low byte first; PFNC alone does
+// not define word byte order. Adapters must establish it independently.
+enum class PixelFormat { mono8, mono12 };
+enum class ByteOrder { not_applicable, little_endian, big_endian };
+
+struct ImageLayout {
+    std::size_t row_bytes;
+    std::size_t image_bytes;
+    std::uint32_t significant_bits;
+    std::uint32_t storage_bits;
+    ByteOrder byte_order;
+};
+
+// Checked before allocation, narrowing or offset arithmetic. A successful
+// result proves every packed-row offset fits size_t.
+inline std::optional<ImageLayout> image_layout(PixelFormat format, std::uint32_t width,
+                                               std::uint32_t height) noexcept {
+    if (width == 0 || height == 0 || (format != PixelFormat::mono8 && format != PixelFormat::mono12))
+        return std::nullopt;
+    const std::size_t sample_bytes = format == PixelFormat::mono12 ? 2 : 1;
+    if (width > std::numeric_limits<std::size_t>::max() / sample_bytes) return std::nullopt;
+    const auto row = static_cast<std::size_t>(width) * sample_bytes;
+    if (height > std::numeric_limits<std::size_t>::max() / row) return std::nullopt;
+    return ImageLayout{row, row * height, format == PixelFormat::mono12 ? 12u : 8u,
+                       format == PixelFormat::mono12 ? 16u : 8u,
+                       format == PixelFormat::mono12 ? ByteOrder::little_endian : ByteOrder::not_applicable};
+}
+
 struct CameraCapabilities {
     std::uint32_t sensor_width{640};
     std::uint32_t sensor_height{480};
@@ -91,6 +121,9 @@ struct CameraCapabilities {
     // Explicit source evidence, valid across all supported configurations.
     // Unknown/unsupported by default; not inferred from identity or frames.
     bool known_empty_defect_map{false};
+    // Selected backend/device profile, not a CameraCommand setting. `mono8`
+    // above is retained for existing source consumers; this is authoritative.
+    PixelFormat pixel_format{PixelFormat::mono8};
 };
 
 struct DeviceInfo {
@@ -99,8 +132,6 @@ struct DeviceInfo {
     std::string display_name;
 };
 
-enum class PixelFormat { mono8 };
-enum class ByteOrder { not_applicable, little_endian, big_endian };
 enum class ClockDomain { unspecified, host_monotonic, device, utc };
 enum class TimestampEvent { unspecified, integration_start, reception };
 enum class FrameStatus { complete, incomplete };
@@ -217,6 +248,7 @@ public:
 struct SyntheticOptions {
     std::size_t frame_pool_size{4};
     CameraConfiguration initial_configuration{};
+    PixelFormat pixel_format{PixelFormat::mono8};
 };
 
 // Invalid options are reported by open(), avoiding constructor-side I/O.

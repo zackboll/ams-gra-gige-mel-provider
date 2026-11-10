@@ -2,6 +2,14 @@
 
 ## Starting point
 
+GIGE-MEL-022 adds explicit CameraCapabilities.pixel_format selection and
+PixelFormat::mono12, not a CameraConfiguration selector. See
+[Mono12](mono12-image-profile.md): checked two-byte layouts, LSB alignment,
+independently established little-endian words, minimal last-row spans and
+immutable per-device format. The old Mono8 default is unchanged. PFNC alone
+does not establish word endianness. Historical Mono8-only references below
+describe the original profile, not a limitation of the current provider.
+
 The internal source contract is [`include/gige_mel/backend.hpp`](../include/gige_mel/backend.hpp), in namespace `gige_mel::backend`. The first implementation is [`src/backends/synthetic.cpp`](../src/backends/synthetic.cpp).
 
 There are three distinct levels of test evidence:

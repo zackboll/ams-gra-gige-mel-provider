@@ -48,6 +48,15 @@ ctest --test-dir build/make --output-on-failure
 
 ## What is implemented
 
+**Unpacked Mono12 (GIGE-MEL-022)** is an explicitly selected internal synthetic
+and optional Aravis profile; default factories remain Mono8. It carries 12
+significant bits in little-endian, LSB-aligned 16-bit words, one band, MEL Mono,
+`width*2` row pitch and `width*height*2` buffer bytes. PFNC does not specify word
+endianness: Aravis requires native `DeviceStreamChannelEndianness=Little`.
+Packed formats and conversion remain unsupported. Production Aravis timestamps
+are invalid; physical Cognex Mono12 testing is pending authorization. See the
+[representation, selection and qualification contract](docs/mono12-image-profile.md).
+
 **Synthetic Image BadPixelList** supports the generator's explicitly known-empty
 defect map: one synchronous callback before successful registration returns,
 including while Image is disabled, with zero bytes, zero entries and an empty

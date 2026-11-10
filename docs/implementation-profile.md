@@ -50,6 +50,15 @@ none of these is a pinned dependency revision.
 
 ## Image layout and synthetic camera
 
+GIGE-MEL-022 adds the explicitly selected internal
+[unpacked Mono12 profile](mono12-image-profile.md). The table below describes
+the unchanged **default Mono8** profile. Mono12 uses significant bitDepth 12,
+storage bitsPerPixel 16, rowPitch width×2 and image/buffer bytes width×height×2,
+MEL Mono, one band, LSB-aligned little-endian words. Backend profile selection
+does not extend CameraCommand or the standard factory. Aravis requires explicit
+native `DeviceStreamChannelEndianness=Little`; its production timestamps are
+still invalid. No physical Mono12/timestamp qualification is claimed.
+
 | Property | Behavior |
 | --- | --- |
 | Initial image | 64×48 pixels, offsets (0,0) |

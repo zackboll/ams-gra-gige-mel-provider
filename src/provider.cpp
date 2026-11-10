@@ -217,9 +217,10 @@ bool in_runtime_callback(const Runtime* runtime) noexcept {
 }
 
 bool valid_layout(const backend::CameraConfiguration& c, const backend::CameraCapabilities& caps) {
-    return caps.mono8 && c.width > 0 && c.height > 0 && c.width <= caps.sensor_width && c.height <= caps.sensor_height &&
+    const auto layout = backend::image_layout(caps.pixel_format, c.width, c.height);
+    return layout && c.width <= caps.sensor_width && c.height <= caps.sensor_height &&
         c.offset_x <= caps.sensor_width - c.width && c.offset_y <= caps.sensor_height - c.height &&
-        static_cast<std::uint64_t>(c.width) * c.height <= std::numeric_limits<std::uint32_t>::max();
+        layout->image_bytes <= std::numeric_limits<std::uint32_t>::max();
 }
 
 ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
@@ -231,10 +232,13 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     if (type != ir::ChannelType::HealthAndStatus) {
         cap.setWidth(c.width);
         cap.setHeight(c.height);
-        cap.setBitDepth(8); // significant bits; FrameHeader separately reports storage bits
-        cap.setRowPitch(c.width);
-        cap.setBufferSize(c.width * c.height);
-        cap.setImageSize(c.width * c.height);
+        const auto layout = backend::image_layout(runtime.camera_capabilities.pixel_format, c.width, c.height);
+        if (!layout || layout->image_bytes > std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("MEL image layout is not representable");
+        cap.setBitDepth(layout->significant_bits);
+        cap.setRowPitch(static_cast<std::uint32_t>(layout->row_bytes));
+        cap.setBufferSize(static_cast<std::uint32_t>(layout->image_bytes));
+        cap.setImageSize(static_cast<std::uint32_t>(layout->image_bytes));
         cap.setNumberOfBands(1);
         cap.setFormat(ir::PixelFormat::Mono);
     }
@@ -605,7 +609,10 @@ public:
             state->configuration = runtime_->configuration;
             state->generation = runtime_->configuration_generation;
         }
-        const auto bytes = static_cast<std::size_t>(state->configuration.width) * state->configuration.height;
+        const auto layout = backend::image_layout(runtime_->camera_capabilities.pixel_format,
+                                                  state->configuration.width, state->configuration.height);
+        if (!layout || layout->image_bytes > std::numeric_limits<std::uint32_t>::max()) return ir::Return::Fail;
+        const auto bytes = layout->image_bytes;
         for (const auto& buffer : buffers_) {
             if (buffer->outstanding() || static_cast<std::size_t>(buffer->getSize()) < bytes) return ir::Return::Fail;
         }
@@ -870,15 +877,19 @@ private:
                 if (state->stopping) break;
                 const auto& d = frame.descriptor();
                 const auto& c = state->configuration;
+                const auto format = state->runtime->camera_capabilities.pixel_format;
+                const auto layout = backend::image_layout(format, c.width, c.height);
                 const bool layout_matches = d.width == c.width && d.height == c.height && d.configuration == c &&
                     d.configuration_generation == state->generation && (!stream_generation || d.stream_generation == *stream_generation) &&
-                    d.pixel_format == backend::PixelFormat::mono8 && d.storage_bits_per_pixel == 8 &&
-                    d.significant_bits_per_pixel == 8 && d.bands == 1 && d.row_stride_bytes >= d.width &&
-                    d.height > 0 && d.row_stride_bytes <= std::numeric_limits<std::size_t>::max() / d.height;
+                    layout && d.pixel_format == format && d.storage_bits_per_pixel == layout->storage_bits &&
+                    d.significant_bits_per_pixel == layout->significant_bits && d.byte_order == layout->byte_order &&
+                    d.bands == 1 && d.row_stride_bytes >= layout->row_bytes &&
+                    (d.height == 1 || d.row_stride_bytes <=
+                        (std::numeric_limits<std::size_t>::max() - layout->row_bytes) / (d.height - 1));
                 const bool timestamp_matches = d.timestamp.valid && d.timestamp.domain == state->runtime->settings.timestamp_domain &&
                     d.timestamp.event == backend::TimestampEvent::integration_start;
                 if (!layout_matches || !timestamp_matches || d.status != backend::FrameStatus::complete ||
-                    frame.bytes().size() < d.row_stride_bytes * d.height) {
+                    frame.bytes().size() < (d.height - 1) * d.row_stride_bytes + layout->row_bytes) {
                     ++state->runtime->rejected;
                     state->runtime->report("rejected incomplete frame or mismatched layout, generation, or timestamp contract");
                     continue;
@@ -893,7 +904,7 @@ private:
                 }
                 clock_generation = d.timestamp.clock_generation;
                 last_timestamp = d.timestamp.value;
-                const auto bytes = static_cast<std::size_t>(d.width) * d.height;
+                const auto bytes = layout->image_bytes;
                 std::shared_ptr<HostBuffer> target;
                 for (const auto& buffer : state->buffers) if (buffer->acquire(bytes)) { target = buffer; break; }
                 if (!target) { ++state->runtime->dropped; continue; }
@@ -903,14 +914,15 @@ private:
                 } fill_guard{target};
                 auto* destination = static_cast<std::byte*>(target->getBufferAddress());
                 for (std::size_t row = 0; row < d.height; ++row)
-                    std::memcpy(destination + row * d.width, frame.bytes().data() + row * d.row_stride_bytes, d.width);
+                    std::memcpy(destination + row * layout->row_bytes,
+                                frame.bytes().data() + row * d.row_stride_bytes, layout->row_bytes);
 
                 ir::FrameHeader header;
                 header.setSystemTime(d.timestamp.value);
                 header.setIntegrationTime(c.exposure);
                 header.setWidth(d.width);
                 header.setHeight(d.height);
-                header.setBitsPerPixel(8);
+                header.setBitsPerPixel(layout->storage_bits);
                 header.setNumBands(1);
                 header.setFormat(ir::PixelFormat::Mono);
                 header.setFrameID(static_cast<std::uint32_t>(d.native_frame_id & 0xffffffffULL));
@@ -1493,7 +1505,7 @@ public:
                 const auto caps = device->capabilities();
                 if (!actual || !valid_layout(actual.value(), caps)) {
                     (void)device->close();
-                    runtime_->report("backend initial configuration does not satisfy the Mono8 profile");
+                    runtime_->report("backend initial configuration does not satisfy the selected monochrome profile");
                     return ir::Return::Fail;
                 }
                 {

@@ -192,10 +192,16 @@ Result<double> exposure_to_native(std::chrono::nanoseconds exposure) {
 
 Status check_preconditions(const NativeSnapshot& n) {
     const auto unsupported = [](std::string message) { return fail(ErrorCode::unsupported, std::move(message)); };
-    if (n.pixel_format != "Mono8")
+    if (n.pixel_format != "Mono8" && n.pixel_format != "Mono12")
         return unsupported("PixelFormat is '" + n.pixel_format + "'; profile " + std::string(profile_name) +
-                           " requires the camera to be set to Mono8 beforehand (the adapter never changes it)");
-    if (!n.mono8_available) return unsupported("PixelFormat entry Mono8 is not available");
+                           " requires the camera to be set to Mono8 or unpacked Mono12 beforehand (the adapter never changes it)");
+    if ((n.pixel_format == "Mono8" && !n.mono8_available) ||
+        (n.pixel_format == "Mono12" && !n.mono12_available))
+        return unsupported("PixelFormat entry " + n.pixel_format + " is not available");
+    // PFNC §1.1 explicitly does NOT prescribe word endianness. Require a
+    // native declaration instead of inferring it from the code or host CPU.
+    if (n.pixel_format == "Mono12" && n.pixel_endianness != std::optional<std::string>{"Little"})
+        return unsupported("DeviceStreamChannelEndianness must explicitly read Little for unpacked Mono12");
     if (n.trigger_selector && *n.trigger_selector != "FrameStart")
         return unsupported("TriggerSelector is '" + *n.trigger_selector +
                            "'; the profile inspects FrameStart only and does not change the selector");
@@ -268,7 +274,8 @@ Result<CameraCapabilities> capabilities_from(const NativeSnapshot& n) {
     const auto& exposure = n.exposure_us; // bounds validated by check_limits()
     caps.minimum_exposure = std::chrono::nanoseconds{
         std::max<std::int64_t>(1, static_cast<std::int64_t>(std::ceil(exposure.minimum * 1000.0)))};
-    caps.mono8 = true; // check_preconditions established Mono8 is current and available
+    caps.pixel_format = n.pixel_format == "Mono12" ? PixelFormat::mono12 : PixelFormat::mono8;
+    caps.mono8 = caps.pixel_format == PixelFormat::mono8;
     caps.external_trigger = false;
     caps.external_buffer_acquisition = false;
     return caps;
@@ -370,6 +377,11 @@ Status unchanged_profile(const NativeSnapshot& n, const NativeSnapshot& envelope
                                                 "; the published capabilities no longer describe the camera; "
                                                 "close and reopen the device; nothing was written");
     };
+    if (n.pixel_format != envelope.pixel_format)
+        return changed("PixelFormat", envelope.pixel_format, n.pixel_format);
+    if (n.pixel_endianness != envelope.pixel_endianness)
+        return changed("DeviceStreamChannelEndianness", envelope.pixel_endianness.value_or("absent"),
+                       n.pixel_endianness.value_or("absent"));
     if (n.sensor_width != envelope.sensor_width)
         return changed(std::string(sensor_width_feature), std::to_string(envelope.sensor_width), std::to_string(n.sensor_width));
     if (n.sensor_height != envelope.sensor_height)
@@ -454,19 +466,20 @@ Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& c, const
 // Acquisition profile.
 
 Result<PoolPlan> plan_pool(std::int64_t payload_size, const CameraConfiguration& frozen, std::size_t buffers,
-                           std::size_t frame_limit, std::size_t pool_limit) {
+                           std::size_t frame_limit, std::size_t pool_limit, PixelFormat format) {
     if (payload_size <= 0)
         return fail(ErrorCode::unsupported, "PayloadSize returned " + std::to_string(payload_size) +
                                                 "; a positive payload is required; nothing was allocated");
     const auto payload = static_cast<std::uint64_t>(payload_size);
-    // Both factors are uint32_t, so the product is exact in 64 bits.
-    const std::uint64_t image = std::uint64_t{frozen.width} * std::uint64_t{frozen.height};
-    if (image == 0)
-        return fail(ErrorCode::unsupported, "the frozen configuration has an empty image; nothing was allocated");
+    const auto layout = image_layout(format, frozen.width, frozen.height);
+    if (!layout)
+        return fail(ErrorCode::unsupported, "the frozen configuration has an empty or overflowing image; nothing was allocated");
+    const auto image = layout->image_bytes;
     if (payload < image)
         return fail(ErrorCode::unsupported, "PayloadSize " + std::to_string(payload) + " bytes is smaller than the " +
                                                 std::to_string(frozen.width) + "x" + std::to_string(frozen.height) +
-                                                " Mono8 image (" + std::to_string(image) + " bytes); nothing was allocated");
+                                                (format == PixelFormat::mono12 ? " Mono12 image (" : " Mono8 image (") +
+                                                std::to_string(image) + " bytes); nothing was allocated");
     if (payload > std::numeric_limits<std::size_t>::max() || payload > frame_limit)
         return fail(ErrorCode::resource_exhausted, "PayloadSize " + std::to_string(payload) +
                                                        " bytes exceeds the per-frame limit of " + std::to_string(frame_limit) +
@@ -480,7 +493,7 @@ Result<PoolPlan> plan_pool(std::int64_t payload_size, const CameraConfiguration&
     return PoolPlan{per_buffer, buffers, per_buffer * buffers};
 }
 
-FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguration& frozen) {
+FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguration& frozen, PixelFormat format) {
     FrameDecision d;
     const auto reject = [&](std::string reason, ErrorCode code = ErrorCode::io_error) {
         d.verdict = FrameVerdict::reject;
@@ -502,12 +515,18 @@ FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguratio
     if (f.has_chunks) return reject("the buffer carries chunk data, which is unsupported", ErrorCode::unsupported);
     if (f.parts != 1) return reject(std::to_string(f.parts) + " parts; exactly one image part is supported", ErrorCode::unsupported);
     if (!f.part_is_2d_image) return reject("part 0 is not a 2-D image", ErrorCode::unsupported);
-    if (f.pixel_format != pfnc_mono8) {
+    const auto layout = image_layout(format, frozen.width, frozen.height);
+    if (!layout) return reject("empty, overflowing or unsupported frozen image layout");
+    if (f.pixel_format != (format == PixelFormat::mono12 ? pfnc_mono12 : pfnc_mono8)) {
         char code[16];
         std::snprintf(code, sizeof code, "0x%08x", static_cast<unsigned>(f.pixel_format));
         return reject(std::string("pixel format ") + code +
-                      " is not Mono8 (0x01080001); packed and other formats are unsupported", ErrorCode::unsupported);
+                      (format == PixelFormat::mono12 ? " is not Mono12" : " is not Mono8") +
+                      "; packed and other formats are unsupported", ErrorCode::unsupported);
     }
+    if (f.storage_bits != layout->storage_bits || f.significant_bits != layout->significant_bits ||
+        f.byte_order != layout->byte_order)
+        return reject("storage/significant bits or byte order differs from the selected profile", ErrorCode::unsupported);
     const auto geometry = [](auto w, auto h, auto x, auto y) {
         return std::to_string(w) + "x" + std::to_string(h) + "@(" + std::to_string(x) + "," + std::to_string(y) + ")";
     };
@@ -520,15 +539,14 @@ FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguratio
         return reject("padding (" + std::to_string(f.padding_x) + ", " + std::to_string(f.padding_y) +
                       ") is unsupported; only nonnegative X padding without Y padding is representable", ErrorCode::unsupported);
     if (!f.data_present) return reject("the SDK reported no image data");
-    // Row stride: Mono8 is one byte per pixel plus the per-row X padding.
-    // Width/height equal the uint32 configuration here, so they are positive.
-    const auto width = static_cast<std::uint64_t>(f.width);
+    const auto width = layout->row_bytes;
     const auto pad = static_cast<std::uint64_t>(f.padding_x);
     if (pad > std::numeric_limits<std::size_t>::max() - width) return reject("row stride overflows");
     const auto stride = static_cast<std::size_t>(width + pad);
     const auto height = static_cast<std::size_t>(f.height);
-    if (height == 0 || stride > std::numeric_limits<std::size_t>::max() / height) return reject("image span overflows");
-    const std::size_t span = stride * height;
+    if (height > 1 && stride > (std::numeric_limits<std::size_t>::max() - width) / (height - 1))
+        return reject("image span overflows");
+    const std::size_t span = stride * (height - 1) + width;
     // The image part must lie inside both the received payload and the
     // allocation (subtractions are guarded, so nothing wraps).
     if (f.received_bytes > f.capacity_bytes || f.part_offset > f.received_bytes ||
@@ -536,7 +554,11 @@ FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguratio
         return reject("SDK image part [" + std::to_string(f.part_offset) + ", +" + std::to_string(f.image_bytes) +
                       ") is not inside the received size " + std::to_string(f.received_bytes) +
                       " within the buffer capacity " + std::to_string(f.capacity_bytes));
-    if (f.image_bytes < span)
+    // A plain image may include its final X padding or omit it. No unrelated
+    // trailing data, hidden prefix, fabricated padding or truncated row.
+    const bool full_rows = stride <= std::numeric_limits<std::size_t>::max() / height &&
+                           f.image_bytes == stride * height;
+    if ((f.image_bytes != span && !full_rows) || f.part_offset != 0 || f.received_bytes != f.image_bytes)
         return reject("SDK image size " + std::to_string(f.image_bytes) + " bytes is shorter than row stride " +
                       std::to_string(stride) + " x height " + std::to_string(height) + " = " + std::to_string(span) +
                       " bytes; no padding is fabricated");

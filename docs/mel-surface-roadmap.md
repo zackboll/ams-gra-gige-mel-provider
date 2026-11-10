@@ -1,5 +1,15 @@
 # MEL surface inventory and implementation order
 
+## Unpacked Mono12 (GIGE-MEL-022)
+
+The existing Image capability/header/buffer surface maps explicitly selected
+Mono12 to 12 significant bits, 16 storage bits, MEL Mono, one band and packed
+two-byte rows. No new public MEL method, format command, C ABI or plugin ABI.
+[The profile](mono12-image-profile.md) defines byte-order admission, arithmetic,
+lease ownership and simulated evidence. Mono12Packed, Bayer/RGB, physical Cognex
+Mono12, production Aravis timestamps and full MEL conformance remain open or
+unsupported; these are not implied by successful image delivery.
+
 ## How to read this plan
 
 The API in scope is **AMS-GRA IR MEL**, with its Common MEL dependencies. This repository provides that API to Skills; it does not merely call an existing provider through a consumer bridge.

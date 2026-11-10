@@ -320,6 +320,20 @@ void profile_translation() {
     CHECK(caps.minimum_frame_rate_hz == 1 && caps.maximum_frame_rate_hz == 1000 && caps.minimum_exposure == 10'000ns);
     CHECK(!caps.external_trigger && !caps.external_buffer_acquisition);
 
+    auto mono12 = n;
+    mono12.pixel_format = "Mono12";
+    mono12.mono12_available = true;
+    CHECK(!profile::capabilities_from(mono12)); // PFNC alone cannot establish endianness
+    mono12.pixel_endianness = "Big";
+    CHECK(!profile::capabilities_from(mono12));
+    mono12.pixel_endianness = "Little";
+    const auto twelve = profile::capabilities_from(mono12).value();
+    CHECK(twelve.pixel_format == backend::PixelFormat::mono12 && !twelve.mono8);
+    CHECK(profile::configuration_from(mono12).value() == profile::configuration_from(n).value());
+    CHECK(!profile::acquisition_preflight(mono12, n)); // format is immutable per open
+    mono12.pixel_format = "Mono12Packed";
+    CHECK(!profile::capabilities_from(mono12));
+
     // Unsupported profiles fail with a diagnostic; nothing is fabricated.
     auto bad = n;
     bad.pixel_format = "Mono16";

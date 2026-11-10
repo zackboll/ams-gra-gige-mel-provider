@@ -1,5 +1,50 @@
 # Bootstrap validation record
 
+## Unpacked Mono12 (GIGE-MEL-022)
+
+Started from freshly fetched origin/main
+`f684d792724130ce3841384d0aef36d953c59817` on
+`feature/gige-mel-022-mono12`. No pinned upstream or SDK sources changed.
+The [image profile](mono12-image-profile.md) records the authoritative PFNC
+alignment and SFNC stream-endianness distinction and the exact MEL mapping.
+
+Focused contracts cover full-image deterministic 12-bit samples, high bytes,
+0 and 4095 at full synthetic geometry, packed destination sizes, source X
+padding with/without final-row padding, source/destination pool exhaustion,
+explicit release, reconfiguration, Standby/restart, callbacks throwing, source
+and destination retention after teardown, malformed format/depth/order/geometry/
+stride/span/capacity/generations/timestamps and one-byte-short destinations.
+The optional test is **explicitly arranged simulated Mono12**, not stock Fake
+Mono12 or physical camera evidence. Production invalid timestamp rejection is
+tested alongside positive test-only virtual-clock MEL publication.
+
+Development runs passed SDK-free **9/9** and Aravis-enabled **16/16**, including
+unchanged Fake, loopback, navigation, Health, BIT, ModeCmd and BadPixelList
+contracts. Wider final-source compiler/sanitizer qualification is recorded below
+when complete; intermediate builds performed while the new synthetic oracle
+was being edited are not final qualification (one such ASan build correctly
+failed its pixel assertions; it reported no sanitizer defect).
+
+Also executed:
+
+* Upstream verification: **97 pinned files verified**; private JSON integrity
+  remains part of every normal build.
+* Package isolation: provisioned Aravis 0.8.36 loaded by adapter; no Aravis/GLib
+  provider dependencies, installed SDK symbols or private SDK headers; a
+  separate installed consumer configured without PKG_CONFIG_PATH, built and ran.
+* The existing pre-feature `build/018r2-gcc-dev/loader_tests` binary loaded the
+  new provider and passed Mono8 delivery and native factory/metadata contracts
+  **without recompilation**. A separately compiled main-source MEL-only loader
+  also passed. This does not promise backend value-type binary compatibility.
+* The opt-in physical-camera executable compiled, but **was not executed**.
+  Physical Cognex Mono12 format/endianness/readback, capture and restoration are
+  pending explicit owner authorization. No physical camera write, network tuning,
+  raw-image commit or timestamp qualification was performed.
+
+No new sanitizer suppressions, skipped tests or production time bypass were
+added. Existing uninstrumented-SDK TSan limitations still apply. Hosted
+final-head CI must pass before declaring readiness for independent review.
+
 ## GIGE-MEL-020 GVSP inter-packet delay (`GevSCPD`)
 
 **Starting point.** `feature/gige-mel-020-packet-spacing` was created from

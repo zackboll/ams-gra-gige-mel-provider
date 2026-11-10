@@ -1,5 +1,12 @@
 # Physical camera record: Cognex CIC-5000R (GIGE-MEL-018)
 
+**GIGE-MEL-022:** physical Mono12 capture and native endianness/readback remain
+**pending owner authorization**. No camera writes or physical captures were
+performed for this feature. Format advertisement alone is insufficient. The
+[Mono12 profile](mono12-image-profile.md) requires explicit Little stream
+endianness and documents the snapshot/stop/temporary-selection/restoration gate.
+Prior Mono8 observations below do not qualify Mono12 or production timestamps.
+
 This is the first **physical** GigE Vision camera used with the optional Aravis
 adapter. It records what was actually observed, what the adapter needed to
 change, and what remains **unqualified**. Raw evidence (GenICam XML, PGM,
