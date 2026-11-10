@@ -67,11 +67,10 @@ Linux x86-64, GCC 14.2.0, Clang 19.1.7, provisioned Aravis 0.8.36:
 | GCC ASan/UBSan | 9/9 | 16/16 |
 | GCC TSan | 9/9 | 16/16 |
 
-All five SDK-free final-head runs passed. SDK-enabled Release, Clang and both
-sanitizers passed serialized full suites after the fixture correction; GCC
-Debug passed the full suite before the test-only correction and its corrected
-focused Mono12 test passed under TSan. The corrected full Debug suite is also
-rerun serially. Sanitizers use halt-on-error (ASan leak detection enabled).
+All five SDK-free final-source runs passed. All five SDK-enabled lanes passed
+serialized full suites after the fixture correction, including the corrected
+full Debug suite (16/16, 116.77 s). Sanitizers use halt-on-error (ASan leak
+detection enabled).
 No sanitizer report remains in the passing suites.
 
 Both hosted push and PR workflows at source head
