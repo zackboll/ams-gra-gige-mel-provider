@@ -108,10 +108,13 @@ release, restart, Standby, exceptions, retained bytes and negative metadata,
 generation and arithmetic controls.
 
 `aravis_mono12_simulated` uses real Aravis control/stream/buffer ownership with
-an **explicitly arranged** Mono12 enum, stream-endianness feature and fill
-callback through public SDK APIs. Stock Fake provides neither Mono12 enum nor
-generator. The existing decoded-facts seam supplies generated received/image
-lengths only (no public setter exists). Pixels `(17*x + 31*y + native_id) & 4095`
+an **explicitly arranged** Mono12 enum, stream-endianness feature and storage
+observation callback through public SDK APIs. Stock Fake provides neither Mono12
+enum nor generator. The existing decoded-facts seam generates pixels in the
+real popped SDK buffer and supplies received/image lengths (no public setter
+exists). Generation happens after pop, not on the uninstrumented SDK producer,
+so no SDK queue synchronization is inferred for project pixel writes.
+Pixels `(17*x + 31*y + native_id) & 4095`
 are checked across all 3072 samples. This is **simulated adapter qualification**,
 not native Fake Mono12 transport or physical-camera evidence. Existing Mono8
 Fake and UDP loopback tests remain.

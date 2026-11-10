@@ -12,7 +12,8 @@ Packed formats are rejected, not converted. Manual exposure, TriggerMode Off,
 Continuous mode, exact rate/readback, bounded pools and lifecycle rules remain.
 
 `aravis_mono12_simulated` explicitly arranges Fake GenICam/pixel facts through
-public SDK APIs and the existing decoded-length seam; it is not native Fake
+public SDK APIs and the existing decoded-facts seam (pixels generated after
+pop and lengths supplied explicitly); it is not native Fake
 Mono12 or hardware evidence. The SDK-enabled suite has **16 CTest entries**
 (9 SDK-free plus 7 optional entries). Existing Mono8 Fake/loopback tests remain.
 Production timestamps stay invalid; positive MEL tests use only the existing

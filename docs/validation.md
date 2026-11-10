@@ -45,6 +45,16 @@ No new sanitizer suppressions, skipped tests or production time bypass were
 added. Existing uninstrumented-SDK TSan limitations still apply. Hosted
 final-head CI must pass before declaring readiness for independent review.
 
+During qualification, simultaneous local SDK suites collided on the loopback
+simulator's fixed UDP port 3956. The failed ASan loopback entry reported
+`Address already in use`; final SDK suites are serialized across build trees.
+TSan also identified the new simulated producer's writes crossing the
+uninstrumented SDK queue. The fixture was changed to generate payload bytes
+after the actual SDK pop, under exclusive lease ownership, and to publish its
+allocation/storage observations with an ordinary instrumented mutex. The
+focused corrected TSan test passed without adding a suppression. This remains
+explicit payload simulation, not native Fake Mono12 transport evidence.
+
 ## GIGE-MEL-020 GVSP inter-packet delay (`GevSCPD`)
 
 **Starting point.** `feature/gige-mel-020-packet-spacing` was created from
