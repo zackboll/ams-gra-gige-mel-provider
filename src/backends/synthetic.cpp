@@ -43,6 +43,7 @@ struct DeviceState {
     CameraConfiguration configuration;
     CameraConfiguration running_configuration;
     std::size_t pool_size;
+    const PixelFormat pixel_format;
     bool closed{false};
     bool running{false};
     bool stop_requested{false};
@@ -55,8 +56,8 @@ struct DeviceState {
     std::vector<Slot> slots;
     StreamStatistics statistics;
 
-    DeviceState(CameraConfiguration initial, std::size_t count)
-        : configuration(initial), running_configuration(initial), pool_size(count) {}
+    DeviceState(CameraConfiguration initial, std::size_t count, PixelFormat format)
+        : configuration(initial), running_configuration(initial), pool_size(count), pixel_format(format) {}
 };
 
 // The token, rather than the stream/device object, retains the storage owner.
@@ -112,8 +113,10 @@ public:
         }
         try {
             std::vector<Slot> slots(state_->pool_size);
-            const auto bytes = static_cast<std::size_t>(state_->configuration.width) *
-                               state_->configuration.height;
+            const auto layout = image_layout(state_->pixel_format, state_->configuration.width,
+                                             state_->configuration.height);
+            if (!layout) return error(ErrorCode::invalid_argument, "Synthetic image layout overflows");
+            const auto bytes = layout->image_bytes;
             for (auto& slot : slots) {
                 slot.bytes.resize(bytes);
                 slot.generation = state_->stream_generation + 1;
@@ -168,10 +171,16 @@ public:
                 }
                 const auto config = state_->running_configuration;
                 const auto frame_id = state_->next_frame_id++;
+                const auto layout = *image_layout(state_->pixel_format, config.width, config.height);
+                const auto sample_bytes = layout.storage_bits / 8;
                 for (std::uint32_t y = 0; y < config.height; ++y) {
                     for (std::uint32_t x = 0; x < config.width; ++x) {
-                        free_slot->bytes[static_cast<std::size_t>(y) * config.width + x] =
-                            static_cast<std::byte>((x + y + frame_id) & 0xffU);
+                        const auto pixel_offset = static_cast<std::size_t>(y) * layout.row_bytes +
+                                           static_cast<std::size_t>(x) * sample_bytes;
+                        const auto value = sample_bytes == 2 ? (17 * x + 31 * y + frame_id) & 0xfffU
+                                                             : (x + y + frame_id) & 0xffU;
+                        free_slot->bytes[pixel_offset] = static_cast<std::byte>(value & 0xffU);
+                        if (sample_bytes == 2) free_slot->bytes[pixel_offset + 1] = static_cast<std::byte>(value >> 8);
                     }
                 }
                 free_slot->in_use = true;
@@ -179,7 +188,11 @@ public:
                 FrameDescriptor descriptor;
                 descriptor.width = config.width;
                 descriptor.height = config.height;
-                descriptor.row_stride_bytes = config.width;
+                descriptor.row_stride_bytes = layout.row_bytes;
+                descriptor.pixel_format = state_->pixel_format;
+                descriptor.storage_bits_per_pixel = layout.storage_bits;
+                descriptor.significant_bits_per_pixel = layout.significant_bits;
+                descriptor.byte_order = layout.byte_order;
                 descriptor.native_frame_id = frame_id;
                 descriptor.stream_generation = generation;
                 descriptor.configuration_generation = state_->configuration_generation;
@@ -250,6 +263,8 @@ public:
         // The deterministic generator introduces no defective pixels; this is
         // a source invariant, not a measurement or physical-sensor calibration.
         caps.known_empty_defect_map = true;
+        caps.pixel_format = state_->pixel_format;
+        caps.mono8 = state_->pixel_format == PixelFormat::mono8;
         return caps;
     }
 
@@ -318,7 +333,8 @@ public:
     std::string_view id() const noexcept override { return "synthetic"; }
 
     Result<std::vector<DeviceInfo>> enumerate() override {
-        return std::vector<DeviceInfo>{{"synthetic", "synthetic-0", "Deterministic Mono8 camera"}};
+        return std::vector<DeviceInfo>{{"synthetic", "synthetic-0",
+            options_.pixel_format == PixelFormat::mono12 ? "Deterministic Mono12 camera" : "Deterministic Mono8 camera"}};
     }
 
     Result<std::shared_ptr<ICameraDevice>> open(std::string_view device_id) override {
@@ -332,6 +348,9 @@ public:
         if (!valid) {
             return valid.error();
         }
+        if (!image_layout(options_.pixel_format, options_.initial_configuration.width,
+                          options_.initial_configuration.height))
+            return error(ErrorCode::unsupported, "Unsupported synthetic pixel profile");
         std::lock_guard backend_lock(mutex_);
         if (const auto current = opened_device_.lock()) {
             std::lock_guard device_lock(current->mutex);
@@ -341,7 +360,7 @@ public:
         }
         try {
             auto state = std::make_shared<DeviceState>(options_.initial_configuration,
-                                                       options_.frame_pool_size);
+                                                       options_.frame_pool_size, options_.pixel_format);
             std::shared_ptr<ICameraDevice> device = std::make_shared<SyntheticDevice>(state);
             opened_device_ = std::move(state);
             return device;

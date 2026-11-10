@@ -1,5 +1,91 @@
 # Bootstrap validation record
 
+## Unpacked Mono12 (GIGE-MEL-022)
+
+Started from freshly fetched origin/main
+`f684d792724130ce3841384d0aef36d953c59817` on
+`feature/gige-mel-022-mono12`. No pinned upstream or SDK sources changed.
+The [image profile](mono12-image-profile.md) records the authoritative PFNC
+alignment and SFNC stream-endianness distinction and the exact MEL mapping.
+
+Focused contracts cover full-image deterministic 12-bit samples, high bytes,
+0 and 4095 at full synthetic geometry, packed destination sizes, source X
+padding with/without final-row padding, source/destination pool exhaustion,
+explicit release, reconfiguration, Standby/restart, callbacks throwing, source
+and destination retention after teardown, malformed format/depth/order/geometry/
+stride/span/capacity/generations/timestamps and one-byte-short destinations.
+The optional test is **explicitly arranged simulated Mono12**, not stock Fake
+Mono12 or physical camera evidence. Production invalid timestamp rejection is
+tested alongside positive test-only virtual-clock MEL publication.
+
+Development runs passed SDK-free **9/9** and Aravis-enabled **16/16**, including
+unchanged Fake, loopback, navigation, Health, BIT, ModeCmd and BadPixelList
+contracts. Wider final-source compiler/sanitizer qualification is recorded below
+when complete; intermediate builds performed while the new synthetic oracle
+was being edited are not final qualification (one such ASan build correctly
+failed its pixel assertions; it reported no sanitizer defect).
+
+Also executed:
+
+* Upstream verification: **97 pinned files verified**; private JSON integrity
+  remains part of every normal build.
+* Package isolation: provisioned Aravis 0.8.36 loaded by adapter; no Aravis/GLib
+  provider dependencies, installed SDK symbols or private SDK headers; a
+  separate installed consumer configured without PKG_CONFIG_PATH, built and ran.
+* The existing pre-feature `build/018r2-gcc-dev/loader_tests` binary loaded the
+  new provider and passed Mono8 delivery and native factory/metadata contracts
+  **without recompilation**. A separately compiled main-source MEL-only loader
+  also passed. This does not promise backend value-type binary compatibility.
+* The opt-in physical-camera executable compiled, but **was not executed**.
+  Physical Cognex Mono12 format/endianness/readback, capture and restoration are
+  pending explicit owner authorization. No physical camera write, network tuning,
+  raw-image commit or timestamp qualification was performed.
+
+No new sanitizer suppressions, skipped tests or production time bypass were
+added. Existing uninstrumented-SDK TSan limitations still apply. Hosted
+final-head CI must pass before declaring readiness for independent review.
+
+During qualification, simultaneous local SDK suites collided on the loopback
+simulator's fixed UDP port 3956. The failed ASan loopback entry reported
+`Address already in use`; final SDK suites are serialized across build trees.
+TSan also identified the new simulated producer's writes crossing the
+uninstrumented SDK queue. The fixture was changed to generate payload bytes
+after the actual SDK pop, under exclusive lease ownership, and to publish its
+allocation/storage observations with an ordinary instrumented mutex. The
+focused corrected TSan test passed without adding a suppression. This remains
+explicit payload simulation, not native Fake Mono12 transport evidence.
+
+### Completed final-source qualification
+
+Linux x86-64, GCC 14.2.0, Clang 19.1.7, provisioned Aravis 0.8.36:
+
+| Lane | SDK-free | Aravis enabled |
+| --- | ---: | ---: |
+| GCC Debug | 9/9 | 16/16 |
+| GCC Release | 9/9 | 16/16 |
+| Clang Debug | 9/9 | 16/16 |
+| GCC ASan/UBSan | 9/9 | 16/16 |
+| GCC TSan | 9/9 | 16/16 |
+
+All five SDK-free final-source runs passed. All five SDK-enabled lanes passed
+serialized full suites after the fixture correction, including the corrected
+full Debug suite (16/16, 116.77 s). Sanitizers use halt-on-error (ASan leak
+detection enabled).
+No sanitizer report remains in the passing suites.
+
+Both hosted push and PR workflows at source head
+`5f27a3fb31cb4cea662c3a2255ba02fd213727df` passed all five lanes, each running
+SDK-free and SDK-enabled tests:
+
+* [push workflow 42753890106](https://github.com/zackboll/ams-gra-gige-mel-provider/actions/runs/42753890106)
+* [PR workflow 42753896726](https://github.com/zackboll/ams-gra-gige-mel-provider/actions/runs/42753896726)
+
+These links identify their exact tested source commit, not a future head.
+The documentation-only validation-record commit triggers fresh final-head CI;
+its outcome is reported in PR #21 rather than recursively committing a CI result
+that would create another untested head. Physical Mono12 remains pending and is
+not a hosted CI requirement.
+
 ## GIGE-MEL-020 GVSP inter-packet delay (`GevSCPD`)
 
 **Starting point.** `feature/gige-mel-020-packet-spacing` was created from

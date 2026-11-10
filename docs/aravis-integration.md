@@ -1,5 +1,26 @@
 # Optional Aravis adapter: camera control (GIGE-MEL-008), source acquisition (GIGE-MEL-009) and timestamp provenance (GIGE-MEL-010)
 
+## Unpacked Mono12 (GIGE-MEL-022)
+
+The current device format may be Mono8 or PFNC **0x01100005 Mono12**, never
+changed on open. Mono12 requires native SFNC DeviceStreamChannelEndianness to
+read **Little**; missing/Big/unknown is unsupported because PFNC defines
+alignment but not endianness. The immutable selected format is validated at
+readback/apply/start and every native image admission. Complete single-part,
+chunk-free image spans are capacity-checked, including optional final X padding.
+Packed formats are rejected, not converted. Manual exposure, TriggerMode Off,
+Continuous mode, exact rate/readback, bounded pools and lifecycle rules remain.
+
+`aravis_mono12_simulated` explicitly arranges Fake GenICam/pixel facts through
+public SDK APIs and the existing decoded-facts seam (pixels generated after
+pop and lengths supplied explicitly); it is not native Fake
+Mono12 or hardware evidence. The SDK-enabled suite has **16 CTest entries**
+(9 SDK-free plus 7 optional entries). Existing Mono8 Fake/loopback tests remain.
+Production timestamps stay invalid; positive MEL tests use only the existing
+test virtual clock. The PGM/255 diagnostic stays Mono8-only and rejects Mono12.
+Physical CIC-5000R Mono12 remains pending explicit owner approval and native
+representation/readback verification. See [full profile](mono12-image-profile.md).
+
 > **GIGE-MEL-019.** GigE Vision streams now request a 4 MiB socket receive
 > buffer and report whether the kernel actually granted it. See
 > [GVSP socket receive buffer](#gvsp-socket-receive-buffer-gige-mel-019).

@@ -4,6 +4,7 @@
 #include "aravis_backend.hpp"
 
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -19,9 +20,20 @@ Error fail(ErrorCode code, std::string message) { return Error{code, std::move(m
 // is created only after the frame was validated; a partial file is removed.
 Result<std::size_t> write_pgm(const std::string& path, const FrameLease& frame) {
     const auto& d = frame.descriptor();
-    if (d.row_stride_bytes < d.width || frame.bytes().size() / d.row_stride_bytes < d.height)
+    // This diagnostic's P5/255 and evidence schema remain Mono8-only. Never
+    // silently truncate Mono12 or emit little-endian data as a 16-bit PGM
+    // (PGM requires big-endian words). Native Mono12 is available via leases.
+    if (d.pixel_format != PixelFormat::mono8 || d.storage_bits_per_pixel != 8 ||
+        d.significant_bits_per_pixel != 8 || d.byte_order != ByteOrder::not_applicable)
+        return fail(ErrorCode::unsupported, "PGM capture supports Mono8 only; Mono12 requires native frame leases");
+    const auto layout = image_layout(d.pixel_format, d.width, d.height);
+    if (!layout || d.row_stride_bytes < layout->row_bytes ||
+        (d.height > 1 && d.row_stride_bytes > (std::numeric_limits<std::size_t>::max() - layout->row_bytes) / (d.height - 1)) ||
+        frame.bytes().size() < (d.height - 1) * d.row_stride_bytes + layout->row_bytes)
         return fail(ErrorCode::io_error, "leased frame span does not cover its layout");
     const std::string header = "P5\n" + std::to_string(d.width) + " " + std::to_string(d.height) + "\n255\n";
+    if (layout->image_bytes > std::numeric_limits<std::size_t>::max() - header.size())
+        return fail(ErrorCode::io_error, "PGM size overflows");
     std::unique_ptr<std::FILE, int (*)(std::FILE*)> file(std::fopen(path.c_str(), "wb"), &std::fclose);
     if (!file) return fail(ErrorCode::io_error, "cannot create output '" + path + "'");
     bool ok = std::fwrite(header.data(), 1, header.size(), file.get()) == header.size();
@@ -33,7 +45,7 @@ Result<std::size_t> write_pgm(const std::string& path, const FrameLease& frame) 
         std::remove(path.c_str());
         return fail(ErrorCode::io_error, "writing output '" + path + "' failed; the partial file was removed");
     }
-    return header.size() + std::size_t{d.width} * d.height;
+    return header.size() + layout->image_bytes;
 }
 
 } // namespace

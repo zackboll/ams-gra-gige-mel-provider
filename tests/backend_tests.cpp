@@ -29,9 +29,10 @@ struct Camera {
     std::shared_ptr<ICameraDevice> device;
     std::unique_ptr<IFrameStream> stream;
 
-    explicit Camera(std::size_t pool_size = 4) {
+    explicit Camera(std::size_t pool_size = 4, PixelFormat format = PixelFormat::mono8) {
         SyntheticOptions options;
         options.frame_pool_size = pool_size;
+        options.pixel_format = format;
         options.initial_configuration.frame_rate_hz = 120;
         backend = make_synthetic_backend(options);
         auto opened = backend->open("synthetic-0");
@@ -266,10 +267,64 @@ void move_lease_does_not_release_early() {
     CHECK(third.descriptor().native_frame_id == 3);
 }
 
+void mono12_profile() {
+    CHECK(!image_layout(PixelFormat::mono12, 0, 1));
+    CHECK(!image_layout(PixelFormat::mono12, 0xffffffffu, 0xffffffffu));
+    CHECK(!image_layout(static_cast<PixelFormat>(99), 64, 48));
+    Camera camera(2, PixelFormat::mono12);
+    CHECK(camera.device->capabilities().pixel_format == PixelFormat::mono12);
+    CHECK(!camera.device->capabilities().mono8);
+    CHECK(camera.stream->start(3));
+    auto first = camera.next();
+    const auto saved = std::vector(first.bytes().begin(), first.bytes().end());
+    const auto d = first.descriptor();
+    CHECK(d.row_stride_bytes == 128 && first.bytes().size() == 6144);
+    CHECK(d.storage_bits_per_pixel == 16 && d.significant_bits_per_pixel == 12);
+    CHECK(d.byte_order == ByteOrder::little_endian && d.pixel_format == PixelFormat::mono12);
+    for (std::size_t y = 0; y < 48; ++y) for (std::size_t x = 0; x < 64; ++x) {
+        const auto i = y * 128 + x * 2;
+        const auto value = std::to_integer<unsigned>(saved[i]) | (std::to_integer<unsigned>(saved[i + 1]) << 8);
+        CHECK(value == ((17 * x + 31 * y + d.native_frame_id) & 4095));
+    }
+    auto second = camera.next();
+    CHECK(!std::equal(saved.begin(), saved.end(), second.bytes().begin()));
+    CHECK(camera.stream->receive(0ms).error().code == ErrorCode::timeout);
+    CHECK(std::equal(saved.begin(), saved.end(), first.bytes().begin()));
+    camera.stream->stop();
+    auto config = camera.device->configuration().value();
+    config.width = 640; config.height = 480;
+    CHECK(camera.device->apply(config));
+    CHECK(camera.stream->start(4).error().code == ErrorCode::resource_exhausted);
+    { auto released = std::move(second); }
+    CHECK(std::equal(saved.begin(), saved.end(), first.bytes().begin()));
+    { auto released = std::move(first); }
+    CHECK(camera.stream->start(4));
+    auto restarted = camera.next();
+    CHECK(restarted.bytes().size() == 640 * 480 * 2);
+    CHECK(restarted.descriptor().configuration_generation == 4);
+    CHECK(restarted.descriptor().stream_generation != d.stream_generation);
+    // Exercise values above 255, without reducing them to an 8-bit ramp.
+    CHECK(std::to_integer<unsigned>(restarted.bytes()[639 * 2 + 1]) > 0);
+    bool zero = false, maximum = false;
+    for (std::size_t y = 0; y < 480; ++y) for (std::size_t x = 0; x < 640; ++x) {
+        const auto i = (y * 640 + x) * 2;
+        const auto value = std::to_integer<unsigned>(restarted.bytes()[i]) |
+                           (std::to_integer<unsigned>(restarted.bytes()[i + 1]) << 8);
+        CHECK(value == ((17 * x + 31 * y + restarted.descriptor().native_frame_id) & 4095));
+        zero = zero || value == 0; maximum = maximum || value == 4095;
+    }
+    CHECK(zero && maximum);
+    const auto retained = std::vector(restarted.bytes().begin(), restarted.bytes().end());
+    CHECK(camera.device->close());
+    camera.stream.reset(); camera.device.reset(); camera.backend.reset();
+    CHECK(std::equal(retained.begin(), retained.end(), restarted.bytes().begin()));
+}
+
 } // namespace
 
 int main() {
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"Mono12 values, geometry, pool, reconfiguration and lease lifetime", mono12_profile},
         {"discovery and exclusive open", discovery_and_exclusive_open},
         {"configuration validation is atomic", configuration_validation_is_atomic},
         {"metadata and retained images", frame_metadata_and_retention},

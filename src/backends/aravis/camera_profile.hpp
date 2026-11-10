@@ -2,7 +2,7 @@
 
 // Narrow camera-control profile translation for the optional Aravis adapter.
 // SDK-free: it converts native facts (already read by aravis_backend.cpp) into
-// the project's integer-Hz / nanosecond / staring-Mono8 contract and plans the
+// the project's integer-Hz / nanosecond / staring monochrome contract and plans the
 // native writes for a request. Internal and uninstalled.
 
 #include <gige_mel/backend.hpp>
@@ -16,7 +16,8 @@
 
 namespace gige_mel::backend::aravis_profile {
 
-// Profile "aravis-mono8-free-running-v1" (see docs/aravis-integration.md).
+// Historical profile identifier retained for Mono8 diagnostic compatibility;
+// Mono12 extends admission only with explicit native byte-order readback.
 inline constexpr std::string_view profile_name = "aravis-mono8-free-running-v1";
 
 inline constexpr std::string_view sensor_width_feature = "SensorWidth";
@@ -61,6 +62,8 @@ struct NativeSnapshot {
     std::string exposure_feature;
     std::string pixel_format;
     bool mono8_available{false};
+    bool mono12_available{false};
+    std::optional<std::string> pixel_endianness; // SFNC DeviceStreamChannelEndianness; required for Mono12
     std::optional<std::string> trigger_selector;
     std::optional<std::string> trigger_mode;
     std::optional<std::string> exposure_auto;
@@ -176,7 +179,7 @@ inline constexpr std::size_t maximum_pool_bytes = std::size_t{256} << 20; // 256
 inline constexpr std::string_view acquisition_mode = "Continuous";
 
 // Checked pool requirement for one run: payload (PayloadSize readback) must be
-// positive, at least width*height for the frozen Mono8 configuration, at most
+// positive, at least the checked selected-format image size, at most
 // maximum_frame_bytes, and buffers*payload at most maximum_pool_bytes. Every
 // product is overflow-checked. ErrorCode::unsupported/resource_exhausted with
 // the values; nothing is allocated by this function.
@@ -187,7 +190,7 @@ struct PoolPlan {
 };
 Result<PoolPlan> plan_pool(std::int64_t payload_size, const CameraConfiguration& frozen,
                            std::size_t buffers = pool_buffers, std::size_t frame_limit = maximum_frame_bytes,
-                           std::size_t pool_limit = maximum_pool_bytes);
+                           std::size_t pool_limit = maximum_pool_bytes, PixelFormat format = PixelFormat::mono8);
 
 // Facts decoded from one popped SDK buffer through public accessors only.
 // Fields after `status` are meaningful only when the adapter could read them
@@ -211,24 +214,29 @@ struct NativeFrameFacts {
     bool data_present{false};      // non-null image data pointer at or after the buffer base
     std::size_t capacity_bytes{0}; // allocated size of this pool buffer
     std::uint64_t frame_id{0};
+    std::uint32_t storage_bits{8};
+    std::uint32_t significant_bits{8};
+    ByteOrder byte_order{ByteOrder::not_applicable};
 };
 // PFNC Mono8 (0x01080001): monochrome, 8 bits per pixel, unpacked.
 inline constexpr std::uint32_t pfnc_mono8 = 0x01080001u;
+inline constexpr std::uint32_t pfnc_mono12 = 0x01100005u;
 
 enum class FrameVerdict { accept, incomplete, reject };
 struct FrameDecision {
     FrameVerdict verdict{FrameVerdict::reject};
     ErrorCode code{ErrorCode::io_error}; // reject: unsupported (payload/format/layout) or io_error (inconsistent facts)
     std::size_t row_stride{0};    // accepted frames: bytes between rows
-    std::size_t span_bytes{0};    // accepted frames: row_stride * height
+    std::size_t span_bytes{0};    // accepted: (height-1)*row_stride + packed row bytes
     std::string reason;           // incomplete/reject: precise explanation
 };
-// The ONLY payload accepted is one complete, single-part, chunk-free 2-D Mono8
+// The ONLY payload accepted is one complete, single-part, chunk-free 2-D image
 // image whose geometry equals the frozen configuration, with no Y padding and
 // X padding representable as row stride, and whose SDK-reported valid bytes
-// cover row_stride * height (no fabricated final-row padding). All arithmetic
+// exactly describe the minimal image span or actual final X padding. All arithmetic
 // is overflow-checked. Non-success SDK status is `incomplete`; everything
 // else that is not acceptable is `reject` with the reason.
-FrameDecision validate_frame(const NativeFrameFacts& facts, const CameraConfiguration& frozen);
+FrameDecision validate_frame(const NativeFrameFacts& facts, const CameraConfiguration& frozen,
+                             PixelFormat format = PixelFormat::mono8);
 
 } // namespace gige_mel::backend::aravis_profile

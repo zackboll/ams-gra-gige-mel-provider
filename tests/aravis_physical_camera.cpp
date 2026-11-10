@@ -1,7 +1,7 @@
 // GIGE-MEL-018 OPT-IN PHYSICAL-CAMERA MEL TEST. Built only with
 // -DGIGE_MEL_ARAVIS_HARDWARE_TESTS=ON (default OFF) and never part of hosted
 // CI. It needs a reachable GigE Vision camera that already satisfies profile
-// aravis-mono8-free-running-v1 (Mono8, TriggerMode Off, ExposureAuto Off,
+// the free-running Mono8 or admitted unpacked Mono12 profile (TriggerMode Off, ExposureAuto Off,
 // frame-rate control enabled); the test itself writes NO camera feature.
 //
 // Usage: aravis_physical_camera_tests DEVICE_ID [DISCOVERY_INTERFACE]
@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -121,7 +122,10 @@ private:
         d.context = buffer.getContext();
         for (const auto& [address, context] : registered)
             d.registered = d.registered || (address == d.address && context == d.context);
-        const std::size_t size = std::size_t{header.getWidth()} * header.getHeight();
+        const auto format = header.getBitsPerPixel() == 16 ? backend::PixelFormat::mono12 : backend::PixelFormat::mono8;
+        const auto layout = backend::image_layout(format, header.getWidth(), header.getHeight());
+        if (!layout) return;
+        const auto size = layout->image_bytes;
         if (!d.address || static_cast<std::size_t>(buffer.getSize()) < size) return;
         const auto* begin = static_cast<const std::byte*>(d.address);
         d.bytes.assign(begin, begin + size);
@@ -135,10 +139,13 @@ private:
         // THIS frame, so original_data still points at its genuine SDK bytes.
         d.source_lease_held = ledger->outstanding() >= 1;
         bool sdk = d.source_lease_held && s.original_data && od.width == header.getWidth() &&
-                   od.height == header.getHeight() && s.original_size >= std::size_t{od.row_stride_bytes} * od.height;
+                   od.height == header.getHeight() && od.row_stride_bytes >= layout->row_bytes &&
+                   od.height > 0 && od.row_stride_bytes <=
+                       (std::numeric_limits<std::size_t>::max() - layout->row_bytes) / od.height &&
+                   s.original_size >= (od.height - 1) * od.row_stride_bytes + layout->row_bytes;
         for (std::uint32_t y = 0; sdk && y < od.height; ++y)
-            sdk = std::memcmp(d.bytes.data() + std::size_t{y} * od.width,
-                              s.original_data + std::size_t{y} * od.row_stride_bytes, od.width) == 0;
+            sdk = std::memcmp(d.bytes.data() + std::size_t{y} * layout->row_bytes,
+                              s.original_data + std::size_t{y} * od.row_stride_bytes, layout->row_bytes) == 0;
         d.matches_sdk = sdk;
     }
     mutable std::mutex mutex_;
@@ -180,7 +187,7 @@ struct Session {
         if (control->init() != ir::Return::Success)
             throw std::runtime_error("Control::init failed for '" + device_id + "': " +
                                      gige_mel::provider_statistics(manager).last_error +
-                                     " (the camera must already satisfy aravis-mono8-free-running-v1)");
+                                     " (the camera must already satisfy the Mono8 or unpacked Mono12 profile)");
         for (const auto& cap : control->getCapabilities()) {
             const auto types = cap.getChannelTypes();
             ir::Config config;
@@ -214,7 +221,7 @@ struct Session {
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
 
-    std::size_t frame_bytes() const { return std::size_t{configuration.width} * configuration.height; }
+    std::size_t frame_bytes() const { return image->getCapabilities().getBufferSize(); }
     void add_buffer(std::int64_t context) {
         storage.reserve(4); // stable addresses: never reallocated after the first registration
         CHECK(storage.size() < 4);
@@ -241,13 +248,16 @@ void check_published(const Delivery& d, const vc::Model& model, const backend::C
     CHECK(s.run == run && s.substituted);
     CHECK(unqualified(s.original.timestamp)); // a genuine production adapter frame
     CHECK(s.original.configuration == c && s.original.width == c.width && s.original.height == c.height);
-    CHECK(s.original.pixel_format == backend::PixelFormat::mono8 && s.original.status == backend::FrameStatus::complete);
+    const auto layout = backend::image_layout(s.original.pixel_format, c.width, c.height);
+    CHECK(layout && s.original.status == backend::FrameStatus::complete);
+    CHECK(s.original.storage_bits_per_pixel == layout->storage_bits &&
+          s.original.significant_bits_per_pixel == layout->significant_bits && s.original.byte_order == layout->byte_order);
     CHECK(d.source_lease_held && d.matches_sdk); // destination == genuine SDK bytes, row by row
     CHECK(d.non_sentinel > 0);                   // the consumer memory was really written
     const auto declared = vc::nominal(model, s.sequence);
     CHECK(declared && d.header.getSystemTime() == declared->value); // TEST MODEL value, not camera time
     const auto& h = d.header;
-    CHECK(h.getWidth() == c.width && h.getHeight() == c.height && h.getBitsPerPixel() == 8 && h.getNumBands() == 1);
+    CHECK(h.getWidth() == c.width && h.getHeight() == c.height && h.getBitsPerPixel() == layout->storage_bits && h.getNumBands() == 1);
     CHECK(h.getFormat() == ir::PixelFormat::Mono && h.getImageType() == ir::ImageType::Staring);
     CHECK(h.getColumnOffset() == c.offset_x && h.getRowOffset() == c.offset_y);
     CHECK(h.getIntegrationTime() == c.exposure); // actual configuration readback
@@ -280,6 +290,7 @@ void delivery_standby_restart() {
     s.clock->set_model(model);
     const auto cap = s.image->getCapabilities();
     CHECK(cap.getWidth() == c.width && cap.getHeight() == c.height && cap.getBufferSize() == s.frame_bytes());
+    CHECK(cap.getBitDepth() == (cap.getRowPitch() == c.width ? 8u : 12u));
     s.add_buffer(101);
     s.add_buffer(102);
 
@@ -339,7 +350,7 @@ void delivery_standby_restart() {
     const auto stats = s.stats();
     CHECK(stats.stream_failures == 0 && stats.callback_failures == 0 && stats.rejected_frames == 0);
     std::cout << "  delivered " << stats.delivered_frames << " physical frames (" << c.width << 'x' << c.height
-              << " Mono8, integration " << c.exposure.count() << " ns, " << c.frame_rate_hz << " Hz); held IDs "
+              << (cap.getBitDepth() == 12 ? " Mono12" : " Mono8") << ", integration " << c.exposure.count() << " ns, " << c.frame_rate_hz << " Hz); held IDs "
               << first.header.getFrameID() << ',' << second.header.getFrameID() << ", " << stats.dropped_no_buffer
               << " dropped while held; Standby accepted (command 1801); stream generation "
               << first.source->original.stream_generation << " -> " << restarted.source->original.stream_generation

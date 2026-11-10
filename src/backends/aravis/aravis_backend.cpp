@@ -355,11 +355,15 @@ Result<profile::NativeSnapshot> read_snapshot(ArvDevice* device) {
     n.pixel_format = std::move(pixel).value();
     {
         ErrorSlot error;
-        n.mono8_available = arv_device_is_enumeration_entry_available(device, "PixelFormat", "Mono8", error.out());
-        if (error.failed()) return translate("query entry Mono8 of", "PixelFormat", *error.take());
+        const char* selected = n.pixel_format.c_str();
+        const bool available = arv_device_is_enumeration_entry_available(device, "PixelFormat", selected, error.out());
+        if (error.failed()) return translate("query selected entry of", "PixelFormat", *error.take());
+        n.mono8_available = n.pixel_format == "Mono8" && available;
+        n.mono12_available = n.pixel_format == "Mono12" && available;
     }
     struct { std::string_view name; std::optional<std::string>* target; } optional_strings[] = {
-        {"TriggerSelector", &n.trigger_selector}, {"TriggerMode", &n.trigger_mode}, {"ExposureAuto", &n.exposure_auto}};
+        {"TriggerSelector", &n.trigger_selector}, {"TriggerMode", &n.trigger_mode}, {"ExposureAuto", &n.exposure_auto},
+        {"DeviceStreamChannelEndianness", &n.pixel_endianness}};
     for (const auto& [name, target] : optional_strings) {
         auto value = read_optional_string(device, name);
         if (!value) return value.error();
@@ -478,6 +482,13 @@ profile::NativeFrameFacts decode(ArvBuffer* buffer, std::size_t capacity) {
     f.part_is_2d_image = arv_buffer_get_part_data_type(buffer, 0) == ARV_BUFFER_PART_DATA_TYPE_2D_IMAGE;
     if (!f.part_is_2d_image) return f;
     f.pixel_format = static_cast<std::uint32_t>(arv_buffer_get_image_pixel_format(buffer));
+    if (f.pixel_format == profile::pfnc_mono12) {
+        f.storage_bits = 16;
+        f.significant_bits = 12;
+        // Native DeviceStreamChannelEndianness=Little was required at
+        // open/start; PFNC supplies alignment, NOT endianness. SDK copies bytes.
+        f.byte_order = ByteOrder::little_endian;
+    }
     gint x = 0, y = 0, w = 0, h = 0, px = 0, py = 0;
     arv_buffer_get_image_region(buffer, &x, &y, &w, &h);
     arv_buffer_get_image_padding(buffer, &px, &py);
@@ -613,6 +624,7 @@ struct Run {
     const std::uint64_t stream_generation;
     const std::uint64_t configuration_generation;
     const CameraConfiguration configuration; // frozen from start()'s fresh readback
+    PixelFormat pixel_format{PixelFormat::mono8}; // fixed before run publication
     const std::size_t buffer_count;
     const std::size_t buffer_bytes;
 
@@ -775,6 +787,9 @@ Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
     if (core.lost()) return control_loss_error();
     if (!native) return native.error();
     if (auto ok = profile::check_preconditions(native.value()); !ok) return ok.error();
+    if (native.value().pixel_format != core.envelope.pixel_format ||
+        native.value().pixel_endianness != core.envelope.pixel_endianness)
+        return fail(ErrorCode::unsupported, "PixelFormat changed since open; close and reopen explicitly");
     return profile::configuration_from(native.value());
 }
 
@@ -1106,12 +1121,14 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
         if (auto node = command_node(device, command); !node) return node.error();
     auto payload = read_integer(device, "PayloadSize", false);
     if (!payload) return payload.error();
-    auto pool = profile::plan_pool(payload.value(), frozen.value());
+    auto pool = profile::plan_pool(payload.value(), frozen.value(), profile::pool_buffers,
+                                   profile::maximum_frame_bytes, profile::maximum_pool_bytes, core.caps.pixel_format);
     if (!pool) return pool.error();
     if (core.lost()) return control_loss_error(); // last admission check before native stream creation
 
     auto run = std::make_shared<Run>(stream_generations.fetch_add(1) + 1, configuration_generation, frozen.value(),
                                      pool.value().buffers, pool.value().buffer_bytes);
+    run->pixel_format = core.caps.pixel_format;
     {
         ErrorSlot error;
         run->stream.reset(arv_device_create_stream(device, nullptr, nullptr, error.out()));
@@ -1322,18 +1339,18 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
                     throw;
                 }
             }
-            const auto decision = profile::validate_frame(facts, run->configuration);
+            const auto decision = profile::validate_frame(facts, run->configuration, run->pixel_format);
             if (decision.verdict == profile::FrameVerdict::accept) {
                 const auto* data = static_cast<const std::byte*>(arv_buffer_get_image_data(buffer.get(), nullptr));
                 FrameDescriptor d;
                 d.width = run->configuration.width;
                 d.height = run->configuration.height;
                 d.row_stride_bytes = decision.row_stride;
-                d.storage_bits_per_pixel = 8;
-                d.significant_bits_per_pixel = 8;
+                d.storage_bits_per_pixel = facts.storage_bits;
+                d.significant_bits_per_pixel = facts.significant_bits;
                 d.bands = 1;
-                d.pixel_format = PixelFormat::mono8;
-                d.byte_order = ByteOrder::not_applicable; // single-byte samples
+                d.pixel_format = run->pixel_format;
+                d.byte_order = facts.byte_order;
                 d.status = FrameStatus::complete;
                 d.native_frame_id = facts.frame_id; // SDK value, unmodified
                 d.stream_generation = run->stream_generation;

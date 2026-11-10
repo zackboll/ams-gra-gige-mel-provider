@@ -61,6 +61,13 @@ if(BUILD_TESTING)
     Threads::Threads)
   add_test(NAME aravis_stream_contract COMMAND aravis_stream_contract_tests)
 
+  add_executable(aravis_mono12_tests tests/aravis_mono12_tests.cpp
+    tests/support/aravis_virtual_clock.cpp tests/support/tsan_uninstrumented_sdk.cpp)
+  target_link_libraries(aravis_mono12_tests PRIVATE gige_mel_provider gige_mel_aravis_test_support
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME aravis_mono12_simulated COMMAND aravis_mono12_tests)
+  set_tests_properties(aravis_mono12_simulated PROPERTIES TIMEOUT 30)
+
   # GIGE-MEL-010: native timestamp observation, the shared time-probe routine
   # against the private Fake, and positive/negative MEL publication through a
   # TEST-ONLY virtual integration-start clock (tests/support only; never

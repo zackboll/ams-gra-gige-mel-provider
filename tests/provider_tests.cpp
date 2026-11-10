@@ -849,6 +849,12 @@ void detach_drains_metadata_callback_and_closes_admission() {
 enum class Transform {
     none,
     padding,
+    padding_without_last,
+    wrong_format, wrong_storage, wrong_significance, wrong_order,
+    wrong_width, wrong_height, short_stride, overflow_stride, short_span,
+    invalid_timestamp, reception_timestamp,
+    wrong_stream_after_one,
+    impossible_geometry,
     incomplete,
     wrong_generation,
     wrong_clock,
@@ -949,18 +955,33 @@ public:
         auto lease = std::make_shared<backend::FrameLease>(std::move(result).value());
         auto descriptor = lease->descriptor();
         const auto frame_number = received_++;
-        if (transform_ == Transform::padding) {
+        if (transform_ == Transform::padding || transform_ == Transform::padding_without_last) {
             descriptor.row_stride_bytes += 7;
             auto storage = std::make_shared<std::vector<std::byte>>(
-                descriptor.row_stride_bytes * descriptor.height, std::byte{0xee});
+                descriptor.row_stride_bytes * descriptor.height -
+                    (transform_ == Transform::padding_without_last ? 7 : 0), std::byte{0xee});
             for (std::size_t row = 0; row < descriptor.height; ++row) {
                 std::memcpy(storage->data() + row * descriptor.row_stride_bytes,
                             lease->bytes().data() + row * lease->descriptor().row_stride_bytes,
-                            descriptor.width);
+                            static_cast<std::size_t>(descriptor.width) * descriptor.storage_bits_per_pixel / 8);
             }
             return backend::FrameLease(descriptor, std::span<const std::byte>{*storage}, storage);
         }
         if (transform_ == Transform::incomplete) descriptor.status = backend::FrameStatus::incomplete;
+        if (transform_ == Transform::wrong_format) descriptor.pixel_format = backend::PixelFormat::mono8;
+        if (transform_ == Transform::wrong_storage) descriptor.storage_bits_per_pixel = 12;
+        if (transform_ == Transform::wrong_significance) descriptor.significant_bits_per_pixel = 16;
+        if (transform_ == Transform::wrong_order) descriptor.byte_order = backend::ByteOrder::big_endian;
+        if (transform_ == Transform::wrong_width) ++descriptor.width;
+        if (transform_ == Transform::wrong_height) descriptor.height = 0;
+        if (transform_ == Transform::impossible_geometry) descriptor.width = descriptor.height = UINT32_MAX;
+        if (transform_ == Transform::short_stride) --descriptor.row_stride_bytes;
+        if (transform_ == Transform::overflow_stride) descriptor.row_stride_bytes = std::numeric_limits<std::size_t>::max();
+        if (transform_ == Transform::wrong_stream_after_one && frame_number > 0) ++descriptor.stream_generation;
+        if (transform_ == Transform::invalid_timestamp) descriptor.timestamp.valid = false;
+        if (transform_ == Transform::reception_timestamp) descriptor.timestamp.event = backend::TimestampEvent::reception;
+        if (transform_ == Transform::short_span)
+            return backend::FrameLease(descriptor, lease->bytes().first(lease->bytes().size() - 1), lease);
         if (transform_ == Transform::wrong_generation) ++descriptor.configuration_generation;
         if (transform_ == Transform::wrong_clock) descriptor.timestamp.domain = backend::ClockDomain::device;
         if (transform_ == Transform::first_incomplete_bad_stream && frame_number == 0) {
@@ -1055,8 +1076,13 @@ private:
 
 class TransformBackend final : public backend::ICameraBackend {
 public:
-    explicit TransformBackend(Transform transform, std::shared_ptr<ReceivePlan> plan = {}, std::shared_ptr<ConfigurationProbe> probe = {})
-        : transform_(transform), plan_(std::move(plan)), probe_(std::move(probe)) {}
+    explicit TransformBackend(Transform transform, std::shared_ptr<ReceivePlan> plan = {}, std::shared_ptr<ConfigurationProbe> probe = {},
+                              backend::PixelFormat format = backend::PixelFormat::mono8)
+        : transform_(transform), plan_(std::move(plan)), probe_(std::move(probe)) {
+        backend::SyntheticOptions options;
+        options.pixel_format = format;
+        inner_ = backend::make_synthetic_backend(options);
+    }
     std::string_view id() const noexcept override { return "decorated-synthetic"; }
     backend::Result<std::vector<backend::DeviceInfo>> enumerate() override { return inner_->enumerate(); }
     backend::Result<std::shared_ptr<backend::ICameraDevice>> open(std::string_view id) override {
@@ -1068,11 +1094,127 @@ public:
     }
 
 private:
-    std::shared_ptr<backend::ICameraBackend> inner_{backend::make_synthetic_backend()};
+    std::shared_ptr<backend::ICameraBackend> inner_;
     Transform transform_;
     std::shared_ptr<ReceivePlan> plan_;
     std::shared_ptr<ConfigurationProbe> probe_;
 };
+
+std::shared_ptr<backend::ICameraBackend> mono12_backend(Transform transform = Transform::none) {
+    return std::make_shared<TransformBackend>(transform, nullptr, nullptr, backend::PixelFormat::mono12);
+}
+
+std::vector<std::byte> mono12_bytes(const Delivered& frame) {
+    const auto* data = static_cast<const std::byte*>(frame.buffer->getImageAddress());
+    const auto size = static_cast<std::size_t>(frame.header.getWidth()) * frame.header.getHeight() * 2;
+    return {data, data + size};
+}
+
+void check_mono12(const Delivered& frame) {
+    CHECK(frame.header.getBitsPerPixel() == 16 && frame.header.getNumBands() == 1);
+    CHECK(frame.header.getFormat() == ir::PixelFormat::Mono);
+    const auto bytes = mono12_bytes(frame);
+    for (std::size_t y = 0; y < frame.header.getHeight(); ++y)
+        for (std::size_t x = 0; x < frame.header.getWidth(); ++x) {
+            const auto i = (y * frame.header.getWidth() + x) * 2;
+            const auto value = std::to_integer<unsigned>(bytes[i]) | (std::to_integer<unsigned>(bytes[i + 1]) << 8);
+            CHECK(value == ((17 * x + 31 * y + frame.header.getFrameID()) & 4095));
+        }
+}
+
+void mono12_delivery_and_lifecycle() {
+    for (const auto transform : {Transform::none, Transform::padding, Transform::padding_without_last}) {
+        Fixture f(true, mono12_backend(transform));
+        const auto cap = f.image->getCapabilities();
+        CHECK(cap.getBitDepth() == 12 && cap.getRowPitch() == 128);
+        CHECK(cap.getBufferSize() == 6144 && cap.getImageSize() == 6144);
+        CHECK(cap.getFormat() == ir::PixelFormat::Mono && cap.getNumberOfBands() == 1);
+        auto first_buffer = f.add_buffer(6144);
+        auto second_buffer = f.add_buffer(6144);
+        CHECK(f.image->enable() == ir::Return::Success);
+        f.listener->wait_for(2);
+        eventually([&] { return gige_mel::provider_statistics(f.manager).dropped_no_buffer > 0; });
+        const auto first = f.listener->at(0), second = f.listener->at(1);
+        check_mono12(first); check_mono12(second);
+        const auto held = mono12_bytes(first);
+        CHECK(held != mono12_bytes(second));
+        CHECK(second_buffer->release() == ir::Return::Success);
+        f.listener->wait_for(3);
+        CHECK(mono12_bytes(first) == held);
+        // Same bounded ModeCmd contract as Mono8, without changing format.
+        ir::ModeCmd standby;
+        standby.setState(mel::MFA_State::Standby); standby.setMode(ir::MFA_Mode::Unused);
+        CHECK(*response(f.c2->send(standby)) == ir::MFA_Mode::Unused);
+        CHECK(mono12_bytes(first) == held);
+        CHECK(f.image->enable() == ir::Return::Fail); // held buffers still owned
+        f.release_buffers();
+        CHECK(f.image->enable() == ir::Return::Success);
+        f.listener->wait_for(4);
+        CHECK(f.image->disable() == ir::Return::Success);
+        check_mono12(f.listener->at(3));
+        f.release_buffers();
+        CHECK(response(f.c2->send(camera_command(81, 32, 16)))->getCommandSuccess());
+        CHECK(f.image->getCapabilities().getBufferSize() == 1024);
+        CHECK(f.image->getCapabilities().getRowPitch() == 64);
+        CHECK(f.image->enable() == ir::Return::Success);
+        f.listener->wait_for(5);
+        CHECK(f.image->disable() == ir::Return::Success);
+        check_mono12(f.listener->at(4));
+        const auto retained = mono12_bytes(f.listener->at(4));
+        CHECK(f.control->detachChannel(f.image) == ir::Return::Success);
+        f.control.reset(); f.manager.reset();
+        CHECK(mono12_bytes(f.listener->at(4)) == retained);
+        CHECK(f.listener->at(4).buffer->release() == ir::Return::Success);
+        (void)first_buffer;
+    }
+}
+
+void mono12_negative_controls() {
+    for (const auto transform : {Transform::wrong_format, Transform::wrong_storage, Transform::wrong_significance,
+             Transform::wrong_order, Transform::wrong_width, Transform::wrong_height, Transform::short_stride,
+             Transform::overflow_stride, Transform::short_span, Transform::incomplete,
+             Transform::wrong_generation, Transform::wrong_clock, Transform::invalid_timestamp,
+             Transform::reception_timestamp, Transform::impossible_geometry}) {
+        Fixture f(true, mono12_backend(transform));
+        f.add_buffer(6144);
+        std::fill(f.storage.front().begin(), f.storage.front().end(), std::byte{0x5a});
+        const auto untouched = f.storage.front();
+        CHECK(f.image->enable() == ir::Return::Success);
+        eventually([&] { return gige_mel::provider_statistics(f.manager).rejected_frames >= 2; });
+        CHECK(f.image->disable() == ir::Return::Success);
+        CHECK(f.listener->count() == 0 && f.storage.front() == untouched);
+    }
+    for (const auto transform : {Transform::clock_reset_after_one, Transform::clock_regression_after_one,
+                                 Transform::wrong_stream_after_one}) {
+        Fixture f(true, mono12_backend(transform)); f.add_buffer(6144);
+        CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(1);
+        const auto held = mono12_bytes(f.listener->at(0));
+        eventually([&] { const auto s = gige_mel::provider_statistics(f.manager);
+            return s.stream_failures > 0 || s.rejected_frames >= 2; });
+        CHECK(f.image->disable() == ir::Return::Success);
+        CHECK(f.listener->count() == 1 && mono12_bytes(f.listener->at(0)) == held);
+    }
+    {
+        Fixture f(true, mono12_backend());
+        auto short_buffer = f.add_buffer(6143, false);
+        CHECK(f.image->registerBuffer(short_buffer) == ir::Return::BadPointer);
+        const auto unchanged = f.storage.front();
+        CHECK(f.image->enable() == ir::Return::Fail);
+        CHECK(f.storage.front() == unchanged && f.listener->count() == 0);
+    }
+    {
+        Fixture f(true, mono12_backend()); f.add_buffer(6144);
+        f.listener->throw_after_record = true;
+        CHECK(f.image->enable() == ir::Return::Success); f.listener->wait_for(1);
+        eventually([&] { return gige_mel::provider_statistics(f.manager).callback_failures == 1; });
+        CHECK(f.image->disable() == ir::Return::Success);
+        const auto held = mono12_bytes(f.listener->at(0));
+        CHECK(f.control->detachChannel(f.image) == ir::Return::Success);
+        f.control.reset(); f.manager.reset();
+        CHECK(mono12_bytes(f.listener->at(0)) == held);
+        CHECK(f.buffers.front()->release() == ir::Return::Success);
+    }
+}
 
 void unexpected_stop_is_a_fault_and_explicit_disable_recovers() {
     auto plan = std::make_shared<ReceivePlan>();
@@ -2340,6 +2482,8 @@ void navigation_noninterference() {
 int main(int argc, char** argv) {
     test_join::prepare();
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"Mono12 delivery padded rows retention ModeCmd restart reconfiguration detach", mono12_delivery_and_lifecycle},
+        {"Mono12 negative controls untouched bytes and throwing callback", mono12_negative_controls},
         {"BadPixelList one-shot sessions configuration and frame invariants", bad_pixels_sessions},
         {"BadPixelList callback reentry exception and independent workers", bad_pixels_reentry_and_throw},
         {"BadPixelList detach drain registration race and lifetime pins", bad_pixels_detach_and_lifetime},
