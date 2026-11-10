@@ -55,6 +55,38 @@ allocation/storage observations with an ordinary instrumented mutex. The
 focused corrected TSan test passed without adding a suppression. This remains
 explicit payload simulation, not native Fake Mono12 transport evidence.
 
+### Completed final-source qualification
+
+Linux x86-64, GCC 14.2.0, Clang 19.1.7, provisioned Aravis 0.8.36:
+
+| Lane | SDK-free | Aravis enabled |
+| --- | ---: | ---: |
+| GCC Debug | 9/9 | 16/16 |
+| GCC Release | 9/9 | 16/16 |
+| Clang Debug | 9/9 | 16/16 |
+| GCC ASan/UBSan | 9/9 | 16/16 |
+| GCC TSan | 9/9 | 16/16 |
+
+All five SDK-free final-head runs passed. SDK-enabled Release, Clang and both
+sanitizers passed serialized full suites after the fixture correction; GCC
+Debug passed the full suite before the test-only correction and its corrected
+focused Mono12 test passed under TSan. The corrected full Debug suite is also
+rerun serially. Sanitizers use halt-on-error (ASan leak detection enabled).
+No sanitizer report remains in the passing suites.
+
+Both hosted push and PR workflows at source head
+`5f27a3fb31cb4cea662c3a2255ba02fd213727df` passed all five lanes, each running
+SDK-free and SDK-enabled tests:
+
+* [push workflow 42753890106](https://github.com/zackboll/ams-gra-gige-mel-provider/actions/runs/42753890106)
+* [PR workflow 42753896726](https://github.com/zackboll/ams-gra-gige-mel-provider/actions/runs/42753896726)
+
+These links identify their exact tested source commit, not a future head.
+The documentation-only validation-record commit triggers fresh final-head CI;
+its outcome is reported in PR #21 rather than recursively committing a CI result
+that would create another untested head. Physical Mono12 remains pending and is
+not a hosted CI requirement.
+
 ## GIGE-MEL-020 GVSP inter-packet delay (`GevSCPD`)
 
 **Starting point.** `feature/gige-mel-020-packet-spacing` was created from
