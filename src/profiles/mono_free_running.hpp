@@ -6,6 +6,7 @@
 // Internal and uninstalled.
 
 #include <gige_mel/backend.hpp>
+#include "device_features.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -35,20 +36,8 @@ inline constexpr std::string_view frame_rate_features[] = {frame_rate_feature, "
 // The first implemented name is used; both are SFNC microsecond features.
 inline constexpr std::string_view exposure_features[] = {"ExposureTime", "ExposureTimeAbs"};
 
-struct IntegerFeature {
-    std::int64_t value{0};
-    std::int64_t minimum{0};
-    std::int64_t maximum{0};
-    std::int64_t increment{0};
-};
-
-struct FloatFeature {
-    double value{0};
-    double minimum{0};
-    double maximum{0};
-    std::optional<double> increment; // only when the camera advertises one
-    std::optional<std::string> unit; // GenICam <Unit>, when declared
-};
+using IntegerFeature = device_features::IntegerFeature;
+using FloatFeature = device_features::FloatFeature;
 
 // Every value is a native readback. Optional members are features that may be
 // absent from a camera; absence is part of the profile decision.

@@ -61,7 +61,9 @@ target_link_libraries(gige_mel_backend PUBLIC Threads::Threads PRIVATE $<BUILD_I
 
 # Internal camera-profile policy, compiled and tested without any camera SDK.
 # No MEL declarations, SDK handles, installed headers or plugin ABI are added.
-add_library(gige_mel_camera_profiles STATIC src/profiles/mono_free_running.cpp)
+add_library(gige_mel_camera_profiles STATIC
+  src/profiles/mono_free_running.cpp
+  src/profiles/mono_free_running_device.cpp)
 set_target_properties(gige_mel_camera_profiles PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(gige_mel_camera_profiles PUBLIC cxx_std_20)
 target_include_directories(gige_mel_camera_profiles PUBLIC
@@ -103,6 +105,10 @@ if(BUILD_TESTING)
   target_link_libraries(camera_profile_tests PRIVATE gige_mel_camera_profiles gige_mel_build_options)
   add_test(NAME camera_profile_contract COMMAND camera_profile_tests)
 
+  add_executable(device_feature_tests tests/device_feature_tests.cpp)
+  target_link_libraries(device_feature_tests PRIVATE gige_mel_camera_profiles gige_mel_build_options)
+  add_test(NAME device_feature_contract COMMAND device_feature_tests)
+
   add_executable(provider_tests tests/provider_tests.cpp tests/join_observer.cpp tests/clock_observer.cpp)
   target_link_libraries(provider_tests PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
   target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=clock_gettime)
@@ -135,7 +141,7 @@ if(BUILD_TESTING)
   add_test(NAME aravis_evidence_offline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
-  set_tests_properties(backend_contract camera_profile_contract provider_contract provider_backend_portability configuration_public_api
+  set_tests_properties(backend_contract camera_profile_contract device_feature_contract provider_contract provider_backend_portability configuration_public_api
     native_loader PROPERTIES TIMEOUT 30)
 endif()
 

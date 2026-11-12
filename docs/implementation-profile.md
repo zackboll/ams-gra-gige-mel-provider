@@ -6,10 +6,12 @@ It is **not full MEL conformance**. Required functionality outside this subset
 remains explicitly unsupported; see [the complete inventory](mel-surface-roadmap.md).
 
 GIGE-MEL-024 extracts the existing camera-profile policy into an internal,
-SDK-free module with a default contract test. This changes no advertised MEL
-capability, factory selection, camera behavior or timestamp admission. See
+SDK-free module. GIGE-MEL-025 adds a typed feature service and shared snapshot,
+configuration-write and readback orchestration, with default recording-service
+tests. These changes preserve advertised MEL capabilities, factory selection,
+camera behavior and timestamp admission. See
 [camera-profile portability](camera-profile-portability.md) for the implemented
-boundary and the remaining typed-service, second-backend and plugin work.
+boundary and the remaining second-backend, selection and plugin work.
 
 ## Provider and discovery
 
