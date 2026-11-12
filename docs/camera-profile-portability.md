@@ -25,9 +25,14 @@ default `device_feature_contract` test without an SDK.
 
 Aravis implements the actual node operations, type/access validation and native
 error translation. It retains discovery, device ownership, acquisition-command
-uncertainty, streams, buffers and normalization of received-frame facts. A
-second SDK backend, independent profile selection and dynamically loaded
-profile plugins remain subsequent work.
+uncertainty, streams, buffers and normalization of received-frame facts.
+
+GIGE-MEL-026 implements a second SDK backend in `src/backends/pleora/`, using
+the same unchanged profile and orchestration. Its typed service accesses the
+real GenApi node map owned by eBUS. Native GenApi fixture tests establish
+feature semantics; native Ethernet acquisition and physical camera/MEL tests
+remain pending. See [Pleora integration](pleora-integration.md). Independent
+profile selection and dynamically loaded profile plugins remain subsequent work.
 
 ## Preserved behavior
 
@@ -123,7 +128,7 @@ or acceptance semantics.
 | --- | --- | --- |
 | 1: shared profile (GIGE-MEL-024) | Extract existing SDK-free policy and run its pure tests by default | Existing behavior preserved; default and optional-adapter suites pass; installed package remains independent |
 | 2: typed device services (GIGE-MEL-025) | Shared snapshot/configuration orchestration over an internal typed feature interface, with an Aravis implementation | Recording-service tests prove required operations, ordering, fresh readback and error distinctions; actual Aravis tests remain passing |
-| 3: narrow Pleora backend | Implement that interface and native acquisition for the same initial camera/profile | The same unchanged profile and applicable MEL tests work with both actual SDKs |
+| 3: narrow Pleora backend (GIGE-MEL-026) | Implemented against external eBUS; real native GenApi feature tests; Ethernet/camera qualification pending | Require the explicit host acquisition/MEL contract to pass before marking this step qualified |
 | 4: selection and device identity | Select backend and profile independently; match verified physical device identity | Reconnect through either backend without profile or MEL-client edits; incompatible requirements are diagnosed |
 | 5: sensor capabilities | Add navigation wire protocol, additional payloads or other requested operations individually | Shared semantic tests plus device/SDK evidence for each advertised capability |
 | 6: optional binary plugins | Define loading, versioning, ownership and compatibility if independent distribution is needed | Profile lifetime, ABI mismatch and unload behavior are validated separately |

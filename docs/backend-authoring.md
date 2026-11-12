@@ -1,5 +1,11 @@
 # Adding a camera backend
 
+GIGE-MEL-026 adds the optional [Pleora eBUS implementation](pleora-integration.md)
+of the same internal feature/profile boundary. It keeps original SDK files
+external, uses one unchanged profile, and distinguishes real native GenApi tests
+from pending Ethernet/camera/stream qualification. The adapter is uninstalled;
+it does not add a standard MEL factory selector or a stable plugin ABI.
+
 ## Starting point
 
 GIGE-MEL-023 adds an optional `INavigationSink` interface alongside

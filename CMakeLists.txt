@@ -15,6 +15,7 @@ find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 option(GIGE_MEL_BUILD_EXAMPLES "Build the native dynamically loaded capture example" ON)
 option(GIGE_MEL_WARNINGS_AS_ERRORS "Treat warnings in project code as errors" ON)
 option(GIGE_MEL_BUILD_ARAVIS "Build the optional, internal Aravis 0.8.36 camera-control adapter, its SDK tests and diagnostic tool" OFF)
+option(GIGE_MEL_BUILD_PLEORA "Build the optional, internal Pleora eBUS 6.5.3.7155 adapter and diagnostic tool using an external SDK" OFF)
 set(GIGE_MEL_SANITIZERS "" CACHE STRING "Compiler sanitizers, e.g. address,undefined or thread")
 
 add_library(gige_mel_build_options INTERFACE)
@@ -150,6 +151,12 @@ endif()
 # here is internal: never installed, exported or selectable by getAPI_Manager().
 if(GIGE_MEL_BUILD_ARAVIS)
   include(cmake/GigeMelAravis.cmake)
+endif()
+
+# Pleora is also an independent, optional adapter. The common provider and
+# installed package never link it, and configure/build never download an SDK.
+if(GIGE_MEL_BUILD_PLEORA)
+  include(cmake/GigeMelPleora.cmake)
 endif()
 
 configure_package_config_file(cmake/GigeMelProviderConfig.cmake.in

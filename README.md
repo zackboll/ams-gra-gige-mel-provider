@@ -48,6 +48,15 @@ ctest --test-dir build/make --output-on-failure
 
 ## What is implemented
 
+**Optional Pleora backend (GIGE-MEL-026)** implements the same internal typed
+feature and acquisition interfaces using an external eBUS 6.5.3.7155 SDK and
+the unchanged shared camera profile. Native GenApi tests run without a camera;
+native Ethernet acquisition and physical-camera qualification remain pending.
+The adapter is off by default, uninstalled and not selected by the standard
+MEL factories. Production timestamps remain invalid. See
+[Pleora integration](docs/pleora-integration.md) and the
+[Debian 13 execution task](docs/tasks/GIGE-MEL-026-pleora-debian13.md).
+
 **Unpacked Mono12 (GIGE-MEL-022)** is an explicitly selected internal synthetic
 and optional Aravis profile; default factories remain Mono8. It carries 12
 significant bits in little-endian, LSB-aligned 16-bit words, one band, MEL Mono,
@@ -138,8 +147,8 @@ flowchart TD
     Runtime --> Contract["Internal C++ backend contract"]
     Contract --> Synthetic["Synthetic backend · implemented"]
     Contract --> Fixture["Contract-fixture backend · test only"]
-    Contract -.-> SDK1["First GigE SDK adapter · planned"]
-    Contract -.-> SDK2["Second adapter · planned"]
+    Contract --> SDK1["Aravis · optional internal adapter"]
+    Contract --> SDK2["Pleora · native acquisition qualification pending"]
 ```
 
 The same MEL-facing portability scenarios pass against the synthetic backend
@@ -158,7 +167,8 @@ GIGE-MEL-024 moves the existing SDK-free monochrome profile into a shared
 internal module. GIGE-MEL-025 adds typed device features and shared snapshot,
 configuration-write and readback orchestration, with Aravis supplying the native
 operations. Pure profile and recording-service contract tests run by default.
-A Pleora backend is the next step in
+GIGE-MEL-026 implements that boundary for Pleora; its physical/native-stream
+qualification is the current gate in
 [camera-profile portability](docs/camera-profile-portability.md).
 
 The default path copies or repacks a backend frame into registered MEL host
@@ -178,6 +188,8 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `src/device_features.hpp` | Internal SDK-free typed feature operations and owned numeric snapshots |
 | `src/profiles/` | Internal SDK-free camera-profile policy and checked frame/pool planning; shared by adapter code and default tests |
 | `src/backends/aravis/` | Optional internal Aravis 0.8.36 adapter (`GIGE_MEL_BUILD_ARAVIS`): camera control, bounded Mono8 source acquisition with unqualified timestamps, and read-only raw SDK timestamp observation; never installed |
+| `src/backends/pleora/` | Optional internal eBUS 6.5.3.7155 adapter (`GIGE_MEL_BUILD_PLEORA`): unchanged shared profile, native features and bounded source acquisition; hardware qualification pending; never installed |
+| `tools/pleora_diagnostic.cpp` | Optional Pleora list/inspect/apply/capture diagnostic; reports checksums, no fabricated time mapping |
 | `tools/aravis_diagnostic.cpp` | Optional, uninstalled Aravis GigE list/inspect/apply/capture/time-probe diagnostic |
 | `examples/capture.cpp` | Standalone MEL consumer that dynamically loads the provider |
 | `tests/backend_tests.cpp` | Synthetic-specific backend lifetime, cancellation, validation, and pool contracts |
@@ -192,6 +204,7 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `third_party/` | Exact, minimal upstream header closure, notices, and checksum manifest |
 | `scripts/vendor_upstream.py` | Offline integrity check; explicit restoration of locked files |
 | `scripts/provision_aravis.sh` | Explicit, checksum-verified Aravis 0.8.36 provisioning (never run by CMake) |
+| `scripts/provision_pleora.py`, `scripts/run_pleora.py` | Explicit external SDK/header provisioning and process-local SDK environment; never run by CMake or CI |
 | `scripts/verify_package_isolation.py` | Checked CI verifier that the optional Aravis build leaves the provider and installed package Aravis-free |
 | `docs/` | Implementation profile, architecture, exhaustive MEL roadmap, backend guide, and decisions |
 | `.github/workflows/ci.yml` | GCC/Clang, debug/release, native loading, package consumer, and sanitizer jobs |

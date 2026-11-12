@@ -1,5 +1,11 @@
 # Experimental image-stream profile, version 0.1
 
+GIGE-MEL-026 adds an optional, internal Pleora eBUS adapter consuming the same
+shared profile as Aravis. It does not extend the standard factories or MEL
+capabilities. Production timestamps remain invalid; native stream and physical
+camera qualification are pending. Native GenApi fixture tests establish feature
+service behavior only. See [Pleora integration](pleora-integration.md).
+
 This document is the contract implemented by the bootstrap. It describes a
 useful development subset against the pinned IR/Common MEL 4.0 declarations.
 It is **not full MEL conformance**. Required functionality outside this subset
