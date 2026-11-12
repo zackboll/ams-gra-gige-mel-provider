@@ -26,8 +26,10 @@ default `device_feature_contract` test without an SDK.
 Aravis implements the actual node operations, type/access validation and native
 error translation. It retains discovery, device ownership, acquisition-command
 uncertainty, streams, buffers and normalization of received-frame facts. A
-second SDK backend, independent profile selection and dynamically loaded
-profile plugins remain subsequent work.
+second SDK backend is now implemented by the optional [Pleora adapter](pleora-integration.md),
+but licensed camera-control and transport qualification remain pending.
+Independent profile selection and dynamically loaded profile plugins remain
+subsequent work. The shared profile sources are unchanged by that adapter.
 
 ## Preserved behavior
 

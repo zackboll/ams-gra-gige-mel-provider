@@ -15,6 +15,12 @@ boundary and the remaining second-backend, selection and plugin work.
 
 ## Provider and discovery
 
+The optional [Pleora adapter](pleora-integration.md) reuses this project's shared
+camera profile and adds internal native acquisition with bounded host-copy
+leases. It is OFF by default, uninstalled, and not a MEL factory selection.
+Timestamps remain invalid and no MEL capability changes. SDK licensing blocks
+physical-camera open; controlled-source tests are not hardware qualification.
+
 The standard factory instance is exactly `synthetic`; unknown names return null. The optional, internal
 Aravis camera-control foundation ([Aravis integration](aravis-integration.md))
 is not a factory selection and does not change this profile. Its GIGE-MEL-009

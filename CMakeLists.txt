@@ -15,6 +15,8 @@ find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 option(GIGE_MEL_BUILD_EXAMPLES "Build the native dynamically loaded capture example" ON)
 option(GIGE_MEL_WARNINGS_AS_ERRORS "Treat warnings in project code as errors" ON)
 option(GIGE_MEL_BUILD_ARAVIS "Build the optional, internal Aravis 0.8.36 camera-control adapter, its SDK tests and diagnostic tool" OFF)
+option(GIGE_MEL_BUILD_PLEORA "Build the optional Pleora eBUS backend" OFF)
+set(GIGE_MEL_PLEORA_SDK_ROOT "" CACHE PATH "External Pleora SDK installation")
 set(GIGE_MEL_SANITIZERS "" CACHE STRING "Compiler sanitizers, e.g. address,undefined or thread")
 
 add_library(gige_mel_build_options INTERFACE)
@@ -138,6 +140,9 @@ if(BUILD_TESTING)
   add_test(NAME package_isolation_verifier
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_package_isolation_tests.py)
   set_tests_properties(package_isolation_verifier PROPERTIES TIMEOUT 120)
+  add_test(NAME proprietary_guard_contract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/proprietary_guard_tests.py)
+  set_tests_properties(proprietary_guard_contract PROPERTIES TIMEOUT 30)
   add_test(NAME aravis_evidence_offline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
@@ -150,6 +155,9 @@ endif()
 # here is internal: never installed, exported or selectable by getAPI_Manager().
 if(GIGE_MEL_BUILD_ARAVIS)
   include(cmake/GigeMelAravis.cmake)
+endif()
+if(GIGE_MEL_BUILD_PLEORA)
+  include(cmake/GigeMelPleora.cmake)
 endif()
 
 configure_package_config_file(cmake/GigeMelProviderConfig.cmake.in

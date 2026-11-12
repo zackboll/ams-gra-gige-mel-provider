@@ -28,6 +28,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Reject proprietary SDK content (index and new history)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if test -n "$BASE_SHA" && ! test "$BASE_SHA" = "0000000000000000000000000000000000000000"; then
+            python3 scripts/check_proprietary.py --history "$BASE_SHA"
+          else
+            python3 scripts/check_proprietary.py --history "$(git rev-list --max-parents=0 HEAD | head -1)"
+          fi
       - name: Configure without SDKs or network downloads
         run: cmake --preset "${{ matrix.preset }}"
       - name: Build

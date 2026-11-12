@@ -1,5 +1,15 @@
 # MEL surface inventory and implementation order
 
+## Optional Pleora backend (GIGE-MEL-025 integration)
+
+An internal, default-OFF eBUS adapter now implements the shared typed feature
+service and native acquisition with bounded copy leases, without changing the
+shared profile or MEL provider. [Integration and qualification record](pleora-integration.md)
+distinguishes SDK-buffer tests from physical-camera tests blocked by licensing.
+P3 is **not complete**: licensed control/acquisition qualification, paired
+Aravis/Cognex behavior, and qualified camera timestamps remain pending. No
+navigation transport, backend factory selection or new MEL capability is added.
+
 ## Typed device services (GIGE-MEL-025)
 
 The shared monochrome profile now selects aliases, builds fresh snapshots,
@@ -7,9 +17,8 @@ executes ordered configuration writes and reads actual state through an
 internal SDK-free typed feature interface. Aravis implements native access;
 recording-service tests cover orchestration without an SDK. Device locking,
 control loss, acquisition-command uncertainty and stream ownership remain
-adapter responsibilities. This adds no MEL capability or second backend;
-the next portability step is a narrow Pleora implementation of the same
-service and acquisition contracts. See
+adapter responsibilities. The optional Pleora implementation above consumes
+the same service and acquisition contracts but remains unqualified. See
 [camera-profile portability](camera-profile-portability.md).
 
 ## Shared camera-profile foundation (GIGE-MEL-024)
@@ -18,8 +27,8 @@ The existing monochrome/free-running profile is an internal SDK-free module,
 consumed by Aravis and a default profile contract test. Host pool policy is
 separate and passed explicitly. This is a behavior-preserving extraction with
 no new MEL capability or production backend. GIGE-MEL-025 adds typed device
-services; the Pleora adapter, independent backend/profile selection and optional
-binary plugins remain subsequent work; see
+services; the optional Pleora implementation above still needs qualification.
+Independent backend/profile selection and binary plugins remain subsequent work; see
 [the sequence and acceptance criteria](camera-profile-portability.md).
 
 ## Backend-independent NavigationReport forwarding (GIGE-MEL-023)

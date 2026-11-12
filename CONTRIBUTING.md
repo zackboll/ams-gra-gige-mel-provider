@@ -20,6 +20,14 @@ Do not put SDK headers in the common backend contract or require commercial
 software for the synthetic CI jobs. A second real adapter should exercise the
 same provider without editing MEL channel code.
 
+Proprietary SDKs must remain entirely outside the working tree. Never publish
+SDK headers, source, libraries, samples, installers, EULAs, keys or SDK-dependent
+build artifacts. Enable local safeguards with `git config core.hooksPath .githooks`.
+Before committing, inspect staged files and run `python3 scripts/check_proprietary.py`;
+before pushing also run it with `--history origin/main`. CI repeats the Git-blob
+checks. See [Pleora integration](docs/pleora-integration.md) for licensing and
+qualification restrictions. A successful download does not grant vendor rights.
+
 ## Dependency maintenance
 
 Ordinary builds verify checked-in upstream bytes and perform no downloads.
