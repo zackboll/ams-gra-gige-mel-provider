@@ -313,18 +313,18 @@ ctest --test-dir build/aravis-dev --output-on-failure
 ```
 
 With the option ON, a missing or different SDK is a clear configuration error.
-The SDK-enabled build adds six CTest entries to the eight default ones (14 in
-total; five before GIGE-MEL-011, four before GIGE-MEL-010, three before
-GIGE-MEL-009). All of these targets are internal and are not installed or
-exported:
+The SDK-enabled build adds seven CTest entries to the ten default ones (17 in
+total). The default suite includes the SDK-free `camera_profile_contract`.
+All of these targets are internal and are not installed or exported:
 
 | Target | Purpose |
 | --- | --- |
-| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics (`aravis_backend.cpp`), SDK-free profile translation and frame validation (`camera_profile.cpp`), and the shared capture (`aravis_capture.cpp`) and time-probe (`aravis_time_probe.cpp`) routines |
+| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics (`aravis_backend.cpp`), adapter resource budgets (`acquisition_policy.hpp`), and the shared capture (`aravis_capture.cpp`) and time-probe (`aravis_time_probe.cpp`) routines; links the SDK-free `gige_mel_camera_profiles` module in `src/profiles/mono_free_running.cpp` |
 | `gige_mel_aravis_test_support` | `tests/support/aravis_fake_support.*`: test-only Fake interface selection |
 | `aravis_adapter_tests` → CTest `aravis_adapter` | Direct adapter scenarios against the real SDK |
 | `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration and negative timestamp-admission probe |
 | `aravis_stream_contract_tests` → CTest `aravis_stream_contract` | GIGE-MEL-009 acquisition contract against the real SDK Fake stream |
+| `aravis_mono12_tests` → CTest `aravis_mono12_simulated` | Mono12 acquisition and MEL publication through the real SDK Fake stream with a test-only virtual clock |
 | `aravis_timestamp_contract_tests` → CTest `aravis_timestamp_contract` | GIGE-MEL-010: native timestamp observation, the time-probe routine against the Fake, and positive/negative MEL publication through the **test-only** virtual clock (`tests/support/aravis_virtual_clock.*`) |
 | `aravis_gige_loopback_contract_tests` → CTest `aravis_gige_loopback_contract` | GIGE-MEL-011: the production GigE backend against the SDK's `ArvGvFakeCamera` (GVCP/GVSP on 127.0.0.1; real discovery, GVCP, GVSP), plus the R1 socket-audit control case. Test-only fixture `tests/support/aravis_gv_loopback.*`. Needs IPv4 loopback with UDP 3956 free; never skipped. **While it runs, the simulator holds a wildcard 255.255.255.255:3956 listener** ([test-only exception](#network-exposure-of-the-simulator-gige-mel-011-r1)) |
 | `gige_mel_aravis_diagnostic` → CTest `aravis_diagnostic_help` | Diagnostic tool (`--help` performs no device I/O) |

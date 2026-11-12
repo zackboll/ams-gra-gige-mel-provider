@@ -1,5 +1,14 @@
 # MEL surface inventory and implementation order
 
+## Shared camera-profile foundation (GIGE-MEL-024)
+
+The existing monochrome/free-running profile is an internal SDK-free module,
+consumed by Aravis and a default profile contract test. Host pool policy is
+separate and passed explicitly. This is a behavior-preserving extraction with
+no new MEL capability or production backend. Typed device services, the Pleora
+adapter, independent backend/profile selection and optional binary plugins
+remain subsequent work; see [the sequence and acceptance criteria](camera-profile-portability.md).
+
 ## Backend-independent NavigationReport forwarding (GIGE-MEL-023)
 
 The existing Image navigation receipt path optionally submits every validated

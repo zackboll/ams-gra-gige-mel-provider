@@ -1,5 +1,5 @@
 // Aravis SDK mechanics for the optional camera-control foundation. Profile
-// translation (units, bounds, write planning) lives in camera_profile.cpp.
+// translation (units, bounds, write planning) lives in profiles/mono_free_running.cpp.
 //
 // Synchronization boundary: the adapter serializes ITS OWN discovery/open per
 // Aravis interface (process-wide, across adapter instances) and its own
@@ -7,7 +7,8 @@
 // Aravis thread-safe. Ownership: one logically open device per (interface,
 // device ID) per process, across adapter instances; a second open is `busy`.
 #include "aravis_private.hpp"
-#include "camera_profile.hpp"
+#include "acquisition_policy.hpp"
+#include "profiles/mono_free_running.hpp"
 
 #include <arv.h>
 
@@ -39,7 +40,7 @@
 namespace gige_mel::backend::aravis {
 namespace {
 
-namespace profile = aravis_profile;
+namespace profile = profiles::mono_free_running;
 
 Error fail(ErrorCode code, std::string message) { return Error{code, std::move(message)}; }
 
@@ -1121,8 +1122,8 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
         if (auto node = command_node(device, command); !node) return node.error();
     auto payload = read_integer(device, "PayloadSize", false);
     if (!payload) return payload.error();
-    auto pool = profile::plan_pool(payload.value(), frozen.value(), profile::pool_buffers,
-                                   profile::maximum_frame_bytes, profile::maximum_pool_bytes, core.caps.pixel_format);
+    auto pool = profile::plan_pool(payload.value(), frozen.value(), pool_buffers,
+                                   maximum_frame_bytes, maximum_pool_bytes, core.caps.pixel_format);
     if (!pool) return pool.error();
     if (core.lost()) return control_loss_error(); // last admission check before native stream creation
 

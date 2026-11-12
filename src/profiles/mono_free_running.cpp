@@ -1,4 +1,4 @@
-#include "camera_profile.hpp"
+#include "profiles/mono_free_running.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,7 +9,7 @@
 #include <limits>
 #include <utility>
 
-namespace gige_mel::backend::aravis_profile {
+namespace gige_mel::backend::profiles::mono_free_running {
 namespace {
 
 Error fail(ErrorCode code, std::string message) { return Error{code, std::move(message)}; }
@@ -568,4 +568,4 @@ FrameDecision validate_frame(const NativeFrameFacts& f, const CameraConfiguratio
     return d;
 }
 
-} // namespace gige_mel::backend::aravis_profile
+} // namespace gige_mel::backend::profiles::mono_free_running

@@ -5,6 +5,12 @@ useful development subset against the pinned IR/Common MEL 4.0 declarations.
 It is **not full MEL conformance**. Required functionality outside this subset
 remains explicitly unsupported; see [the complete inventory](mel-surface-roadmap.md).
 
+GIGE-MEL-024 extracts the existing camera-profile policy into an internal,
+SDK-free module with a default contract test. This changes no advertised MEL
+capability, factory selection, camera behavior or timestamp admission. See
+[camera-profile portability](camera-profile-portability.md) for the implemented
+boundary and the remaining typed-service, second-backend and plugin work.
+
 ## Provider and discovery
 
 The standard factory instance is exactly `synthetic`; unknown names return null. The optional, internal

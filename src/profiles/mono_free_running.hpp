@@ -1,9 +1,9 @@
 #pragma once
 
-// Narrow camera-control profile translation for the optional Aravis adapter.
-// SDK-free: it converts native facts (already read by aravis_backend.cpp) into
-// the project's integer-Hz / nanosecond / staring monochrome contract and plans the
-// native writes for a request. Internal and uninstalled.
+// Shared, SDK-free camera-control profile translation. It converts native
+// facts supplied by an adapter into the project's integer-Hz / nanosecond /
+// staring monochrome contract and plans the native writes for a request.
+// Internal and uninstalled.
 
 #include <gige_mel/backend.hpp>
 
@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace gige_mel::backend::aravis_profile {
+namespace gige_mel::backend::profiles::mono_free_running {
 
 // Historical profile identifier retained for Mono8 diagnostic compatibility;
 // Mono12 extends admission only with explicit native byte-order readback.
@@ -58,7 +58,7 @@ struct NativeSnapshot {
     IntegerFeature width, height, offset_x, offset_y;
     FloatFeature frame_rate_hz;  // frame_rate_feature, Hz
     FloatFeature exposure_us;    // exposure_feature, microseconds
-    std::string frame_rate_feature{aravis_profile::frame_rate_feature}; // selected frame_rate_features entry
+    std::string frame_rate_feature{mono_free_running::frame_rate_feature}; // selected frame_rate_features entry
     std::string exposure_feature;
     std::string pixel_format;
     bool mono8_available{false};
@@ -135,7 +135,7 @@ struct NativeWrite {
 // ROI maximum can rise); the frame-rate minimum and maximum; the exposure
 // minimum and increment; advertised scalar increments; and the exposure
 // maximum whenever the exposure is written before the rate. Deferred to the
-// SDK range check at the write (the adapter enables Aravis range checking on
+// SDK range check at the write (each adapter must enable range checking on
 // its own device): a ROI maximum after such a companion decrease, and the
 // exposure maximum when the plan lengthens the period first. This profile
 // does not model a rate maximum raised by an earlier write in the same
@@ -151,7 +151,7 @@ Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& request,
 
 // ---------------------------------------------------------------------------
 // Acquisition profile (GIGE-MEL-009). SDK-free decisions consumed by the
-// adapter's stream; the SDK mechanics stay in aravis_backend.cpp.
+// adapter's stream; SDK mechanics stay in the adapter implementation.
 
 // Read-only acquisition admission over the FRESH snapshot that start() read
 // under the device lock (GIGE-MEL-009-R1, finding C). Reuses, in order, the
@@ -167,20 +167,13 @@ Result<std::vector<NativeWrite>> plan_writes(const CameraConfiguration& request,
 // not lie on the advertised grid or inside the reported bounds.
 Result<CameraConfiguration> acquisition_preflight(const NativeSnapshot& current, const NativeSnapshot& envelope);
 
-// Fixed source pool and explicit allocation limits. A run allocates exactly
-// pool_buffers SDK buffers of PayloadSize bytes each, once, before the
-// acquisition-start command. No additional pixel buffers are allocated after
-// pool setup; each delivered lease still allocates its small shared owner
-// record (not pixel storage).
-inline constexpr std::size_t pool_buffers = 4;
-inline constexpr std::size_t maximum_frame_bytes = std::size_t{64} << 20; // 64 MiB per buffer
-inline constexpr std::size_t maximum_pool_bytes = std::size_t{256} << 20; // 256 MiB per run
 // The only accepted native acquisition mode (no SingleFrame/MultiFrame).
 inline constexpr std::string_view acquisition_mode = "Continuous";
 
 // Checked pool requirement for one run: payload (PayloadSize readback) must be
 // positive, at least the checked selected-format image size, at most
-// maximum_frame_bytes, and buffers*payload at most maximum_pool_bytes. Every
+// frame_limit, and buffers*payload at most pool_limit. The caller supplies its
+// host resource policy; this profile chooses no buffer count or budget. Every
 // product is overflow-checked. ErrorCode::unsupported/resource_exhausted with
 // the values; nothing is allocated by this function.
 struct PoolPlan {
@@ -189,8 +182,8 @@ struct PoolPlan {
     std::size_t total_bytes{0};
 };
 Result<PoolPlan> plan_pool(std::int64_t payload_size, const CameraConfiguration& frozen,
-                           std::size_t buffers = pool_buffers, std::size_t frame_limit = maximum_frame_bytes,
-                           std::size_t pool_limit = maximum_pool_bytes, PixelFormat format = PixelFormat::mono8);
+                           std::size_t buffers, std::size_t frame_limit,
+                           std::size_t pool_limit, PixelFormat format);
 
 // Facts decoded from one popped SDK buffer through public accessors only.
 // Fields after `status` are meaningful only when the adapter could read them
@@ -239,4 +232,4 @@ struct FrameDecision {
 FrameDecision validate_frame(const NativeFrameFacts& facts, const CameraConfiguration& frozen,
                              PixelFormat format = PixelFormat::mono8);
 
-} // namespace gige_mel::backend::aravis_profile
+} // namespace gige_mel::backend::profiles::mono_free_running
