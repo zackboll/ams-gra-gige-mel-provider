@@ -1,5 +1,6 @@
 #include "pleora_backend.hpp"
 #include "pleora_features.hpp"
+#include "pleora_license.hpp"
 #include "pleora_stream.hpp"
 #include "profiles/mono_free_running_device.hpp"
 
@@ -219,6 +220,7 @@ private:
 
 class Backend final : public ICameraBackend {
 public:
+    explicit Backend(Options options) : options_(std::move(options)) {}
     std::string_view id() const noexcept override { return "pleora"; }
     Result<std::vector<DeviceInfo>> enumerate() override {
         PvSystem system;
@@ -259,15 +261,28 @@ public:
             if (info && id == info->GetMACAddress().GetAscii()) { selected = info; break; }
         }
         if (!selected) return Error{ErrorCode::not_found, "eBUS exact MAC not discovered"};
-        if (!selected->IsLicenseValid())
-            return Error{ErrorCode::unsupported, "eBUS SDK license rejected: " + std::string(selected->GetLicenseMessage().GetAscii())};
-        state->device = std::make_unique<PvDeviceGEV>();
-        auto r = state->device->Connect(selected, PvAccessExclusive);
-        if (!r.IsOK()) return native_error(r, "exclusive Connect");
-        r = state->device->RegisterEventSink(&state->link);
+        const LicenseStatus license{selected->IsLicenseValid(), selected->GetLicenseMessage().GetAscii()};
+        auto connected = connect_with_license(license, options_, [&]() -> Status {
+            state->device = std::make_unique<PvDeviceGEV>();
+            return checked(state->device->Connect(selected, PvAccessExclusive), "exclusive Connect");
+        });
+        if (!connected) return connected.error();
+        auto r = state->device->RegisterEventSink(&state->link);
         if (!r.IsOK()) return native_error(r, "register link sink");
         state->registered = true;
         Features features(*state->device->GetParameters());
+        if (options_.diagnostic) {
+            const auto report = [&](std::string_view name, const std::string& value) {
+                options_.diagnostic(std::string(name) + "=" + value);
+            };
+            report("license valid after Connect", selected->IsLicenseValid() ? "true" : "false");
+            report("license message after Connect", selected->GetLicenseMessage().GetAscii());
+            for (const auto* name : {"DeviceVendorName", "DeviceModelName", "DeviceID",
+                                     "DeviceFirmwareVersion", "PixelFormat", "AcquisitionMode"}) {
+                auto value = features.read_string_or_enum(name);
+                report(name, value ? value.value() : value.error().message);
+            }
+        }
         auto snapshot = profile::read_snapshot(features);
         if (!snapshot) return snapshot.error();
         auto capabilities = profile::capabilities_from(snapshot.value());
@@ -277,8 +292,12 @@ public:
         state->capabilities = capabilities.value();
         return std::shared_ptr<ICameraDevice>(std::make_shared<Device>(std::move(state)));
     }
+private:
+    Options options_;
 };
 }
 
-std::shared_ptr<ICameraBackend> make_backend() { return std::make_shared<Backend>(); }
+std::shared_ptr<ICameraBackend> make_backend(Options options) {
+    return std::make_shared<Backend>(std::move(options));
+}
 } // namespace gige_mel::backend::pleora

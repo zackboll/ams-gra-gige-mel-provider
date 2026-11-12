@@ -5,9 +5,12 @@
 An internal, default-OFF eBUS adapter now implements the shared typed feature
 service and native acquisition with bounded copy leases, without changing the
 shared profile or MEL provider. [Integration and qualification record](pleora-integration.md)
-distinguishes SDK-buffer tests from physical-camera tests blocked by licensing.
-P3 is **not complete**: licensed control/acquisition qualification, paired
-Aravis/Cognex behavior, and qualified camera timestamps remain pending. No
+distinguishes SDK-buffer tests from real watermarked Cognex Mono8 evaluation.
+Receiver evaluation is explicitly selected, default-off and not production-qualified;
+the SDK remains authoritative and development entitlement remains unresolved.
+P3 is **not complete**: licensed control/acquisition qualification and qualified
+camera timestamps remain pending. Sequential Aravis/Cognex evaluation results
+are recorded, not a production benchmark. No
 navigation transport, backend factory selection or new MEL capability is added.
 
 ## Typed device services (GIGE-MEL-025)

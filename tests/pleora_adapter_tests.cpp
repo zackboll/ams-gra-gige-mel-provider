@@ -2,6 +2,7 @@
 // No copied SDK declarations, camera simulation, network or license bypass.
 #include "backends/pleora/pleora_backend.hpp"
 #include "backends/pleora/pleora_features.hpp"
+#include "backends/pleora/pleora_license.hpp"
 #include "backends/pleora/pleora_stream.hpp"
 
 #include <chrono>
@@ -164,6 +165,37 @@ void budgets_and_native_errors() {
         CHECK(!stream->start(2));
     }
 }
+void licensing() {
+    const p::LicenseStatus unlicensed{false, "Unlicensed. Watermark, limited use"};
+    p::Options options;
+    CHECK(!options.allow_watermarked_evaluation);
+    std::string diagnostics;
+    options.diagnostic = [&](std::string_view text) { diagnostics += std::string(text) + '\n'; };
+    unsigned connects = 0;
+    const auto permitted = [&]() -> b::Status { ++connects; return {}; };
+    auto rejected = p::connect_with_license(unlicensed, options, permitted);
+    CHECK(!rejected && rejected.error().code == b::ErrorCode::unsupported);
+    CHECK(connects == 0);
+    CHECK(rejected.error().message == "eBUS SDK license rejected: " + unlicensed.message);
+    options.allow_watermarked_evaluation = true;
+    CHECK(p::connect_with_license(unlicensed, options, permitted));
+    CHECK(connects == 1);
+    CHECK(!unlicensed.valid && unlicensed.message == "Unlicensed. Watermark, limited use");
+    CHECK(diagnostics.find("valid=false") != std::string::npos);
+    CHECK(diagnostics.find("UNLICENSED / WATERMARKED") != std::string::npos);
+    CHECK(diagnostics.find("NOT PRODUCTION QUALIFIED") != std::string::npos);
+    const auto denial = p::native_error(PvResult(PvResult::Code::NO_LICENSE), "exclusive Connect");
+    auto denied = p::connect_with_license(unlicensed, options, [&]() -> b::Status {
+        ++connects;
+        return denial;
+    });
+    CHECK(connects == 2); // exactly one attempt, no retry/fallback on denial
+    CHECK(!denied && denied.error().code == denial.code && denied.error().message == denial.message);
+    CHECK(diagnostics.find(denial.message) != std::string::npos);
+    options.allow_watermarked_evaluation = false;
+    CHECK(p::connect_with_license({true, "valid"}, options, permitted));
+    CHECK(connects == 3);
+}
 int main() {
     try {
         auto backend = p::make_backend();
@@ -176,7 +208,7 @@ int main() {
         CHECK(!features.write_float("missing", 1));
         CHECK(p::native_error(PvResult(PvResult::Code::NO_LICENSE), "test").code == b::ErrorCode::unsupported);
         CHECK(p::native_error(PvResult(PvResult::Code::NOT_CONNECTED), "test").code == b::ErrorCode::disconnected);
-        leases(); failures(); cancellation(); budgets_and_native_errors();
+        licensing(); leases(); failures(); cancellation(); budgets_and_native_errors();
         std::cout << "Pleora controlled-source contracts passed (not camera qualification)\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

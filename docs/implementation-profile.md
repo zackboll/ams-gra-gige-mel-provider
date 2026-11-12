@@ -18,8 +18,10 @@ boundary and the remaining second-backend, selection and plugin work.
 The optional [Pleora adapter](pleora-integration.md) reuses this project's shared
 camera profile and adds internal native acquisition with bounded host-copy
 leases. It is OFF by default, uninstalled, and not a MEL factory selection.
-Timestamps remain invalid and no MEL capability changes. SDK licensing blocks
-physical-camera open; controlled-source tests are not hardware qualification.
+Timestamps remain invalid and no MEL capability changes. Explicit default-off
+watermarked evaluation delegates Connect permission to the SDK; real Cognex
+Mono8 reception succeeds. Development entitlement and production qualification
+remain unresolved; see the integration record for the scope of hardware tests.
 
 The standard factory instance is exactly `synthetic`; unknown names return null. The optional, internal
 Aravis camera-control foundation ([Aravis integration](aravis-integration.md))
