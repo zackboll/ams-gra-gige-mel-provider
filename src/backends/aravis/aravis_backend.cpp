@@ -1,5 +1,5 @@
 // Aravis SDK mechanics for the optional camera-control foundation. Profile
-// translation (units, bounds, write planning) lives in profiles/mono_free_running.cpp.
+// policy and feature orchestration live in profiles/mono_free_running*.cpp.
 //
 // Synchronization boundary: the adapter serializes ITS OWN discovery/open per
 // Aravis interface (process-wide, across adapter instances) and its own
@@ -8,7 +8,7 @@
 // device ID) per process, across adapter instances; a second open is `busy`.
 #include "aravis_private.hpp"
 #include "acquisition_policy.hpp"
-#include "profiles/mono_free_running.hpp"
+#include "profiles/mono_free_running_device.hpp"
 
 #include <arv.h>
 
@@ -171,136 +171,154 @@ Result<ArvGcFeatureNode*> feature_node(ArvDevice* device, std::string_view name,
     return feature_node;
 }
 
-// Optional features. Three distinct outcomes:
-//   - Result value false: confirmed absent (no node) or the SDK successfully
-//     reported "not implemented". Supported optional absence.
-//   - Result value true: present and implemented.
-//   - Result error: the implementation query itself failed (translated GError
-//     with feature and operation context), or a node exists under the name
-//     but is not a GenICam feature node. Never converted into absence.
-Result<bool> present(ArvDevice* device, std::string_view name) {
-    const std::string feature(name);
-    ArvGcNode* node = arv_device_get_feature(device, feature.c_str());
-    if (!node) return false;
-    if (!ARV_IS_GC_FEATURE_NODE(node))
-        return fail(ErrorCode::unsupported, "optional feature '" + feature + "' exists but is not a GenICam feature node");
-    ErrorSlot error;
-    const bool implemented = arv_gc_feature_node_is_implemented(ARV_GC_FEATURE_NODE(node), error.out());
-    if (error.failed()) return translate("query implementation of optional feature", feature, *error.take());
-    return implemented;
-}
+// Borrowed native view used only while the caller owns the device lifetime
+// and operation lock (or exclusive, unpublished open/inspection). This class
+// supplies SDK mechanics; feature aliases and camera policy live in the profile.
+class AravisDeviceFeatures final : public device_features::IDeviceFeatures {
+public:
+    explicit AravisDeviceFeatures(ArvDevice* device) : device_(device) {}
 
-Result<std::int64_t> read_integer(ArvDevice* device, std::string_view name, bool writable) {
-    const auto node = feature_node(device, name, writable);
-    if (!node) return node.error();
-    if (!ARV_IS_GC_INTEGER(node.value()))
-        return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not an integer feature");
-    ErrorSlot error;
-    const gint64 value = arv_gc_integer_get_value(ARV_GC_INTEGER(node.value()), error.out());
-    if (error.failed()) return translate("read", name, *error.take());
-    return static_cast<std::int64_t>(value);
-}
+    // False is confirmed absence/unimplemented. Availability, access, wrong
+    // node type and failed queries must never become optional absence.
+    Result<bool> implemented(std::string_view name) override {
+        const std::string feature(name);
+        ArvGcNode* node = arv_device_get_feature(device_, feature.c_str());
+        if (!node) return false;
+        if (!ARV_IS_GC_FEATURE_NODE(node))
+            return fail(ErrorCode::unsupported, "optional feature '" + feature + "' exists but is not a GenICam feature node");
+        ErrorSlot error;
+        const bool implemented = arv_gc_feature_node_is_implemented(ARV_GC_FEATURE_NODE(node), error.out());
+        if (error.failed()) return translate("query implementation of optional feature", feature, *error.take());
+        return implemented;
+    }
 
-Result<profile::IntegerFeature> read_integer_feature(ArvDevice* device, std::string_view name) {
-    const auto node = feature_node(device, name, true);
-    if (!node) return node.error();
-    if (!ARV_IS_GC_INTEGER(node.value()))
-        return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not an integer feature");
-    auto* integer = ARV_GC_INTEGER(node.value());
-    profile::IntegerFeature f;
-    ErrorSlot error;
-    f.value = arv_gc_integer_get_value(integer, error.out());
-    if (!error.failed()) f.minimum = arv_gc_integer_get_min(integer, error.out());
-    if (!error.failed()) f.maximum = arv_gc_integer_get_max(integer, error.out());
-    if (!error.failed()) f.increment = arv_gc_integer_get_inc(integer, error.out());
-    if (error.failed()) return translate("read value/bounds/increment of", name, *error.take());
-    return f;
-}
+    Result<std::int64_t> read_integer(std::string_view name) override {
+        const auto node = feature_node(device_, name, false);
+        if (!node) return node.error();
+        if (!ARV_IS_GC_INTEGER(node.value()))
+            return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not an integer feature");
+        ErrorSlot error;
+        const gint64 value = arv_gc_integer_get_value(ARV_GC_INTEGER(node.value()), error.out());
+        if (error.failed()) return translate("read", name, *error.take());
+        return static_cast<std::int64_t>(value);
+    }
 
-Result<profile::FloatFeature> read_float_feature(ArvDevice* device, std::string_view name) {
-    const auto node = feature_node(device, name, true);
-    if (!node) return node.error();
-    if (!ARV_IS_GC_FLOAT(node.value()))
-        return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not a float feature");
-    auto* real = ARV_GC_FLOAT(node.value());
-    profile::FloatFeature f;
-    ErrorSlot error;
-    f.value = arv_gc_float_get_value(real, error.out());
-    if (!error.failed()) f.minimum = arv_gc_float_get_min(real, error.out());
-    if (!error.failed()) f.maximum = arv_gc_float_get_max(real, error.out());
-    double increment = 0;
-    if (!error.failed()) increment = arv_gc_float_get_inc(real, error.out());
-    if (error.failed()) return translate("read value/bounds of", name, *error.take());
-    // Aravis 0.8.36 (arv_gc_float_get_inc, arvgcfloat.c) documents exactly
-    // G_MINDOUBLE (== DBL_MIN) as "not defined"; a failure is the GError
-    // handled above. Only that value is absence. Every other successfully
-    // returned value - including zero, negative and nonfinite ones from an
-    // explicit <Inc> - is kept unchanged so check_limits() rejects it with
-    // feature/value context instead of it silently becoming "no increment".
-    if (increment != G_MINDOUBLE) f.increment = increment;
-    if (const char* unit = arv_gc_float_get_unit(real); unit && *unit) f.unit = unit;
-    return f;
-}
+    Result<device_features::IntegerFeature> read_integer_feature(std::string_view name,
+                                                                device_features::ReadAccess access) override {
+        const auto node = feature_node(device_, name, access == device_features::ReadAccess::read_write);
+        if (!node) return node.error();
+        if (!ARV_IS_GC_INTEGER(node.value()))
+            return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not an integer feature");
+        auto* integer = ARV_GC_INTEGER(node.value());
+        device_features::IntegerFeature f;
+        ErrorSlot error;
+        f.value = arv_gc_integer_get_value(integer, error.out());
+        if (!error.failed()) f.minimum = arv_gc_integer_get_min(integer, error.out());
+        if (!error.failed()) f.maximum = arv_gc_integer_get_max(integer, error.out());
+        if (!error.failed()) f.increment = arv_gc_integer_get_inc(integer, error.out());
+        if (error.failed()) return translate("read value/bounds/increment of", name, *error.take());
+        return f;
+    }
 
-Result<std::string> read_string(ArvDevice* device, std::string_view name) {
-    const auto node = feature_node(device, name, false);
-    if (!node) return node.error();
-    ErrorSlot error;
-    const char* value = nullptr;
-    if (ARV_IS_GC_ENUMERATION(node.value()))
-        value = arv_gc_enumeration_get_string_value(ARV_GC_ENUMERATION(node.value()), error.out());
-    else if (ARV_IS_GC_STRING(node.value()))
-        value = arv_gc_string_get_value(ARV_GC_STRING(node.value()), error.out());
-    else
-        return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not an enumeration or string");
-    if (error.failed()) return translate("read", name, *error.take());
-    return copy(value); // copied before any later SDK call can invalidate it
-}
+    Result<device_features::FloatFeature> read_float_feature(std::string_view name,
+                                                            device_features::ReadAccess access) override {
+        const auto node = feature_node(device_, name, access == device_features::ReadAccess::read_write);
+        if (!node) return node.error();
+        if (!ARV_IS_GC_FLOAT(node.value()))
+            return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not a float feature");
+        auto* real = ARV_GC_FLOAT(node.value());
+        device_features::FloatFeature f;
+        ErrorSlot error;
+        f.value = arv_gc_float_get_value(real, error.out());
+        if (!error.failed()) f.minimum = arv_gc_float_get_min(real, error.out());
+        if (!error.failed()) f.maximum = arv_gc_float_get_max(real, error.out());
+        double increment = 0;
+        if (!error.failed()) increment = arv_gc_float_get_inc(real, error.out());
+        if (error.failed()) return translate("read value/bounds of", name, *error.take());
+        // Aravis 0.8.36 (arv_gc_float_get_inc, arvgcfloat.c) documents exactly
+        // G_MINDOUBLE (== DBL_MIN) as "not defined"; a failure is the GError
+        // handled above. Only that value is absence. Every other successfully
+        // returned value - including zero, negative and nonfinite ones from an
+        // explicit <Inc> - is kept unchanged so check_limits() rejects it with
+        // feature/value context instead of it silently becoming "no increment".
+        if (increment != G_MINDOUBLE) f.increment = increment;
+        if (const char* unit = arv_gc_float_get_unit(real); unit && *unit) f.unit = unit;
+        return f;
+    }
 
+    Result<std::string> read_string_or_enum(std::string_view name) override {
+        const auto node = feature_node(device_, name, false);
+        if (!node) return node.error();
+        ErrorSlot error;
+        const char* value = nullptr;
+        if (ARV_IS_GC_ENUMERATION(node.value()))
+            value = arv_gc_enumeration_get_string_value(ARV_GC_ENUMERATION(node.value()), error.out());
+        else if (ARV_IS_GC_STRING(node.value()))
+            value = arv_gc_string_get_value(ARV_GC_STRING(node.value()), error.out());
+        else
+            return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not an enumeration or string");
+        if (error.failed()) return translate("read", name, *error.take());
+        return copy(value); // copied before any later SDK call can invalidate it
+    }
+
+    Result<bool> read_boolean(std::string_view name) override {
+        const auto node = feature_node(device_, name, false);
+        if (!node) return node.error();
+        if (!ARV_IS_GC_BOOLEAN(node.value()))
+            return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not a Boolean feature");
+        ErrorSlot error;
+        const bool value = arv_gc_boolean_get_value(ARV_GC_BOOLEAN(node.value()), error.out());
+        if (error.failed()) return translate("read", name, *error.take());
+        return value;
+    }
+
+    Result<bool> enum_entry_available(std::string_view name, std::string_view entry) override {
+        const std::string feature(name), selected(entry);
+        ErrorSlot error;
+        const bool available = arv_device_is_enumeration_entry_available(device_, feature.c_str(), selected.c_str(), error.out());
+        if (error.failed()) return translate("query selected entry of", name, *error.take());
+        return available;
+    }
+
+    // Exactly one native feature write through the GenICam node (no ArvCamera
+    // convenience setter, so no implicit trigger/auto/format changes). The
+    // per-device range/access policy rechecks constraints at each SDK write.
+    Status write_integer(std::string_view name, std::int64_t value) override {
+        const auto node = feature_node(device_, name, true);
+        if (!node) return node.error();
+        if (!ARV_IS_GC_INTEGER(node.value()))
+            return fail(ErrorCode::unsupported, std::string(name) + " is not an integer feature");
+        ErrorSlot error;
+        arv_gc_integer_set_value(ARV_GC_INTEGER(node.value()), value, error.out());
+        if (error.failed()) return translate("write", name, *error.take());
+        return {};
+    }
+
+    Status write_float(std::string_view name, double value) override {
+        const auto node = feature_node(device_, name, true);
+        if (!node) return node.error();
+        if (!ARV_IS_GC_FLOAT(node.value()))
+            return fail(ErrorCode::unsupported, std::string(name) + " is not a float feature");
+        ErrorSlot error;
+        arv_gc_float_set_value(ARV_GC_FLOAT(node.value()), value, error.out());
+        if (error.failed()) return translate("write", name, *error.take());
+        return {};
+    }
+
+private:
+    ArvDevice* const device_; // borrowed, never retained beyond the caller's scope
+};
+
+// Diagnostic identity remains adapter-specific: some cameras expose integer
+// identities and the native node type is part of the reported provenance.
 Result<std::optional<std::string>> read_optional_string(ArvDevice* device, std::string_view name) {
-    const auto exists = present(device, name);
+    AravisDeviceFeatures features(device);
+    const auto exists = features.implemented(name);
     if (!exists) return exists.error(); // a failed query is not absence
     if (!exists.value()) return std::optional<std::string>{};
-    auto value = read_string(device, name); // wrong node type: explicit diagnostic
+    auto value = features.read_string_or_enum(name);
     if (!value) return value.error();
     return std::optional<std::string>{std::move(value).value()};
-}
-
-Result<std::optional<bool>> read_optional_boolean(ArvDevice* device, std::string_view name) {
-    const auto exists = present(device, name);
-    if (!exists) return exists.error();
-    if (!exists.value()) return std::optional<bool>{};
-    const auto node = feature_node(device, name, false);
-    if (!node) return node.error();
-    if (!ARV_IS_GC_BOOLEAN(node.value()))
-        return fail(ErrorCode::unsupported, "feature '" + std::string(name) + "' is not a Boolean feature");
-    ErrorSlot error;
-    const bool value = arv_gc_boolean_get_value(ARV_GC_BOOLEAN(node.value()), error.out());
-    if (error.failed()) return translate("read", name, *error.take());
-    return std::optional<bool>{value};
-}
-
-// The first IMPLEMENTED name wins. A failed implementation query stops the
-// selection with that error: it never falls through to the next name.
-Result<std::string> exposure_feature_name(ArvDevice* device) {
-    for (const auto name : profile::exposure_features) {
-        const auto exists = present(device, name);
-        if (!exists) return exists.error();
-        if (exists.value()) return std::string(name);
-    }
-    return fail(ErrorCode::unsupported, "neither ExposureTime nor ExposureTimeAbs is implemented");
-}
-
-// GIGE-MEL-018: the same first-implemented rule for the frame-rate feature
-// (AcquisitionFrameRate, else the legacy AcquisitionFrameRateAbs). A failed
-// implementation query stops the selection; it never falls through.
-Result<std::string> frame_rate_feature_name(ArvDevice* device) {
-    for (const auto name : profile::frame_rate_features) {
-        const auto exists = present(device, name);
-        if (!exists) return exists.error();
-        if (exists.value()) return std::string(name);
-    }
-    return fail(ErrorCode::unsupported, "neither AcquisitionFrameRate nor AcquisitionFrameRateAbs is implemented");
 }
 
 // GIGE-MEL-018: read-only identity text. String and enumeration nodes give
@@ -309,92 +327,17 @@ Result<std::string> frame_rate_feature_name(ArvDevice* device) {
 // readback, labelled with its node type so it is never mistaken for a string
 // identity. Absence and query failures follow read_optional_string().
 Result<std::optional<std::string>> read_optional_identity(ArvDevice* device, std::string_view name) {
-    const auto exists = present(device, name);
+    AravisDeviceFeatures features(device);
+    const auto exists = features.implemented(name);
     if (!exists) return exists.error();
     if (!exists.value()) return std::optional<std::string>{};
     ArvGcNode* node = arv_device_get_feature(device, std::string(name).c_str());
     if (node && ARV_IS_GC_INTEGER(node) && !ARV_IS_GC_ENUMERATION(node)) {
-        const auto value = read_integer(device, name, false);
+        const auto value = features.read_integer(name);
         if (!value) return value.error();
         return std::optional<std::string>{std::to_string(value.value()) + " (GenICam Integer node)"};
     }
     return read_optional_string(device, name);
-}
-
-// Complete native snapshot; any failure is reported, never defaulted.
-Result<profile::NativeSnapshot> read_snapshot(ArvDevice* device) {
-    profile::NativeSnapshot n;
-    const auto sw = read_integer(device, profile::sensor_width_feature, false);
-    if (!sw) return sw.error();
-    const auto sh = read_integer(device, profile::sensor_height_feature, false);
-    if (!sh) return sh.error();
-    n.sensor_width = sw.value();
-    n.sensor_height = sh.value();
-    struct { std::string_view name; profile::IntegerFeature* target; } integers[] = {
-        {profile::width_feature, &n.width}, {profile::height_feature, &n.height},
-        {profile::offset_x_feature, &n.offset_x}, {profile::offset_y_feature, &n.offset_y}};
-    for (const auto& [name, target] : integers) {
-        auto value = read_integer_feature(device, name);
-        if (!value) return value.error();
-        *target = value.value();
-    }
-    auto exposure_name = exposure_feature_name(device);
-    if (!exposure_name) return exposure_name.error();
-    n.exposure_feature = std::move(exposure_name).value();
-    auto rate_name = frame_rate_feature_name(device);
-    if (!rate_name) return rate_name.error();
-    n.frame_rate_feature = std::move(rate_name).value();
-    auto rate = read_float_feature(device, n.frame_rate_feature);
-    if (!rate) return rate.error();
-    n.frame_rate_hz = std::move(rate).value();
-    auto exposure = read_float_feature(device, n.exposure_feature);
-    if (!exposure) return exposure.error();
-    n.exposure_us = std::move(exposure).value();
-
-    auto pixel = read_string(device, "PixelFormat");
-    if (!pixel) return pixel.error();
-    n.pixel_format = std::move(pixel).value();
-    {
-        ErrorSlot error;
-        const char* selected = n.pixel_format.c_str();
-        const bool available = arv_device_is_enumeration_entry_available(device, "PixelFormat", selected, error.out());
-        if (error.failed()) return translate("query selected entry of", "PixelFormat", *error.take());
-        n.mono8_available = n.pixel_format == "Mono8" && available;
-        n.mono12_available = n.pixel_format == "Mono12" && available;
-    }
-    struct { std::string_view name; std::optional<std::string>* target; } optional_strings[] = {
-        {"TriggerSelector", &n.trigger_selector}, {"TriggerMode", &n.trigger_mode}, {"ExposureAuto", &n.exposure_auto},
-        {"DeviceStreamChannelEndianness", &n.pixel_endianness}};
-    for (const auto& [name, target] : optional_strings) {
-        auto value = read_optional_string(device, name);
-        if (!value) return value.error();
-        *target = std::move(value).value();
-    }
-    auto enable = read_optional_boolean(device, "AcquisitionFrameRateEnable");
-    if (!enable) return enable.error();
-    n.frame_rate_enable = enable.value();
-    return n;
-}
-
-// Exactly one native feature write through the GenICam node (no Aravis
-// ArvCamera convenience setter, so no implicit trigger/auto/format changes).
-Status write_feature(ArvDevice* device, const profile::NativeWrite& write) {
-    const auto node = feature_node(device, write.feature, true);
-    if (!node) return node.error();
-    ErrorSlot error;
-    if (write.is_float) {
-        if (!ARV_IS_GC_FLOAT(node.value())) return fail(ErrorCode::unsupported, write.feature + " is not a float feature");
-        arv_gc_float_set_value(ARV_GC_FLOAT(node.value()), write.real, error.out());
-    } else {
-        if (!ARV_IS_GC_INTEGER(node.value())) return fail(ErrorCode::unsupported, write.feature + " is not an integer feature");
-        arv_gc_integer_set_value(ARV_GC_INTEGER(node.value()), write.integer, error.out());
-    }
-    if (error.failed()) return translate("write", write.feature, *error.take());
-    return {};
-}
-
-std::string describe(const profile::NativeWrite& write) {
-    return write.feature + "=" + (write.is_float ? std::to_string(write.real) : std::to_string(write.integer));
 }
 
 // ---------------------------------------------------------------------------
@@ -775,23 +718,13 @@ struct DeviceCore {
     std::optional<Fault> fault; // not yet reported by close()
 };
 
-std::string text(const CameraConfiguration& c) {
-    return std::to_string(c.width) + "x" + std::to_string(c.height) + "@(" + std::to_string(c.offset_x) + "," +
-           std::to_string(c.offset_y) + ") " + std::to_string(c.frame_rate_hz) + " Hz " +
-           std::to_string(c.exposure.count()) + " ns";
-}
-
 // Fresh, truthful configuration (device lock held).
 Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
-    if (core.lost()) return control_loss_error();
-    auto native = read_snapshot(core.device.get());
-    if (core.lost()) return control_loss_error();
-    if (!native) return native.error();
-    if (auto ok = profile::check_preconditions(native.value()); !ok) return ok.error();
-    if (native.value().pixel_format != core.envelope.pixel_format ||
-        native.value().pixel_endianness != core.envelope.pixel_endianness)
-        return fail(ErrorCode::unsupported, "PixelFormat changed since open; close and reopen explicitly");
-    return profile::configuration_from(native.value());
+    AravisDeviceFeatures features(core.device.get());
+    return profile::read_configuration(features, core.envelope, [&core]() -> Status {
+        if (core.lost()) return control_loss_error();
+        return {};
+    });
 }
 
 // One bounded AcquisitionStop attempt (device lock held, device present): a
@@ -1109,18 +1042,19 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
                             " are still held; release them before restarting; no native stream was created");
     }
     ArvDevice* device = core.device.get();
-    auto snapshot = read_snapshot(device);
+    AravisDeviceFeatures features(device);
+    auto snapshot = profile::read_snapshot(features);
     if (!snapshot) return snapshot.error();
     auto frozen = profile::acquisition_preflight(snapshot.value(), core.envelope);
     if (!frozen) return fail(frozen.error().code, frozen.error().message + "; no native stream was created");
-    auto mode = read_string(device, "AcquisitionMode");
+    auto mode = features.read_string_or_enum("AcquisitionMode");
     if (!mode) return mode.error();
     if (mode.value() != profile::acquisition_mode)
         return fail(ErrorCode::unsupported, "AcquisitionMode is '" + mode.value() +
                                                 "'; the profile requires Continuous, which the adapter does not set");
     for (const char* command : {"AcquisitionStart", "AcquisitionStop"})
         if (auto node = command_node(device, command); !node) return node.error();
-    auto payload = read_integer(device, "PayloadSize", false);
+    auto payload = features.read_integer("PayloadSize");
     if (!payload) return payload.error();
     auto pool = profile::plan_pool(payload.value(), frozen.value(), pool_buffers,
                                    maximum_frame_bytes, maximum_pool_bytes, core.caps.pixel_format);
@@ -1446,32 +1380,18 @@ public:
         // No active receiver is NOT proof that reuse is safe: an unresolved
         // AcquisitionStart/Stop outcome refuses configuration before writes.
         if (core.acquisition == Acquisition::uncertain) return uncertain_refusal(core, "nothing was written");
-        auto current = read_snapshot(core.device.get());
-        if (!current) return current.error();
-        // Requires the stopped/manual profile; nothing is normalized.
-        auto plan = profile::plan_writes(request, current.value(), core.envelope);
-        if (!plan) return plan.error();
-        std::string written;
-        for (const auto& write : plan.value()) {
+        AravisDeviceFeatures features(core.device.get());
+        const profile::ConnectionCheck check_connection = [&core]() -> Status {
             if (core.lost()) return control_loss_error();
-            if (core.hooks && core.hooks->before_write) core.hooks->before_write(write.feature, core.device.get());
+            return {};
+        };
+        const profile::BeforeWrite before_write = [&core](std::string_view feature) -> Status {
             if (core.lost()) return control_loss_error();
-            if (auto ok = write_feature(core.device.get(), write); !ok) {
-                // Preserve the original failure; report earlier writes and the
-                // actual native state. No rollback is attempted or claimed.
-                auto message = ok.error().message + "; earlier successful writes: " +
-                               (written.empty() ? std::string("none") : written) + "; no rollback was attempted";
-                const auto actual = read_configuration_locked(core);
-                message += actual ? "; actual native configuration: " + text(actual.value())
-                                  : "; actual native configuration unreadable or unrepresentable: " + actual.error().message;
-                return fail(ok.error().code, std::move(message));
-            }
-            written += (written.empty() ? "" : ", ") + describe(write);
-        }
-        auto actual = read_configuration_locked(core);
-        if (!actual)
-            return fail(actual.error().code, actual.error().message + " (after writes: " + written + ")");
-        return actual; // may differ from the request through native quantization
+            if (core.hooks && core.hooks->before_write) core.hooks->before_write(feature, core.device.get());
+            if (core.lost()) return control_loss_error();
+            return {};
+        };
+        return profile::apply_configuration(features, request, core.envelope, check_connection, before_write);
     }
 
     // Lightweight: no native stream, receiver, allocation or feature write.
@@ -1653,7 +1573,8 @@ public:
         auto native = open_native(device_id);
         if (!native) return native.error();
         if (native.value().control_loss->lost.load()) return control_loss_error();
-        auto snapshot = read_snapshot(native.value().device.get());
+        AravisDeviceFeatures features(native.value().device.get());
+        auto snapshot = profile::read_snapshot(features);
         if (native.value().control_loss->lost.load()) return control_loss_error();
         if (!snapshot) return fail(snapshot.error().code, "open '" + std::string(device_id) + "': " + snapshot.error().message);
         auto caps = profile::capabilities_from(snapshot.value());
@@ -1868,7 +1789,8 @@ Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id) 
             result.native.emplace_back(name, *value.value());
         }
     }
-    auto snapshot = read_snapshot(device);
+    AravisDeviceFeatures features(device);
+    auto snapshot = profile::read_snapshot(features);
     if (!snapshot) {
         result.problems.push_back(snapshot.error().message);
         return result; // the native reference and reservation are released here

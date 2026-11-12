@@ -15,11 +15,19 @@ and its implementation. The Aravis adapter consumes that target. Profile-only
 conversion, constraint, ordering, preflight and frame-validation tests run in
 the default `camera_profile_contract` test without Aravis, cameras or networking.
 
-This extraction does not implement a generic feature-access service, a second
-SDK backend, profile selection or dynamically loaded profile plugins. Aravis
-still reads the device's GenICam nodes, builds native snapshots, executes write
-plans and normalizes native buffer facts. Those are the next boundaries to
-separate and prove with a Pleora implementation.
+GIGE-MEL-025 adds the internal typed feature service in
+[`src/device_features.hpp`](../src/device_features.hpp). The shared profile now
+selects feature aliases, builds snapshots, executes configuration write plans
+and obtains truthful final readback through that service. The orchestration is
+in [`mono_free_running_device.hpp`](../src/profiles/mono_free_running_device.hpp)
+and its implementation. A recording service exercises these operations in the
+default `device_feature_contract` test without an SDK.
+
+Aravis implements the actual node operations, type/access validation and native
+error translation. It retains discovery, device ownership, acquisition-command
+uncertainty, streams, buffers and normalization of received-frame facts. A
+second SDK backend, independent profile selection and dynamically loaded
+profile plugins remain subsequent work.
 
 ## Preserved behavior
 
@@ -42,12 +50,57 @@ Existing real-Aravis integration tests remain enabled in the optional build.
 Relocating a pure test into the default suite does not replace native SDK
 control, acquisition, lease, cancellation or teardown tests.
 
+## Typed feature-service contract
+
+`IDeviceFeatures` returns project-owned integers, floats, strings, Booleans and
+numeric feature snapshots. Numeric snapshots include current values, bounds,
+increments and optional float units. Numeric snapshot reads declare whether the
+caller needs readable or read/write access. Typed value and numeric-snapshot
+reads validate current implementation, availability, access and type before
+reading a node. The two setters handle integer and float features and enforce
+current native access and bounds at each write.
+
+`implemented(name)` deliberately answers only existence and implementation. A
+successful false result means confirmed absence or a successfully queried
+unimplemented node. Unavailable or incorrectly typed implemented nodes remain
+errors when read; an implementation-query error is never absence. Alias
+selection uses the first implemented name, even when that selected feature
+subsequently fails its type, access or value checks. It does not fall through
+to a more convenient alias. Enumeration-entry availability is a separate query
+from reading its current string value.
+
+All returned values own their data. SDK-specific sentinel normalization stays
+inside the adapter; for example, the pinned Aravis undefined-increment sentinel
+becomes an empty optional, while explicit invalid increments remain facts for
+the profile to reject. The interface exposes the operations the current
+configuration profile uses. Enumeration/string/Boolean setters, generic node
+trees, register blocks and command execution can be added with a concrete
+shared use case; they are not part of this initial service.
+
+The caller holds its device operation lock and native lifetime across the
+entire snapshot or configuration transaction. Feature calls do not establish a
+transaction by individually locking. Shared orchestration accepts explicit
+synchronous `ConnectionCheck` and `BeforeWrite` guards, borrows them only for
+the call and never retains them. These are internal adapter guards, not MEL
+consumer callbacks, and must not reenter the provider. Aravis uses them to keep
+its control-loss checks before/after readback and around its native write hook.
+A before-write guard failure returns directly; only a failure returned by a
+typed setter enters the successful-prefix and actual-state diagnostic path.
+
+Each apply obtains a fresh snapshot before planning all writes. Numeric setters
+must honor bounds and access after preceding writes; the initial snapshot is
+not permanent authorization. Successful writes require final actual readback.
+A failed write may already have affected the device: the original error stays
+primary, successful earlier writes and fresh readback are reported, and there
+is no automatic retry or rollback. The current profile does not change
+selectors, trigger mode, automatic exposure or pixel format.
+
 ## Responsibilities for the next steps
 
 | Component | Responsibility |
 | --- | --- |
 | Camera profile | Model/firmware matching, feature aliases, units, dependencies, ordered camera operations, readback interpretation and documented device protocols |
-| Shared device services | Typed feature access, current availability/access state, bounds/increments, enumeration entries, commands, explicit readback and structured errors |
+| Shared device services | Typed reads, current access validation, bounds/increments/units, selected enumeration-entry availability, integer/float writes and structured errors |
 | SDK backend | Discovery/open, actual SDK operations, native streams and buffers, waits/cancellation, transport configuration and normalized received-frame facts |
 | Common MEL provider | MEL semantics, runtime serialization, callbacks, capabilities, destination-buffer ownership and publication |
 | Deployment data | Selected physical camera/backend, lens and installation information, per-device calibration and qualified clock information |
@@ -69,7 +122,7 @@ or acceptance semantics.
 | Step | Work | Acceptance evidence |
 | --- | --- | --- |
 | 1: shared profile (GIGE-MEL-024) | Extract existing SDK-free policy and run its pure tests by default | Existing behavior preserved; default and optional-adapter suites pass; installed package remains independent |
-| 2: typed device services | Move feature/snapshot/write orchestration behind a small common interface, retaining Aravis implementation | Recording-service tests prove required operations, ordering, fresh readback and error distinctions; actual Aravis tests remain passing |
+| 2: typed device services (GIGE-MEL-025) | Shared snapshot/configuration orchestration over an internal typed feature interface, with an Aravis implementation | Recording-service tests prove required operations, ordering, fresh readback and error distinctions; actual Aravis tests remain passing |
 | 3: narrow Pleora backend | Implement that interface and native acquisition for the same initial camera/profile | The same unchanged profile and applicable MEL tests work with both actual SDKs |
 | 4: selection and device identity | Select backend and profile independently; match verified physical device identity | Reconnect through either backend without profile or MEL-client edits; incompatible requirements are diagnosed |
 | 5: sensor capabilities | Add navigation wire protocol, additional payloads or other requested operations individually | Shared semantic tests plus device/SDK evidence for each advertised capability |

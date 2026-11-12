@@ -193,10 +193,25 @@ directly instead of using the `ArvCamera` convenience setters described above.
 It consumes the SDK-free `gige_mel_camera_profiles` target from
 `src/profiles/mono_free_running.hpp/.cpp` (GIGE-MEL-024). Profile conversion,
 constraints, ordering and frame-validation tests run in the default
-`camera_profile_contract` suite. Aravis still owns actual feature access and
-native snapshot/write orchestration. Its unchanged host pool defaults are in
-`acquisition_policy.hpp`, passed explicitly to the shared pool planner. See
-[the profile portability sequence](camera-profile-portability.md). Its
+`camera_profile_contract` suite. GIGE-MEL-025 adds `IDeviceFeatures` in
+`src/device_features.hpp` and shared snapshot/configuration orchestration in
+`src/profiles/mono_free_running_device.hpp/.cpp`. The default
+`device_feature_contract` uses a recording service to verify aliases, optional
+query errors, ordering, fresh constraints and truthful readback.
+
+The Aravis implementation retains actual node access, native type/range checks,
+error translation and SDK-specific sentinel handling. A backend implementing
+the feature service must keep its operation lock and native device alive for
+the complete shared call, validate current access and bounds at each setter, and
+provide the explicit synchronous connection and before-write guards. Returned
+values own their data; failed queries never become optional absence. A failed
+setter may have affected the device, so shared orchestration preserves its
+error and reads actual state without automatic rollback or retry. Native
+acquisition-command attempt/uncertainty tracking remains in the adapter.
+
+Its unchanged host pool defaults are in `acquisition_policy.hpp`, passed
+explicitly to the shared pool planner. See
+[the feature contract and portability sequence](camera-profile-portability.md). Its
 direct tests (`aravis_adapter`) cover the unknown-device, exclusive-open,
 validation, readback and close items from the checklist below, using Aravis's
 in-process Fake device. GIGE-MEL-009 adds `IFrameStream`: SDK-buffer-backed

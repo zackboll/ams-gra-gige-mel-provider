@@ -155,9 +155,11 @@ resources behind a retained backend frame. Camera-model feature names and units
 belong in an adapter's camera profile, not in MEL channel classes.
 
 GIGE-MEL-024 moves the existing SDK-free monochrome profile into a shared
-internal module and runs its pure contract tests in the default build. Aravis
-consumes the same policy; typed feature services and a Pleora backend are the
-next steps in [camera-profile portability](docs/camera-profile-portability.md).
+internal module. GIGE-MEL-025 adds typed device features and shared snapshot,
+configuration-write and readback orchestration, with Aravis supplying the native
+operations. Pure profile and recording-service contract tests run by default.
+A Pleora backend is the next step in
+[camera-profile portability](docs/camera-profile-portability.md).
 
 The default path copies or repacks a backend frame into registered MEL host
 memory. This makes different SDK ownership models usable through one provider.
@@ -173,12 +175,14 @@ optimization; retaining an SDK buffer is not equivalent to supporting that path.
 | `src/factories.cpp` | Exact MEL export symbols and backend selection |
 | `src/provider.cpp` | MEL objects, shared runtime, channels, registered buffers, and image publication |
 | `src/backends/synthetic.cpp` | Working reference backend with bounded ownership |
+| `src/device_features.hpp` | Internal SDK-free typed feature operations and owned numeric snapshots |
 | `src/profiles/` | Internal SDK-free camera-profile policy and checked frame/pool planning; shared by adapter code and default tests |
 | `src/backends/aravis/` | Optional internal Aravis 0.8.36 adapter (`GIGE_MEL_BUILD_ARAVIS`): camera control, bounded Mono8 source acquisition with unqualified timestamps, and read-only raw SDK timestamp observation; never installed |
 | `tools/aravis_diagnostic.cpp` | Optional, uninstalled Aravis GigE list/inspect/apply/capture/time-probe diagnostic |
 | `examples/capture.cpp` | Standalone MEL consumer that dynamically loads the provider |
 | `tests/backend_tests.cpp` | Synthetic-specific backend lifetime, cancellation, validation, and pool contracts |
 | `tests/camera_profile_tests.cpp` | SDK-free conversion, constraint, write-ordering, preflight and frame-layout contracts |
+| `tests/device_feature_tests.cpp` | Recording-service contracts for aliases, optional-query failures, fresh snapshots, ordered writes and actual readback |
 | `tests/provider_backend_contract_tests.cpp` | Shared MEL-provider portability scenarios run against the synthetic backend and an independent test-only backend |
 | `tests/support/` | Test-only contract-fixture camera backend, Aravis Fake-interface selection, the Aravis loopback GigE simulator fixture (`ArvGvFakeCamera`, GVCP/GVSP on 127.0.0.1, plus its wildcard 255.255.255.255:3956 discovery listener, audited as a documented test-only exception) and the test-only Aravis virtual integration-start clock; never installed or selectable by the exported factories |
 | `tests/aravis_*.cpp` | Optional real-SDK adapter, acquisition-, timestamp- and loopback GigE transport-contract tests, and the private MEL configuration/negative timestamp-admission embedding probe |
