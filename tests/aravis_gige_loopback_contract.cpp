@@ -21,6 +21,7 @@
 #include <gige_mel/provider.hpp>
 #include "aravis_private.hpp" // observation-only hooks on the same GigE interface source
 #include "aravis_gv_loopback.hpp"
+#include "acquisition_policy.hpp"
 #include "aravis_virtual_clock.hpp"
 
 #include <arv.h>
@@ -808,7 +809,7 @@ void control_loss_active() {
     auto second_wrapper = std::move(device->create_stream()).value();
     CHECK(stream->start(120));
     std::vector<backend::FrameLease> held;
-    for (std::size_t i = 0; i < gige_mel::backend::aravis_profile::pool_buffers; ++i)
+    for (std::size_t i = 0; i < gige_mel::backend::aravis::pool_buffers; ++i)
         held.push_back(receive_ok(*stream));
     for (const auto& f : held) check_frame(f, oracle, 120);
     const auto saved = copy_bytes(held.front());
@@ -959,7 +960,7 @@ void control_loss_admission() {
     std::atomic<bool> decoded{false}, resume{false};
     auto camera = aravis::make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, [&] {
         aravis::TestHooks h;
-        h.decoded_facts = [&](gige_mel::backend::aravis_profile::NativeFrameFacts&) {
+        h.decoded_facts = [&](gige_mel::backend::profiles::mono_free_running::NativeFrameFacts&) {
             decoded = true;
             const auto end = Clock::now() + 10s;
             while (!resume && Clock::now() < end) std::this_thread::yield();

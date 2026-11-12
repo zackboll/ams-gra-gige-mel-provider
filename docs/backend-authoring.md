@@ -190,7 +190,13 @@ Do not force every backend through GenTL. An SDK with a well-supported native AP
 The optional `src/backends/aravis/` adapter (GIGE-MEL-008, Aravis 0.8.36) is the
 first code that follows this guide against a real SDK. It writes GenICam nodes
 directly instead of using the `ArvCamera` convenience setters described above.
-It keeps the profile translation in an SDK-free `camera_profile.cpp`. Its
+It consumes the SDK-free `gige_mel_camera_profiles` target from
+`src/profiles/mono_free_running.hpp/.cpp` (GIGE-MEL-024). Profile conversion,
+constraints, ordering and frame-validation tests run in the default
+`camera_profile_contract` suite. Aravis still owns actual feature access and
+native snapshot/write orchestration. Its unchanged host pool defaults are in
+`acquisition_policy.hpp`, passed explicitly to the shared pool planner. See
+[the profile portability sequence](camera-profile-portability.md). Its
 direct tests (`aravis_adapter`) cover the unknown-device, exclusive-open,
 validation, readback and close items from the checklist below, using Aravis's
 in-process Fake device. GIGE-MEL-009 adds `IFrameStream`: SDK-buffer-backed

@@ -28,10 +28,9 @@ message(STATUS "Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION} (internal camera-con
 add_library(gige_mel_aravis STATIC
   src/backends/aravis/aravis_backend.cpp
   src/backends/aravis/aravis_capture.cpp
-  src/backends/aravis/aravis_time_probe.cpp
-  src/backends/aravis/camera_profile.cpp)
+  src/backends/aravis/aravis_time_probe.cpp)
 target_include_directories(gige_mel_aravis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/aravis)
-target_link_libraries(gige_mel_aravis PUBLIC gige_mel_backend PkgConfig::GIGE_MEL_ARAVIS
+target_link_libraries(gige_mel_aravis PUBLIC gige_mel_backend gige_mel_camera_profiles PkgConfig::GIGE_MEL_ARAVIS
   PRIVATE gige_mel_build_options)
 
 # Uninstalled diagnostic tool. GigE interface only; no Fake fallback.

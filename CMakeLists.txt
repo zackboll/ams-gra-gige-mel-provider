@@ -59,6 +59,16 @@ target_include_directories(gige_mel_backend PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(gige_mel_backend PUBLIC Threads::Threads PRIVATE $<BUILD_INTERFACE:gige_mel_build_options>)
 
+# Internal camera-profile policy, compiled and tested without any camera SDK.
+# No MEL declarations, SDK handles, installed headers or plugin ABI are added.
+add_library(gige_mel_camera_profiles STATIC src/profiles/mono_free_running.cpp)
+set_target_properties(gige_mel_camera_profiles PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_features(gige_mel_camera_profiles PUBLIC cxx_std_20)
+target_include_directories(gige_mel_camera_profiles PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(gige_mel_camera_profiles PRIVATE gige_mel_build_options)
+
 add_library(gige_mel_provider SHARED src/provider.cpp src/factories.cpp src/config_parser.cpp)
 target_include_directories(gige_mel_provider SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
 add_library(gige_mel::provider ALIAS gige_mel_provider)
@@ -88,6 +98,10 @@ if(BUILD_TESTING)
   add_executable(backend_tests tests/backend_tests.cpp)
   target_link_libraries(backend_tests PRIVATE gige_mel_backend gige_mel_build_options)
   add_test(NAME backend_contract COMMAND backend_tests)
+
+  add_executable(camera_profile_tests tests/camera_profile_tests.cpp)
+  target_link_libraries(camera_profile_tests PRIVATE gige_mel_camera_profiles gige_mel_build_options)
+  add_test(NAME camera_profile_contract COMMAND camera_profile_tests)
 
   add_executable(provider_tests tests/provider_tests.cpp tests/join_observer.cpp tests/clock_observer.cpp)
   target_link_libraries(provider_tests PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
@@ -121,7 +135,7 @@ if(BUILD_TESTING)
   add_test(NAME aravis_evidence_offline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
-  set_tests_properties(backend_contract provider_contract provider_backend_portability configuration_public_api
+  set_tests_properties(backend_contract camera_profile_contract provider_contract provider_backend_portability configuration_public_api
     native_loader PROPERTIES TIMEOUT 30)
 endif()
 

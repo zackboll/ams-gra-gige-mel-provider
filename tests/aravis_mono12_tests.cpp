@@ -23,7 +23,7 @@
 
 namespace be = gige_mel::backend;
 namespace av = be::aravis;
-namespace p = be::aravis_profile;
+namespace p = be::profiles::mono_free_running;
 namespace vc = aravis_virtual_clock;
 namespace ir = ams::iface::irmel;
 using namespace std::chrono_literals;
@@ -161,43 +161,6 @@ void native_contract() {
     CHECK(!capture.cleanup_error);
 }
 
-void validation_controls() {
-    const be::CameraConfiguration c{};
-    p::NativeFrameFacts f;
-    f.status = p::NativeStatus::success; f.payload = p::NativePayload::image;
-    f.parts = 1; f.part_is_2d_image = true; f.pixel_format = p::pfnc_mono12;
-    f.width = 64; f.height = 48; f.padding_x = 7;
-    f.image_bytes = f.received_bytes = f.capacity_bytes = 135 * 47 + 128;
-    f.data_present = true; f.storage_bits = 16; f.significant_bits = 12;
-    f.byte_order = be::ByteOrder::little_endian;
-    const auto check = [&](const auto& facts) { return p::validate_frame(facts, c, be::PixelFormat::mono12); };
-    CHECK(check(f).verdict == p::FrameVerdict::accept && check(f).span_bytes == 6473);
-    using Edit = std::function<void(p::NativeFrameFacts&)>;
-    const std::vector<Edit> edits{
-        [](auto& n) { n.pixel_format = 0x010c0006; }, // Mono12Packed
-        [](auto& n) { n.pixel_format = 0x010c0004; }, // Mono10Packed
-        [](auto& n) { n.pixel_format = p::pfnc_mono8; },
-        [](auto& n) { n.storage_bits = 12; }, [](auto& n) { n.significant_bits = 16; },
-        [](auto& n) { n.byte_order = be::ByteOrder::big_endian; },
-        [](auto& n) { ++n.width; }, [](auto& n) { n.height = 0; },
-        [](auto& n) { n.padding_x = -1; }, [](auto& n) { n.padding_x = INT64_MAX; },
-        [](auto& n) { --n.image_bytes; }, [](auto& n) { --n.received_bytes; },
-        [](auto& n) { --n.capacity_bytes; }, [](auto& n) { ++n.received_bytes; },
-        [](auto& n) { n.parts = 2; }, [](auto& n) { n.has_chunks = true; },
-        [](auto& n) { n.payload = p::NativePayload::multipart; },
-        [](auto& n) { n.payload = p::NativePayload::chunk_or_extended; },
-        [](auto& n) { n.status = p::NativeStatus::incomplete; },
-    };
-    for (const auto& edit : edits) { auto bad = f; edit(bad); CHECK(check(bad).verdict != p::FrameVerdict::accept); }
-    auto full_padding = f;
-    full_padding.image_bytes = full_padding.received_bytes = full_padding.capacity_bytes = 135 * 48;
-    CHECK(check(full_padding).verdict == p::FrameVerdict::accept);
-    CHECK(!p::plan_pool(6143, c, 4, p::maximum_frame_bytes, p::maximum_pool_bytes, be::PixelFormat::mono12));
-    CHECK(p::plan_pool(6144, c, 4, p::maximum_frame_bytes, p::maximum_pool_bytes, be::PixelFormat::mono12));
-    auto impossible = c; impossible.width = impossible.height = UINT32_MAX;
-    CHECK(!p::plan_pool(INT64_MAX, impossible, 4, SIZE_MAX, SIZE_MAX, be::PixelFormat::mono12));
-}
-
 void retained_source_teardown() {
     Arrangement state;
     auto camera = aravis_fake::make_backend(hooks(state));
@@ -281,7 +244,7 @@ void mel_delivery(bool virtual_time) {
 
 int main() {
     try {
-        validation_controls(); native_contract(); retained_source_teardown(); mel_delivery(true); mel_delivery(false);
+        native_contract(); retained_source_teardown(); mel_delivery(true); mel_delivery(false);
         std::cout << "PASS simulated Mono12: exact pixels, native pool/restart, format-change rejection, MEL delivery, production timestamp rejection, negative controls\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

@@ -7,7 +7,8 @@
 // pinned Fake cannot emit those payloads. No project-generated frame replaces
 // positive streaming. GLib warnings/criticals are fatal (see main()).
 #include "aravis_fake_support.hpp"
-#include "camera_profile.hpp"
+#include "profiles/mono_free_running.hpp"
+#include "acquisition_policy.hpp"
 
 #include <arv.h>
 
@@ -30,7 +31,7 @@
 
 namespace backend = gige_mel::backend;
 namespace aravis = gige_mel::backend::aravis;
-namespace profile = gige_mel::backend::aravis_profile;
+namespace profile = gige_mel::backend::profiles::mono_free_running;
 using namespace std::chrono_literals;
 using Clock = std::chrono::steady_clock;
 
@@ -202,7 +203,7 @@ void start_and_commands() {
 
     CHECK(stream->start(7));
     CHECK(seen.streams_created == 1 && seen.live_streams() == 1);
-    CHECK(seen.buffers_allocated == static_cast<int>(profile::pool_buffers));
+    CHECK(seen.buffers_allocated == static_cast<int>(aravis::pool_buffers));
     CHECK((seen.command_log() == std::vector<std::string>{"AcquisitionStart"}));
     CHECK(acquisition_register(*device) == 1); // the SDK command reached the camera
 
@@ -329,20 +330,20 @@ void pool_and_release() {
     CHECK(stream->start(3));
     std::vector<backend::FrameLease> held;
     std::vector<std::vector<std::byte>> copies;
-    for (std::size_t i = 0; i < profile::pool_buffers; ++i) {
+    for (std::size_t i = 0; i < aravis::pool_buffers; ++i) {
         held.push_back(receive_ok(*stream));
         copies.push_back(copy_bytes(held.back()));
         CHECK(pixels_match(held.back()));
     }
     // Every pool buffer is leased: a bounded timeout, no extra allocation.
     const auto stats_before = stream->statistics();
-    CHECK(stats_before.delivered_frames == profile::pool_buffers && stats_before.pool_starvation_events == 0);
+    CHECK(stats_before.delivered_frames == aravis::pool_buffers && stats_before.pool_starvation_events == 0);
     const auto t0 = Clock::now();
     const auto starved = stream->receive(120ms);
     const auto waited = Clock::now() - t0;
     CHECK(!starved && starved.error().code == backend::ErrorCode::timeout);
     CHECK(waited >= 120ms && waited < 2s);
-    CHECK(seen.buffers_allocated == static_cast<int>(profile::pool_buffers) && seen.live_buffers() == 4);
+    CHECK(seen.buffers_allocated == static_cast<int>(aravis::pool_buffers) && seen.live_buffers() == 4);
     auto stats = stream->statistics();
     CHECK(stats.timeout_count == 1);              // one public expiry, not one per slice
     CHECK(stats.pool_starvation_events == 1);     // one episode, despite many polls
@@ -356,7 +357,7 @@ void pool_and_release() {
     held.erase(held.begin());
     auto resumed = receive_ok(*stream);
     CHECK(pixels_match(resumed));
-    CHECK(seen.buffers_allocated == static_cast<int>(profile::pool_buffers));
+    CHECK(seen.buffers_allocated == static_cast<int>(aravis::pool_buffers));
     held.push_back(std::move(resumed));
     // A new exhaustion after a release is a new episode.
     CHECK(stream->receive(60ms).error().code == backend::ErrorCode::timeout);
@@ -418,7 +419,7 @@ void cancel_blocked(Canceller how) {
     try {
         ReceiverCleanup cleanup{*stream, receiver}; // before any acquisition activity
         CHECK(stream->start(5));
-        for (std::size_t i = 0; i < profile::pool_buffers; ++i) held.push_back(receive_ok(*stream));
+        for (std::size_t i = 0; i < aravis::pool_buffers; ++i) held.push_back(receive_ok(*stream));
         const int waits_before = seen.native_waits.load();
         receiver = std::thread([&] {
             auto result = stream->receive(60s); // long public timeout
@@ -508,7 +509,7 @@ void lifetime_and_reopen() {
     CHECK(seen.buffers.count.load() == buffers_before_release + 1);
     // The new run is unaffected: its pool still has exactly four buffers and
     // keeps delivering oracle frames of ITS generation only.
-    CHECK(seen.live_buffers() == static_cast<int>(profile::pool_buffers));
+    CHECK(seen.live_buffers() == static_cast<int>(aravis::pool_buffers));
     for (int i = 0; i < 4; ++i) {
         auto next = receive_ok(*stream);
         CHECK(pixels_match(next) && next.descriptor().stream_generation == fresh.descriptor().stream_generation);
@@ -703,19 +704,6 @@ void invalid_native_facts() {
     CHECK(stream->start(1));
     stream->stop();
     CHECK(device->close());
-
-    const backend::CameraConfiguration c{64, 48, 0, 0, 25, 10ms};
-    CHECK(profile::plan_pool(3072, c).value().total_bytes == 4 * 3072);
-    CHECK(profile::plan_pool(0, c).error().code == backend::ErrorCode::unsupported);
-    CHECK(profile::plan_pool(-1, c).error().code == backend::ErrorCode::unsupported);
-    CHECK(contains(profile::plan_pool(3071, c).error().message, "smaller than the 64x48 Mono8 image"));
-    CHECK(profile::plan_pool(std::int64_t{65} << 20, c).error().code == backend::ErrorCode::resource_exhausted);
-    CHECK(profile::plan_pool(std::numeric_limits<std::int64_t>::max(), c).error().code ==
-          backend::ErrorCode::resource_exhausted);
-    CHECK(profile::plan_pool(std::int64_t{64} << 20, c, 5).error().code == backend::ErrorCode::resource_exhausted);
-    CHECK(profile::plan_pool(std::int64_t{64} << 20, c, 4).value().total_bytes == std::size_t{256} << 20);
-    const auto huge = std::numeric_limits<std::size_t>::max();
-    CHECK(profile::plan_pool(4096, c, huge, huge, huge).error().code == backend::ErrorCode::resource_exhausted);
 }
 
 // DECODED-FACTS SEAM. While a case is armed, EVERY real popped buffer's facts
@@ -768,7 +756,7 @@ void seam_cases() {
     armed = nullptr;
     const auto stats = stream->statistics();
     CHECK(stats.delivered_frames == 0 && stats.incomplete_frames >= 1); // only the incomplete case counts
-    CHECK(seen.buffers_allocated == static_cast<int>(profile::pool_buffers)); // recycled, never reallocated
+    CHECK(seen.buffers_allocated == static_cast<int>(aravis::pool_buffers)); // recycled, never reallocated
     auto good = receive_ok(*stream);
     CHECK(pixels_match(good));
     stream->stop();
@@ -803,7 +791,7 @@ void exception_unwind() {
     try {
         ReceiverCleanup cleanup{*stream, receiver}; // shared with scenario D
         CHECK(stream->start(51));
-        for (std::size_t i = 0; i < profile::pool_buffers; ++i) held.push_back(receive_ok(*stream));
+        for (std::size_t i = 0; i < aravis::pool_buffers; ++i) held.push_back(receive_ok(*stream));
         { std::lock_guard lock(gate.m); gate.blocked = false; }
         receiver = std::thread([&] {
             auto result = stream->receive(60s);
@@ -1301,7 +1289,7 @@ int main(int argc, char** argv) {
         {"E lease lifetime, retirement order and reopen", lifetime_and_reopen},
         {"F restart policy", restart_policy},
         {"G native command failure cleanup and recovery", failure_cleanup},
-        {"H invalid native facts (SDK arrangements and limits)", invalid_native_facts},
+        {"H invalid native facts (SDK arrangements)", invalid_native_facts},
         {"H decoded-facts seam through the production validator", seam_cases},
         {"I exception unwind while receive is blocked", exception_unwind},
         {"J direct capture helper and independent PGM check", direct_capture},

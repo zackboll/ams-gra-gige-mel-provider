@@ -1049,8 +1049,8 @@ void operational_failure_cleanup() {
             seen.opens.fetch_add(1);
             stop_access = impose_access(d, "AcquisitionStop", "RW");
         };
-        hooks.decoded_facts = [](gige_mel::backend::aravis_profile::NativeFrameFacts& f) {
-            f.status = gige_mel::backend::aravis_profile::NativeStatus::incomplete;
+        hooks.decoded_facts = [](gige_mel::backend::profiles::mono_free_running::NativeFrameFacts& f) {
+            f.status = gige_mel::backend::profiles::mono_free_running::NativeStatus::incomplete;
         };
         if (stop_fails)
             seen.on_command = [&](std::string_view c, ArvDevice*) {
