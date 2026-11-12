@@ -50,6 +50,7 @@ files, camera images or private host evidence. Do not replace an existing eBUS
    cmake -S . -B build/pleora -G Ninja \
      -DCMAKE_BUILD_TYPE=Debug \
      -DGIGE_MEL_BUILD_PLEORA=ON \
+     -DGIGE_MEL_PLEORA_HARDWARE_TESTS=OFF \
      -DGIGE_MEL_PLEORA_ROOT="$HOME/sdk/pleora-6.5.3.7155-gige-mel"
    cmake --build build/pleora --parallel 2
    ctest --test-dir build/pleora --output-on-failure
@@ -57,7 +58,9 @@ files, camera images or private host evidence. Do not replace an existing eBUS
      build/pleora/gige_mel_pleora_diagnostic --version
    ```
 
-   Investigate missing system runtime dependencies rather than copying
+   The explicit hardware-test OFF setting prevents a previous CMake cache from
+   selecting an old physical camera before fresh discovery. Investigate missing
+   system runtime dependencies rather than copying
    incompatible libraries into the provider. Record any required host package
    change separately from SDK provisioning.
 

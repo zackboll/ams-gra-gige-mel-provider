@@ -1,7 +1,8 @@
 // EXPLICIT OPT-IN HARDWARE TEST. Runs only for a caller-selected exact MAC.
 // It starts/stops acquisition at the camera's CURRENT admitted configuration;
-// it never normalizes format/trigger/auto/timing/ROI or changes a valid camera
-// setting. Environment/device/receive failures FAIL this test; none are skips.
+// it never normalizes format/trigger/auto/timing/ROI. Native acquisition does
+// negotiate packet size, set the stream destination and issue start/stop.
+// Environment/device/receive failures FAIL this test; none are skips.
 //
 // Production timestamps remain unqualified. Positive MEL publication uses
 // the existing SDK-free test-only clock decorator (historical Aravis name),

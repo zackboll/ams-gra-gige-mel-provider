@@ -91,6 +91,7 @@ separate header package.
 cmake -S . -B build/pleora -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DGIGE_MEL_BUILD_PLEORA=ON \
+  -DGIGE_MEL_PLEORA_HARDWARE_TESTS=OFF \
   -DGIGE_MEL_PLEORA_ROOT="$HOME/sdk/pleora-6.5.3.7155-gige-mel"
 cmake --build build/pleora --parallel 2
 ctest --test-dir build/pleora --output-on-failure

@@ -55,9 +55,13 @@ public:
     std::unique_ptr<backend::IFrameStream> stream;
     ~Session() { cleanup(); }
     int finish() {
-        if (stream) { stream->request_stop(); stream->stop(); stream.reset(); }
-        if (!device) return 0;
-        const auto closed = device->close();
+        if (stream) stream->request_stop();
+        // Device close owns native stop/drain/disconnect. Destroying the
+        // stream afterwards observes a closed device, rather than retrying an
+        // uncertain command once from stop(), again from its destructor and
+        // a third time from close(). Preserve the single cleanup result.
+        const auto closed = device ? device->close() : backend::Status{};
+        stream.reset();
         device.reset();
         return closed ? 0 : error(closed.error());
     }
