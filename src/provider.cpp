@@ -207,7 +207,15 @@ struct CallbackGuard {
     CallbackGuard& operator=(const CallbackGuard&) = delete;
 };
 
-bool in_provider_callback() noexcept { return callback_context != nullptr; }
+// Sink execution holds operations, so reject same-thread mutations just as for
+// consumer callbacks. A separate flag also blocks callback-producing requests.
+thread_local bool in_navigation_submission = false;
+struct NavigationSubmissionGuard {
+    NavigationSubmissionGuard() noexcept { in_navigation_submission = true; }
+    ~NavigationSubmissionGuard() { in_navigation_submission = false; }
+};
+
+bool in_provider_callback() noexcept { return callback_context != nullptr || in_navigation_submission; }
 
 bool in_runtime_callback(const Runtime* runtime) noexcept {
     for (auto frame = callback_context; frame; frame = frame->previous) {
@@ -536,6 +544,8 @@ public:
         return ready(ir::Return::Success);
     }
     mel::RequestFor<ir::ChannelCommsTestRep> send(ir::ChannelCommsTestReq request) override {
+        if (in_navigation_submission)
+            return failed<ir::ChannelCommsTestRep>(mel::ErrorCode::InvalidState, "communications unavailable during backend navigation submission");
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin || is_detached()) return failed<ir::ChannelCommsTestRep>(mel::ErrorCode::InvalidState, "channel is detached");
         const auto self = shared_from_this();
@@ -1042,6 +1052,43 @@ std::optional<std::string> navigation_error(const mel::NavigationReport& report)
     return std::nullopt;
 }
 
+// Called only after structural validation, including the solution state.
+backend::NavigationReport backend_navigation(const mel::NavigationReport& report) noexcept {
+    backend::NavigationReport value;
+    switch (report.getState()) {
+    case mel::PositionSolutionState::Aligning: value.state = backend::NavigationSolutionState::aligning; break;
+    case mel::PositionSolutionState::FreeInertial: value.state = backend::NavigationSolutionState::free_inertial; break;
+    case mel::PositionSolutionState::GPS: value.state = backend::NavigationSolutionState::gps; break;
+    case mel::PositionSolutionState::Blended: value.state = backend::NavigationSolutionState::blended; break;
+    default: break; // Rejected before conversion.
+    }
+    value.system_time = report.getSystemTime();
+    value.latitude = report.getLatitude();
+    value.longitude = report.getLongitude();
+    value.altitude = report.getAltitude();
+    const auto& attitude = report.getAttitude();
+    value.attitude = {attitude.getRoll(), attitude.getPitch(), attitude.getYaw()};
+    const auto rate = report.getAttitudeRate();
+    const auto& angles = rate.getAttitudeRate();
+    value.attitude_rate = {{angles.getRoll(), angles.getPitch(), angles.getYaw()}, rate.getAttitudeRateTime()};
+    const auto& speed = report.getSpeed();
+    value.speed = {speed.getNorth(), speed.getEast(), speed.getDown()};
+    const auto& acceleration = report.getAcceleration();
+    value.acceleration = {acceleration.getNorth(), acceleration.getEast(), acceleration.getDown()};
+    value.wander_angle = report.getWanderAngle();
+    value.magnetic_heading = report.getMagneticHeading();
+    value.altitude_msl = report.getAltitudeMSL();
+    const auto covariance = report.getPositionVelocityCovarianceUncertainty();
+    value.position_velocity_covariance_uncertainty = {
+        covariance.getPositionPositionPnPn(), covariance.getPositionPositionPnPe(), covariance.getPositionPositionPnPd(),
+        covariance.getPositionPositionPePe(), covariance.getPositionPositionPePd(), covariance.getPositionPositionPdPd(),
+        covariance.getPositionVelocityPnVn(), covariance.getPositionVelocityPnVe(), covariance.getPositionVelocityPnVd(),
+        covariance.getPositionVelocityPeVe(), covariance.getPositionVelocityPeVd(), covariance.getPositionVelocityPdVd(),
+        covariance.getVelocityVelocityVnVn(), covariance.getVelocityVelocityVnVe(), covariance.getVelocityVelocityVnVd(),
+        covariance.getVelocityVelocityVeVe(), covariance.getVelocityVelocityVeVd(), covariance.getVelocityVelocityVdVd()};
+    return value;
+}
+
 class ImageChannelImpl final : public ChannelCore, public ir::ImageChannel {
 public:
     using ChannelCore::ChannelCore;
@@ -1070,11 +1117,27 @@ public:
             reply.setReqId(0);
             reply.setSystemTime(report.getSystemTime()); // Exact echo, not an acknowledgement clock.
             result = ready(reply);
+            if (auto* sink = dynamic_cast<backend::INavigationSink*>(runtime_->device.get())) {
+                try {
+                    NavigationSubmissionGuard submission;
+                    const auto submitted = sink->submit_navigation(backend_navigation(report));
+                    if (!submitted) {
+                        if (submitted.error().code == backend::ErrorCode::timeout)
+                            return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidState,
+                                "backend navigation acceptance is uncertain after timeout: " + submitted.error().message);
+                        return failed<ir::NavigationReportResp>(map_error(submitted.error().code), submitted.error().message);
+                    }
+                } catch (const std::bad_alloc&) {
+                    throw;
+                } catch (...) {
+                    return failed<ir::NavigationReportResp>(mel::ErrorCode::InsufficientRemoteResources, "backend navigation submission threw; acceptance is uncertain");
+                }
+            }
             static_assert(std::is_nothrow_copy_constructible_v<mel::NavigationReport>);
             admit_callback(callback);
             latest_navigation_.emplace(report);
         } catch (const std::bad_alloc&) {
-            return failed<ir::NavigationReportResp>(mel::ErrorCode::InsufficientLocalResources, "navigation acknowledgement allocation failed");
+            return failed<ir::NavigationReportResp>(mel::ErrorCode::InsufficientLocalResources, "navigation preparation or submission allocation failed; backend acceptance is not confirmed");
         }
         invoke(callback, reply, nullptr, true);
         return result;

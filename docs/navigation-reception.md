@@ -1,5 +1,10 @@
 # Partial required Image navigation reception (GIGE-MEL-015)
 
+The receipt-only behavior below remains the default. The optional
+[backend navigation forwarding extension](navigation-backend-forwarding.md)
+adds submission before acceptance only for devices implementing a navigation
+sink; its backend failure and threading rules supplement this contract.
+
 This is **PARTIAL required navigation support**, not full navigation integration
 or MEL conformance. The MEL consumer supplies `mel::NavigationReport`; the
 provider validates structure, retains one report and acknowledges receipt.
