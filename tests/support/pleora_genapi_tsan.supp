@@ -1,0 +1,3 @@
+# GIGE-MEL-030: independently reproduced external GenApi/log4cpp lock inversion.
+# Applied only to pleora_sdk_contract after an unsuppressed exact-report audit.
+deadlock:log4cpp_GenICam::Category::addAppender

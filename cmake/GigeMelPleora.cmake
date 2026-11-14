@@ -77,7 +77,17 @@ if(BUILD_TESTING)
   target_include_directories(pleora_contract_tests SYSTEM PRIVATE "${pleora_include}" "${GIGE_MEL_PLEORA_GENICAM_INCLUDE_DIR}")
   target_link_libraries(pleora_contract_tests PRIVATE gige_mel_pleora gige_mel_camera_profiles
     gige_mel_build_options ${pleora_libraries})
-  add_test(NAME pleora_sdk_contract COMMAND pleora_contract_tests)
+  # An exact vendor report is audited unsuppressed before one test-specific exception.
+  # All other tests retain their ordinary TSan settings.
+  if(GIGE_MEL_SANITIZERS MATCHES "(^|,)thread(,|$)")
+    add_test(NAME pleora_sdk_contract COMMAND ${Python3_EXECUTABLE}
+      "${PROJECT_SOURCE_DIR}/scripts/pleora_tsan_exception.py"
+      --runtime-dir "${pleora_root}/lib/genicam/bin/Linux64_x64"
+      --suppression-file "${PROJECT_SOURCE_DIR}/tests/support/pleora_genapi_tsan.supp"
+      --contract "$<TARGET_FILE:pleora_contract_tests>")
+  else()
+    add_test(NAME pleora_sdk_contract COMMAND pleora_contract_tests)
+  endif()
   add_test(NAME pleora_diagnostic_help COMMAND gige_mel_pleora_diagnostic --help)
   add_test(NAME pleora_sdk_version COMMAND gige_mel_pleora_diagnostic --version)
   add_executable(pleora_mel_contract tests/pleora_hardware_contract.cpp tests/support/aravis_virtual_clock.cpp)
@@ -108,4 +118,7 @@ if(BUILD_TESTING)
   endforeach()
   set_tests_properties(pleora_sdk_contract pleora_diagnostic_help pleora_sdk_version pleora_mel_contract PROPERTIES TIMEOUT 60
     ENVIRONMENT "LD_LIBRARY_PATH=${pleora_runtime};GENICAM_ROOT_V3_4=${pleora_root}/lib/genicam;GENICAM_CACHE_V3_4=${CMAKE_CURRENT_BINARY_DIR}/genicam-cache")
+  if(GIGE_MEL_SANITIZERS MATCHES "(^|,)thread(,|$)")
+    set_tests_properties(pleora_sdk_contract PROPERTIES TIMEOUT 150)
+  endif()
 endif()

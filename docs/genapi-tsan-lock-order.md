@@ -379,3 +379,11 @@ builds. Raw local investigation logs stay in the ignored directory
 camera images, binaries, downloads or raw private evidence are committed.
 The applicable combined TSan gate cannot pass while the original contract
 reports this inversion. No physical camera or entitlement test is implied.
+
+## GIGE-MEL-030 — subsequent scoped development exception
+
+The investigation above records the original unsuppressed diagnosis and its
+then-unresolved status. A subsequent test-only, pinned-runtime exception is
+described in [the GIGE-MEL-030 contract](pleora-tsan-exception.md). The native
+test must still reproduce the exact known cycle unsuppressed before the
+function-specific rule may be applied. All other findings remain failures.
