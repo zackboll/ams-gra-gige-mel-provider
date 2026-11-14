@@ -1,5 +1,25 @@
 # MEL surface inventory and implementation order
 
+## Explicit matched-C++ profile modules (GIGE-MEL-035)
+
+An opt-in Linux x86-64 loader now validates separately compiled camera-profile
+shared libraries through a versioned C-linkage discovery entry point, then uses
+the existing C++ profile interface under an explicitly matched compiler/stdlib/
+ABI/interface contract. This is not a stable cross-toolchain C ABI or a runtime
+backend plugin API. The installed common provider and exported MEL factories
+remain independent and unchanged. No new MEL capability or camera/clock
+qualification is claimed.
+
+Module profiles and independently surviving states each retain a host-owned
+shared RAII module pin. Plugin objects and shared_ptr deleters retire before the
+last pin attempts dlclose. Existing native stream/lease contracts are unchanged;
+retired native/copy frame storage remains valid without plugin code. There is no
+force unload, hot replacement, implicit search/discovery or fallback. See
+[profile authoring](camera-profile-authoring.md),
+[runtime loading](runtime-selection.md#explicit-module-loading), and the
+[pre-implementation boundary audit](tasks/GIGE-MEL-035-design.md).
+
+
 GIGE-MEL-034 introduces an internal, SDK-independent source-level camera-profile
 interface with owned per-device policy state and explicit injection into Aravis
 and Pleora. Selection now executes independently registered implementations,
@@ -13,8 +33,8 @@ and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
 An explicitly owned catalog now selects built `synthetic`, `aravis` and `pleora`
 backends with exact device identity and the default `mono_free_running_v1` binding.
 This is [internal composition](runtime-selection.md), not a new MEL surface,
-factory name, dynamically loaded profile or binary ABI. The common provider remains unchanged. Source-level profile dispatch is now
-implemented by GIGE-MEL-034. Plugin ABI,
+factory name or stable binary ABI. The common provider remains unchanged. Source-level profile dispatch is now
+implemented by GIGE-MEL-034; matched-toolchain loading by GIGE-MEL-035. Stable binary ABI,
 cross-SDK physical-camera ownership qualification and production clocks remain
 future work.
 
@@ -55,7 +75,7 @@ separate and passed explicitly. This is a behavior-preserving extraction with
 no new MEL capability or production backend. GIGE-MEL-025 adds typed device
 services; the optional Pleora implementation above still needs qualification.
 Internal backend/profile binding and source-level profile dispatch are implemented
-above; binary plugins remain subsequent work; see
+above; stable cross-toolchain binary plugins remain subsequent work; see
 [the sequence and acceptance criteria](camera-profile-portability.md).
 
 ## Backend-independent NavigationReport forwarding (GIGE-MEL-023)

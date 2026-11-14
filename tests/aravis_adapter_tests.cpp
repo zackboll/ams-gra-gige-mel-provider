@@ -7,6 +7,7 @@
 #include "selection/session_selection.hpp"
 #include "selected_profile_contract.hpp"
 #include "alternate_camera_profile.hpp"
+#include "selection/profile_loader.hpp"
 
 #include <arv.h>
 
@@ -412,40 +413,54 @@ void catalog_profile_selection() {
     auto reopened = open_fake(*other.value().backend);
     CHECK(reopened->close());
 
-    auto counts = std::make_shared<alternate_profile::Counts>();
-    auto alternate = [&] {
-        selection::BackendCatalog owned;
-        CHECK(owned.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
-        CHECK(owned.register_backend("aravis", std::vector<std::string>{std::string(alternate_profile::id)},
-            [hooks](selection::BackendCatalog::Profile p) {
-                return aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, std::move(p));
-            }));
-        auto wrong = owned.create("aravis", selection::mono_free_running_v1);
-        CHECK(!wrong && counts->created == 0); // incompatible, not a fallback
-        auto session = selection::select_session(owned,
-            {"aravis", std::string(aravis_fake::device_id), std::string(alternate_profile::id), {}});
-        CHECK(session && counts->created == 1 && counts->opened == 0);
-        return std::move(session).value().backend;
-    }(); // catalog destroyed before open
-    device.reset(); reopened.reset();
-    auto alternate_device = open_fake(*alternate);
-    CHECK(alternate_device->capabilities().maximum_frame_rate_hz == 20);
-    auto request = take(alternate_device->configuration());
-    request.frame_rate_hz = 25;
-    writes.clear();
-    auto refused = alternate_device->apply(request);
-    CHECK(!refused && contains(refused.error().message, "test profile") && writes.empty());
-    request.frame_rate_hz = 20;
-    CHECK(alternate_device->apply(request));
-    CHECK(alternate_device->close());
-    alternate_device.reset();
-    CHECK(counts->retired == 1 && counts->destroyed == 0);
-    auto again = open_fake(*alternate);
-    CHECK(counts->opened == 2);
-    CHECK(again->close());
-    again.reset(); alternate.reset();
-    CHECK(counts->destroyed == 1 && counts->states == counts->retired);
+    for (bool dynamic : {false, true}) {
+        auto counts = std::make_shared<alternate_profile::Counts>();
+        auto alternate = [&] {
+            selection::BackendCatalog owned;
+            if (dynamic) {
+                auto loaded = take(selection::load_profile_module(GIGE_MEL_TEST_PROFILE_MODULE));
+                CHECK(loaded.profile->id() == alternate_profile::id);
+                CHECK(selection::register_loaded_profile(owned, loaded));
+            } else {
+                CHECK(owned.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+            }
+            CHECK(owned.register_backend("aravis", std::vector<std::string>{std::string(alternate_profile::id)},
+                [hooks](selection::BackendCatalog::Profile p) {
+                    return aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, std::move(p));
+                }));
+            auto wrong = owned.create("aravis", selection::mono_free_running_v1);
+            CHECK(!wrong && counts->created == 0); // incompatible, not a fallback
+            auto session = selection::select_session(owned,
+                {"aravis", std::string(aravis_fake::device_id), std::string(alternate_profile::id), {}});
+            CHECK(session);
+            if (!dynamic) CHECK(counts->created == 1 && counts->opened == 0);
+            return std::move(session).value().backend;
+        }(); // catalog destroyed before open
+        device.reset(); reopened.reset();
+        auto alternate_device = open_fake(*alternate);
+        CHECK(alternate_device->capabilities().maximum_frame_rate_hz == 20);
+        auto request = take(alternate_device->configuration());
+        request.frame_rate_hz = 25;
+        writes.clear();
+        auto refused = alternate_device->apply(request);
+        CHECK(!refused && contains(refused.error().message, "test profile") && writes.empty());
+        request.frame_rate_hz = 20;
+        CHECK(alternate_device->apply(request));
+        CHECK(take(alternate_device->configuration()) == request);
+        std::string native_message;
+        native(*alternate_device, [&](ArvDevice* d) { native_message = break_implementation_query(d, "Width"); });
+        auto rejected_native = alternate_device->configuration();
+        CHECK(!rejected_native && contains(rejected_native.error().message, native_message));
+        CHECK(alternate_device->close());
+        alternate_device.reset();
+        if (!dynamic) CHECK(counts->retired == 1 && counts->destroyed == 0);
+        auto again = open_fake(*alternate);
+        if (!dynamic) CHECK(counts->opened == 2);
+        CHECK(again->close());
+        again.reset(); alternate.reset();
+        if (!dynamic) CHECK(counts->destroyed == 1 && counts->states == counts->retired);
 
+    }
     class NullStateProfile final : public backend::profiles::ICameraProfile {
     public:
         std::string_view id() const noexcept override { return "test-null-state"; }

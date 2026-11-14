@@ -8,7 +8,7 @@
 
 namespace gige_mel::selection {
 
-// Internal source-level composition only; neither installed nor a plugin ABI.
+// Internal C++ composition; neither installed nor a stable plugin ABI.
 // This binding name does not replace the profile's historical diagnostic ID.
 inline constexpr auto mono_free_running_v1 = backend::profiles::mono_free_running_v1;
 

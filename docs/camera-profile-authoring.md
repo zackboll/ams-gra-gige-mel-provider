@@ -1,7 +1,8 @@
-# Source-level camera-profile authoring (GIGE-MEL-034)
+# Camera-profile authoring (GIGE-MEL-034/035)
 
-This is an **internal, uninstalled C++20 interface** for statically linked
-implementations. It is not a public ABI, binary plugin SDK or `.so`/`.dll` loader.
+This is an **internal, uninstalled C++20 interface** for statically linked or
+explicitly loaded matched-toolchain Linux x86-64 implementations. It is not a
+permanently stable, cross-toolchain binary ABI.
 Do not expose vendor objects, MEL declarations or native node maps through it.
 
 ## Required implementation
@@ -102,7 +103,8 @@ immutable state. Streams retain device state through native teardown; Pleora's
 copy stream captures the selected state's frame validator. Outstanding leases
 retain their original storage owners and bytes after stop/close. States must own
 all their dependencies independently of the parent profile: a native run or
-lease may retain state beyond profile/backend destruction. There is no unloading.
+lease may retain state beyond profile/backend destruction. Loaded modules use
+the additional independently pinned state ownership described below.
 
 Feature services, connection guards and before-write callbacks are borrowed only
 for the synchronous operation; **never retain them**. The adapter keeps its
@@ -134,6 +136,65 @@ observes alternate admission with unchanged provider sources.
 Native fixtures are not physical-camera certification. In particular the Pleora
 offline tests do not connect a `PvDeviceGEV` or exercise real transport/licensing.
 Physical tests remain opt-in, and this test profile is never registered in
-production. Dynamic loading, ABI versioning, live backend switching, reconnect,
+production. Live backend switching, reconnect,
 navigation transport, new payload representations and qualified camera time are
 separate work.
+
+## Matched-C++ dynamic modules, v1 (GIGE-MEL-035)
+
+See the [independent build example](../examples/profile_module/README.md),
+[runtime loading](runtime-selection.md#explicit-module-loading), and
+[pre-implementation ownership audit](tasks/GIGE-MEL-035-design.md).
+
+`src/profiles/profile_module.hpp` defines the sole discovery symbol:
+
+```cpp
+extern "C" __attribute__((visibility("default")))
+const gige_mel::backend::profiles::module::Descriptor*
+gige_mel_camera_profile_module_v1() noexcept;
+```
+
+The static borrowed descriptor contains uint32 API version (1), exact structure
+size, profile-interface version (1), explicit Aravis/Pleora compatibility bits,
+bounded NUL-terminated build identity, profile ID, vendor and module version, and
+noexcept create/destroy function pointers. It must remain immutable until unload.
+Unknown versions, sizes, flags, missing metadata or callbacks are rejected before
+creation. The factory writes a project diagnostic into a host-owned buffer and
+returns int32 zero with a nonnull owned profile on success, nonzero on error.
+The host validates `id()` against the descriptor before registration. Destruction
+uses the matching module callback exactly once, including error cleanup.
+
+Use `guarded_create` to catch standard and unknown factory exceptions in-module;
+neither discovery nor destruction may throw. Violating a noexcept callback is a
+broken trusted module (termination), not a recoverable compatibility mismatch.
+C++ `open()` failures preserve project errors; the host wrapper contains unexpected
+open exceptions. Ordinary state operations obey the existing Result/Status
+contract. No callback may retain borrowed features/guards or start untracked work.
+
+Only discovery has C linkage. Virtual calls, returned std::string/Result/vector
+values, shared_ptr state/control blocks and destructors cross the boundary after
+validation. They require matched compiler/version, standard library, dual ABI,
+debug-STL, compiler ABI flags, sanitizer configuration and interface-header
+revision. `cmake/ProfileBuildIdentity.cmake` and its generated header construct
+the exact conservative identity (including build configuration/flags hash).
+Metadata is not proof of honest compilation; modules are trusted executable code.
+Do not claim universal binary compatibility or a future stable C ABI from this.
+
+The host profile wrapper pins a shared RAII dlopen owner and calls the module's
+destroy callback before releasing it. Every successful open returns a separate
+host state wrapper with its **own** shared module owner. Its plugin shared_ptr,
+including control block/deleter, is destroyed before its module reference. Thus
+state lifetime does not depend on profile lifetime. Catalog factory closures also
+pin the module and create independent profiles on selection. Devices and streams
+retain these wrappers using unchanged native ownership contracts. No new
+asynchronous callback exists; synchronous operations retain their normal owner.
+
+Last-owner destruction attempts dlclose. There is no force unload, NODELETE,
+global registry or intentional leaked handle. Module implementations must avoid
+GNU unique exports/NODELETE and untracked threads, callbacks or TLS destructors
+that could execute after the final owner. The example hides all symbols except
+discovery and disables GNU unique symbols. glibc may retain other external owners;
+the loader cannot forcibly override process-wide dynamic-loader references.
+Aravis retained native storage and Pleora retained copy bytes contain no plugin
+code after stream retirement, so they remain valid even after actual unload.
+The native tests observe finalization while those frame bytes are still retained.

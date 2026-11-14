@@ -1,5 +1,25 @@
 # Camera profiles across SDK backends
 
+## Explicit matched-C++ profile modules (GIGE-MEL-035)
+
+An opt-in Linux x86-64 loader now validates separately compiled camera-profile
+shared libraries through a versioned C-linkage discovery entry point, then uses
+the existing C++ profile interface under an explicitly matched compiler/stdlib/
+ABI/interface contract. This is not a stable cross-toolchain C ABI or a runtime
+backend plugin API. The installed common provider and exported MEL factories
+remain independent and unchanged. No new MEL capability or camera/clock
+qualification is claimed.
+
+Module profiles and independently surviving states each retain a host-owned
+shared RAII module pin. Plugin objects and shared_ptr deleters retire before the
+last pin attempts dlclose. Existing native stream/lease contracts are unchanged;
+retired native/copy frame storage remains valid without plugin code. There is no
+force unload, hot replacement, implicit search/discovery or fallback. See
+[profile authoring](camera-profile-authoring.md),
+[runtime loading](runtime-selection.md#explicit-module-loading), and the
+[pre-implementation boundary audit](tasks/GIGE-MEL-035-design.md).
+
+
 ## Goal and implemented boundary
 
 The goal is one camera profile that works unchanged with each backend that
@@ -33,7 +53,8 @@ GIGE-MEL-034 adds independently registered source-level `ICameraProfile`
 implementations and typed opaque device state, dispatched by both adapters.
 The default canonical selection ID remains `mono_free_running_v1`; its algorithms
 are retained. See [profile authoring](camera-profile-authoring.md). Dynamically
-loaded profile plugins remain separate future work.
+stable cross-toolchain profile plugins remain separate future work; matched-C++
+modules are now covered by GIGE-MEL-035 above.
 
 ## Preserved behavior
 
@@ -51,7 +72,7 @@ requirements for every camera profile or future backend.
 
 The new target and profile headers are internal and are not installed or
 exported. No MEL declaration, factory selection, advertised capability,
-navigation transport, timestamp mapping or binary plugin ABI is added.
+navigation transport, timestamp mapping or stable cross-toolchain binary ABI is added.
 Existing real-Aravis integration tests remain enabled in the optional build.
 Relocating a pure test into the default suite does not replace native SDK
 control, acquisition, lease, cancellation or teardown tests.
@@ -133,7 +154,7 @@ or acceptance semantics.
 | 4: selection and device identity (GIGE-MEL-033 foundation) | Explicit built-backend, exact device ID and canonical profile binding; no implicit open | Offline selector/native-fixture contracts; physical identity equivalence and cross-SDK hardware qualification remain pending |
 | 5: source-level profiles (GIGE-MEL-034) | Owned interface/state and independent registration/compatibility | Alternate test profile changes native configuration/frame admission in both SDK fixture paths |
 | 6: sensor capabilities | Add navigation wire protocol, additional payloads or other requested operations individually | Shared semantic tests plus device/SDK evidence for each advertised capability |
-| 7: optional binary plugins | Define loading, versioning, ownership and compatibility if independent distribution is needed | Profile lifetime, ABI mismatch and unload behavior are validated separately |
+| 7: matched-C++ profile modules (GIGE-MEL-035) | Explicit Linux .so loading, version/build validation and independent state/module ownership | Independently built rate-limited module, negative descriptors and observed unload; native fixture evidence, not physical qualification |
 
 Start with the same physical camera and profile through both SDKs. Compare
 configuration requests and actual readback, invalid requests, pixel layout,
@@ -149,7 +170,7 @@ can map it to a camera.
 Initial backend switching is an orderly stop/close/reopen operation. Switching
 under live native leases or uncertain in-flight commands is separate work.
 Existing source-level C++ interfaces do not promise independent binary plugin
-compatibility; any such ABI remains a separate architecture decision.
+compatibility; a stable cross-toolchain ABI remains a separate architecture decision.
 
 ## Navigation integration
 

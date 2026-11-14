@@ -1,0 +1,4 @@
+{
+  global: gige_mel_camera_profile_module_v1;
+  local: *;
+};

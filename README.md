@@ -21,8 +21,8 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 An uninstalled [runtime selection example](docs/runtime-selection.md) now binds
 an exact backend/device ID to the canonical `mono_free_running_v1` profile using
 the existing C++ embedding seam. Run `gige_mel_select --list` to list compiled
-backends without hardware I/O. [Source-level camera profiles](docs/camera-profile-authoring.md)
-can be registered independently and execute through either native adapter. Optional SDKs stay outside the installed provider;
+backends without hardware I/O. [Camera profiles](docs/camera-profile-authoring.md)
+can be registered independently, including explicitly loaded matched-C++ Linux `.so` modules, and execute through either native adapter. See the [independent module build](examples/profile_module/README.md); this is not a stable cross-toolchain ABI. Optional SDKs stay outside the installed provider;
 the exported MEL factory still accepts only `synthetic`.
 
 An optional, internal [Pleora eBUS backend](docs/pleora-integration.md) implements

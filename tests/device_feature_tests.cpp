@@ -4,6 +4,11 @@
 #include "device_features.hpp"
 #include "profiles/mono_free_running_device.hpp"
 #include "support/alternate_camera_profile.hpp"
+#include "selection/profile_loader.hpp"
+#include <filesystem>
+#include <fstream>
+#include <cstdlib>
+#include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
@@ -687,6 +692,77 @@ void final_readback_is_authoritative() {
     CHECK(contains(unreadable.error().message, "after writes:") && failed.writes().size() == 2);
 }
 
+void dynamic_module_contract() {
+    namespace s = gige_mel::selection;
+    const auto take = []<class T>(backend::Result<T> result) {
+        if (!result) throw std::runtime_error(result.error().message);
+        return std::move(result).value();
+    };
+    const auto log = std::filesystem::temp_directory_path() / ("gige-mel-unload-" + std::to_string(getpid()));
+    std::filesystem::remove(log);
+    CHECK(setenv("GIGE_MEL_TEST_UNLOAD_LOG", log.c_str(), 1) == 0);
+    const auto unloads = [&] {
+        std::ifstream file(log);
+        return static_cast<unsigned>(std::count(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>(), '\n'));
+    };
+    expect_error(s::load_profile_module("relative.so"), backend::ErrorCode::invalid_argument, "absolute");
+    expect_error(s::load_profile_module(std::string("/tmp/bad\0path", 13)), backend::ErrorCode::invalid_argument, "absolute");
+    expect_error(s::load_profile_module("/nonexistent/profile.so"), backend::ErrorCode::not_found, "dlopen");
+    const std::vector<std::string> errors{"dlsym", "API version", "descriptor size", "build identity", "null descriptor",
+        "null profile factory", "profile ID", "compatibility declaration", "factory returned null", "intentional unexpected", "unexpected profile factory", "interface revision",
+        "factory failed", "malformed descriptor", "null profile factory", "expected factory error"};
+    for (unsigned i = 1; i <= errors.size(); ++i) {
+        auto failed = s::load_profile_module(std::string(GIGE_MEL_TEST_PROFILE_DIR) + "/libinvalid_profile_" + std::to_string(i) + ".so");
+        expect_error(failed, backend::ErrorCode::unsupported, errors[i - 1]);
+        CHECK(unloads() == i); // actual finalizer, including factory error cleanup
+    }
+    unsigned expected = unloads();
+    for (unsigned cycle = 0; cycle < 20; ++cycle) {
+        auto features = baseline();
+        features.nodes["AcquisitionMode"] = text_node("Continuous");
+        std::shared_ptr<const backend::profiles::ICameraProfileState> state;
+        {
+            auto loaded = take(s::load_profile_module(GIGE_MEL_TEST_PROFILE_MODULE));
+            auto independent = take(s::load_profile_module(GIGE_MEL_TEST_PROFILE_MODULE));
+            CHECK(loaded.profile != independent.profile && loaded.profile->id() == independent.profile->id());
+            auto first = take(loaded.create());
+            auto second = take(loaded.create());
+            CHECK(first != second && first->id() == second->id());
+            s::BackendCatalog catalog;
+            CHECK(s::register_loaded_profile(catalog, loaded));
+            CHECK(!s::register_loaded_profile(catalog, loaded));
+            CHECK(!catalog.create("synthetic", loaded.profile->id())); // no implicit backend declaration
+            auto broken = baseline();
+            broken.nodes.erase("Width");
+            CHECK(!loaded.profile->open(broken)); // failed compatibility open, still mapped
+            state = take(loaded.profile->open(features));
+            CHECK(state->capabilities().maximum_frame_rate_hz == 20);
+        } // catalog AND both profile factories gone; state independently pins .so
+        CHECK(unloads() == expected);
+        auto requested = initial;
+        requested.frame_rate_hz = 25;
+        features.calls.clear();
+        expect_error(state->apply(features, requested, connected, allow_write), backend::ErrorCode::unsupported, "20 Hz");
+        CHECK(features.writes().empty());
+        requested.frame_rate_hz = 20;
+        CHECK(take(state->apply(features, requested, connected, allow_write)) == requested);
+        CHECK(take(state->preflight(features)) == requested);
+        state.reset();
+        CHECK(unloads() == ++expected);
+    }
+    // Exceptional host teardown also releases the final mapping.
+    try {
+        auto loaded = take(s::load_profile_module(GIGE_MEL_TEST_PROFILE_MODULE));
+        auto features = baseline();
+        auto state = take(loaded.profile->open(features));
+        (void)state;
+        throw std::runtime_error("host unwind");
+    } catch (const std::runtime_error&) {}
+    CHECK(unloads() == ++expected);
+    unsetenv("GIGE_MEL_TEST_UNLOAD_LOG");
+    std::filesystem::remove(log);
+}
+
 void interchangeable_owned_profile_states() {
     namespace p = backend::profiles;
     auto device = baseline();
@@ -736,7 +812,13 @@ void interchangeable_owned_profile_states() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--dynamic-module-only") {
+        try { dynamic_module_contract(); }
+        catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+        std::cout << "Dynamic profile validation and observable unload contract passed\n";
+        return 0;
+    }
     const std::vector<std::pair<const char*, void (*)()>> tests{
         {"typed snapshot, access and native metadata", typed_snapshot_and_metadata},
         {"optional absence is distinct from query, type and access errors", optional_absence_and_errors},

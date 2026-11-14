@@ -1,0 +1,19 @@
+#pragma once
+#include <string>
+#define GIGE_MEL_STRINGIFY_I(x) #x
+#define GIGE_MEL_STRINGIFY(x) GIGE_MEL_STRINGIFY_I(x)
+#ifdef _GLIBCXX_DEBUG
+#define GIGE_MEL_STL_DEBUG "debug"
+#else
+#define GIGE_MEL_STL_DEBUG "normal"
+#endif
+#ifndef __GLIBCXX__
+#error "Profile modules v1 currently require libstdc++"
+#endif
+#if !defined(__x86_64__) || !defined(__linux__)
+#error "Profile modules v1 currently require Linux x86-64"
+#endif
+#define GIGE_MEL_PROFILE_BUILD_ID "v1;@revision@;@CMAKE_CXX_COMPILER_ID@;" __VERSION__ \
+    ";libstdc++=" GIGE_MEL_STRINGIFY(__GLIBCXX__) ";cxx11=" GIGE_MEL_STRINGIFY(_GLIBCXX_USE_CXX11_ABI) \
+    ";abi=" GIGE_MEL_STRINGIFY(__GXX_ABI_VERSION) \
+    ";stl=" GIGE_MEL_STL_DEBUG ";cxx=" GIGE_MEL_STRINGIFY(__cplusplus) ";san=@GIGE_MEL_SANITIZERS@;flags=@flags@;linux-x86_64"
