@@ -2,6 +2,11 @@
 
 ## Optional Pleora backend (GIGE-MEL-025 integration)
 
+GIGE-MEL-027 selects PR #26 as the single canonical implementation and adds
+native feature and test-clock-only MEL coverage from duplicate PR #25. It adds
+no MEL capability or production time qualification. See the
+[source/contract comparison](pleora-consolidation.md).
+
 An internal, default-OFF eBUS adapter now implements the shared typed feature
 service and native acquisition with bounded copy leases, without changing the
 shared profile or MEL provider. [Integration and qualification record](pleora-integration.md)

@@ -26,6 +26,10 @@ frames; development entitlement and production qualification remain unresolved.
 See the integration record for measured hardware results. No valid camera
 timestamps or new MEL capability are claimed.
 
+PR #26 is the [single canonical Pleora backend](docs/pleora-consolidation.md).
+Native GenApi and test-clock-only MEL contracts consolidate useful PR #25
+coverage; neither offline checks nor watermarked acquisition qualify production.
+
 Requirements: Linux, a C++20 compiler (GCC 13 is the locally validated compiler),
 CMake **3.24+**, Ninja, and Python **3.9+**. No camera, commercial SDK, network
 access, package manager, or downloaded dependency is needed by the build itself.

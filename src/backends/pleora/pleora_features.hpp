@@ -4,6 +4,7 @@
 #include "device_features.hpp"
 #include <PvGenParameterArray.h>
 #include <PvResult.h>
+#include <GenApi/GenApi.h>
 
 namespace gige_mel::backend::pleora {
 
@@ -12,7 +13,9 @@ Status checked(const PvResult& result, std::string_view operation);
 
 class Features final : public device_features::IDeviceFeatures {
 public:
-    explicit Features(PvGenParameterArray& parameters) : parameters_(parameters) {}
+    explicit Features(PvGenParameterArray& parameters) : parameters_(&parameters), nodes_(parameters.GetNodeMap()) {}
+    // Internal borrowed-map seam for original XML tests; commands still require eBUS.
+    explicit Features(PV_GENAPI_NS::INodeMap& nodes) : nodes_(&nodes) {}
     Result<bool> implemented(std::string_view name) override;
     Result<std::int64_t> read_integer(std::string_view name) override;
     Result<device_features::IntegerFeature> read_integer_feature(
@@ -26,8 +29,9 @@ public:
     Status write_float(std::string_view name, double value) override;
     Status command(std::string_view name);
 private:
-    Result<PvGenParameter*> node(std::string_view name, PvGenType type, bool read, bool write);
-    PvGenParameterArray& parameters_;
+    Result<PV_GENAPI_NS::INode*> parameter(std::string_view name, bool readable, bool writable);
+    PvGenParameterArray* parameters_{nullptr};
+    PV_GENAPI_NS::INodeMap* nodes_;
 };
 
 } // namespace gige_mel::backend::pleora

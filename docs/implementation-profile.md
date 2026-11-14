@@ -15,6 +15,10 @@ boundary and the remaining second-backend, selection and plugin work.
 
 ## Provider and discovery
 
+GIGE-MEL-027 consolidates Pleora on PR #26 only, transferring native GenApi and
+test-only MEL coverage without changing production timestamp admission or any
+advertised capability. See [disposition and remaining gates](pleora-consolidation.md).
+
 The optional [Pleora adapter](pleora-integration.md) reuses this project's shared
 camera profile and adds internal native acquisition with bounded host-copy
 leases. It is OFF by default, uninstalled, and not a MEL factory selection.

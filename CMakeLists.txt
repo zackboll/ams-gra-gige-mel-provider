@@ -143,6 +143,9 @@ if(BUILD_TESTING)
   add_test(NAME proprietary_guard_contract
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/proprietary_guard_tests.py)
   set_tests_properties(proprietary_guard_contract PROPERTIES TIMEOUT 30)
+  add_test(NAME pleora_tooling_contract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_tooling_tests.py)
+  set_tests_properties(pleora_tooling_contract PROPERTIES TIMEOUT 30)
   add_test(NAME aravis_evidence_offline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)

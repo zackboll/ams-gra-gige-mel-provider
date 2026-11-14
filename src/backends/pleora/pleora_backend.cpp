@@ -2,6 +2,7 @@
 #include "pleora_features.hpp"
 #include "pleora_license.hpp"
 #include "pleora_stream.hpp"
+#include "pleora_private.hpp"
 #include "profiles/mono_free_running_device.hpp"
 
 #include <PvDeviceGEV.h>
@@ -10,6 +11,9 @@
 #include <PvPipeline.h>
 #include <PvStreamGEV.h>
 #include <PvSystem.h>
+#include <PvBaseLib.h>
+#include <PvVersion.h>
+#include <PvGenBoolean.h>
 
 #include <atomic>
 #include <map>
@@ -223,6 +227,8 @@ public:
     explicit Backend(Options options) : options_(std::move(options)) {}
     std::string_view id() const noexcept override { return "pleora"; }
     Result<std::vector<DeviceInfo>> enumerate() override {
+        if (compiled_version() != runtime_version())
+            return Error{ErrorCode::unsupported, "eBUS header/runtime version mismatch; no discovery attempted"};
         PvSystem system;
         system.SetDetectionTimeout(1000);
         if (auto s = checked(system.Find(), "discovery"); !s) return s.error();
@@ -244,6 +250,8 @@ public:
                 : (id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f');
         if (!mac_valid)
             return Error{ErrorCode::invalid_argument, "eBUS open requires exact discovered MAC address"};
+        if (compiled_version() != runtime_version())
+            return Error{ErrorCode::unsupported, "eBUS header/runtime version mismatch; no open attempted"};
         auto state = std::make_shared<State>();
         {
             std::lock_guard lock(ownership_mutex);
@@ -264,6 +272,7 @@ public:
         const LicenseStatus license{selected->IsLicenseValid(), selected->GetLicenseMessage().GetAscii()};
         auto connected = connect_with_license(license, options_, [&]() -> Status {
             state->device = std::make_unique<PvDeviceGEV>();
+            if (auto s = configure_device_policy(*state->device); !s) return s;
             return checked(state->device->Connect(selected, PvAccessExclusive), "exclusive Connect");
         });
         if (!connected) return connected.error();
@@ -299,5 +308,23 @@ private:
 
 std::shared_ptr<ICameraBackend> make_backend(Options options) {
     return std::make_shared<Backend>(std::move(options));
+}
+std::string compiled_version() {
+    return std::to_string(VERSION_MAJOR) + "." + std::to_string(VERSION_MINOR) + "." +
+           std::to_string(VERSION_SUB) + "." + std::to_string(VERSION_BUILD);
+}
+std::string runtime_version() {
+    return std::to_string(PvGetVersionMajor()) + "." + std::to_string(PvGetVersionMinor()) + "." +
+           std::to_string(PvGetVersionSub()) + "." + std::to_string(PvGetVersionBuild());
+}
+Status configure_device_policy(PvDeviceGEV& device) {
+    auto* parameters = device.GetCommunicationParameters();
+    auto* recovery = parameters ? parameters->GetBoolean("LinkRecoveryEnabled") : nullptr;
+    if (!recovery) return Error{ErrorCode::unsupported, "eBUS LinkRecoveryEnabled policy unavailable"};
+    if (auto s = checked(recovery->SetValue(false), "disable automatic link recovery"); !s) return s;
+    bool enabled = true;
+    if (auto s = checked(recovery->GetValue(enabled), "read automatic link recovery"); !s) return s;
+    if (enabled) return Error{ErrorCode::io_error, "eBUS automatic link recovery remained enabled"};
+    return {};
 }
 } // namespace gige_mel::backend::pleora

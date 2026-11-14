@@ -88,6 +88,18 @@ void leases() {
     CHECK(f.value().descriptor().stream_generation == 2);
     stream.reset(); source.reset();
     CHECK(f.value().bytes()[0] == std::byte{3});
+    // Destruction with an entirely full pool must not invalidate any copy.
+    auto second = std::make_shared<Source>();
+    auto full_stream = p::make_stream(second);
+    CHECK(full_stream->start(44));
+    for (int i = 0; i < 4; ++i) {
+        auto frame = full_stream->receive(10ms);
+        CHECK(frame);
+        retained.push_back(std::move(frame).value());
+    }
+    full_stream.reset(); second.reset();
+    for (const auto& frame : retained)
+        for (auto byte : frame.bytes()) CHECK(byte == std::byte{3});
 }
 void failures() {
     for (int mode = 0; mode < 5; ++mode) {

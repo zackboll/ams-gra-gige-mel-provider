@@ -401,3 +401,68 @@ branch history, and compare proposed blobs with the external SDK inventory.
 Pattern checks are defense in depth, not proof against all altered vendor content.
 No SDK header/source/library/sample/license/key, SDK-dependent executable or
 private evidence folder belongs in this repository or its hosted artifacts.
+
+## Consolidated native contracts (GIGE-MEL-027)
+
+[PR #26](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/26) is the
+single canonical implementation. [Comparison and identities](pleora-consolidation.md)
+record the evaluation of duplicate #25; its direct SDK-buffer receiver is not
+imported. The `PvStreamGEV`/`PvPipeline` and four-host-slot copy leases remain.
+
+The existing `Features` class now uses public native node-map access for true
+float increments, list-grid rejection, fresh cache facts and exception translation.
+Matching external GenApi **3.4.1.1** headers are required for the optional build,
+not the default build or installed package. The runtime remains the original
+eBUS **6.5.3.7155** GenApi libraries. Header/runtime agreement is checked before
+discovery/open; local automatic link recovery is disabled and read back.
+
+Select a verified external header directory containing `GenApi/IFloat.h` and
+`_GenICamVersion.h`, or explicitly provision a new external prefix:
+
+```sh
+python3 scripts/provision_pleora.py /external/new-prefix \
+  --sdk-source /external/existing-ebus \
+  --genicam-archive /external/GenICam_V3_4_1_1_public_data.zip
+cmake -S . -B build/pleora -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DGIGE_MEL_BUILD_PLEORA=ON -DGIGE_MEL_PLEORA_SDK_ROOT=/external/new-prefix
+cmake --build build/pleora --parallel 2
+ctest --test-dir build/pleora --output-on-failure
+python3 scripts/run_pleora.py /external/new-prefix build/pleora/gige_mel_pleora_diagnostic --version
+```
+
+Separate headers use `-DGIGE_MEL_PLEORA_GENICAM_INCLUDE_DIR=/external/headers/library/CPP/include`.
+The helper pins the mirror revision and verifies the official EMVA ZIP SHA-256
+`04cae9e8004edef0653c1af35522d04e01b01ac85962456b554c5894d904490a` and Linux
+member `bc6287f516b46fe882cd2425fed334166360b275584ee932a25d271a4d9807eb`.
+Only headers come from that extra archive; runtime libraries stay eBUS originals.
+Provisioning is never implicit or called by hosted CI. Complete-prefix reuse
+requires matching provenance; incomplete installations are not overwritten.
+The launcher changes loader/GenApi paths only for its child, not the shell.
+
+`pleora_sdk_contract` transfers all eight original native XML/IPort groups from
+#25. `pleora_mel_contract` runs without a camera using SDK-allocated memory through
+the canonical production copy stream, Mono8 and unpacked Mono12. It proves
+rejection of unqualified timestamps and copying only under a test-only virtual
+integration-start clock and virtual optics. It checks source/destination bytes
+plus an independent pattern, geometry/metadata/identity, retained caller buffers,
+disable/re-enable, release/unregistration and destruction. Raw SDK buffer times
+are deliberately unrelated to the virtual clock. This is not transport testing.
+
+`pleora_hardware_contract` is always compiled with optional tests, but registered
+only with explicit `GIGE_MEL_PLEORA_HARDWARE_TESTS=ON` and a bare lower-case
+`GIGE_MEL_PLEORA_DEVICE_ID=aa:bb:cc:dd:ee:ff`. It uses current configuration,
+without ROI/timing normalization or packet negotiation. Destination/start/stop
+still have side effects. It has **no evaluation switch**, never skips failures,
+and must run only after entitlement/receiver licensing are established. See the
+[Debian 13 procedure](tasks/GIGE-MEL-027-pleora-debian13.md).
+
+The diagnostic retains `capture` (volatile full frame/10 Hz then restore), and
+adds `capture-current` (no ROI/timing writes), help/version and explicit
+`apply MAC WIDTH HEIGHT X Y HZ EXPOSURE_NS` through the shared profile.
+`apply` reports actual readback without promising rollback. Evaluation PGM output
+preserves every pixel/watermark and includes an unqualified-evaluation comment.
+
+Unlike #25's unconditional watermark rejection, canonical default-OFF receiver
+evaluation deliberately retains SDK-watermarked frames. These are evaluation
+output, **not unrestricted/unmodified sensor pixels**. That policy does not
+authorize SDK development use or production MEL publication.
