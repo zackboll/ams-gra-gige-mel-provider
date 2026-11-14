@@ -44,6 +44,11 @@ separated from source review; historical acquisition is not final-HEAD testing.
 
 ## Engineering scope and remaining gates
 
+GIGE-MEL-028 independently isolates the native GenApi TSan inversion to the
+external log4cpp runtime's initialization/global-cleanup lock order. See the
+[reproducer, exact lock stacks and blocked disposition](genapi-tsan-lock-order.md).
+No suppression is approved or added; combined TSan qualification remains blocked.
+
 No backend interface, MEL declaration, factory signature, shared profile source,
 production stream implementation or published history is replaced. Native GenApi
 validation helpers from #25 were adapted into the existing `Features` class for

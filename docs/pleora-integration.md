@@ -404,6 +404,12 @@ private evidence folder belongs in this repository or its hosted artifacts.
 
 ## Consolidated native contracts (GIGE-MEL-027)
 
+**TSan gate blocked (GIGE-MEL-028):** the native feature contract exposes an
+independently reproduced external GenApi/log4cpp initialization-versus-global-
+teardown lock inversion. [Investigation and SDK-only reproducer](genapi-tsan-lock-order.md)
+record exact library hashes, stacks, supported-ordering experiments and disposition.
+The test remains enabled and failing under TSan; no suppression has been added.
+
 [PR #26](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/26) is the
 single canonical implementation. [Comparison and identities](pleora-consolidation.md)
 record the evaluation of duplicate #25; its direct SDK-buffer receiver is not

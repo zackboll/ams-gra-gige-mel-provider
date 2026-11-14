@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.24)
+project(genapi_lock_order_repro LANGUAGES CXX)
+
+# Intentionally standalone: no provider, adapter, profile or fixture targets.
+set(GENAPI_INCLUDE_DIR "" CACHE PATH "External matching GenApi headers")
+set(GENAPI_LIBRARY_DIR "" CACHE PATH "External SDK GenApi runtime directory")
+set(REPRO_SANITIZERS "thread" CACHE STRING "Sanitizers; empty for debugger backtraces")
+find_path(genapi_include GenApi/NodeMapRef.h PATHS "${GENAPI_INCLUDE_DIR}" NO_DEFAULT_PATH REQUIRED)
+foreach(component GenApi GCBase Log)
+  find_library(${component}_library NAMES ${component}_gcc48_v3_4
+    PATHS "${GENAPI_LIBRARY_DIR}" NO_DEFAULT_PATH REQUIRED)
+endforeach()
+add_executable(genapi_lock_order genapi_lock_order.cpp)
+target_compile_features(genapi_lock_order PRIVATE cxx_std_20)
+target_include_directories(genapi_lock_order SYSTEM PRIVATE "${genapi_include}")
+target_compile_options(genapi_lock_order PRIVATE -g -O0 -Wall -Wextra -Wpedantic -Werror -fno-omit-frame-pointer)
+target_link_libraries(genapi_lock_order PRIVATE "${GenApi_library}" "${GCBase_library}" "${Log_library}")
+target_link_options(genapi_lock_order PRIVATE "LINKER:-rpath-link,${GENAPI_LIBRARY_DIR}")
+if(REPRO_SANITIZERS)
+  target_compile_options(genapi_lock_order PRIVATE "-fsanitize=${REPRO_SANITIZERS}")
+  target_link_options(genapi_lock_order PRIVATE "-fsanitize=${REPRO_SANITIZERS}")
+endif()
