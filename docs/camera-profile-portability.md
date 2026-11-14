@@ -28,8 +28,10 @@ error translation. It retains discovery, device ownership, acquisition-command
 uncertainty, streams, buffers and normalization of received-frame facts. A
 second SDK backend is now implemented by the optional [Pleora adapter](pleora-integration.md),
 but licensed camera-control and transport qualification remain pending.
-Independent profile selection and dynamically loaded profile plugins remain
-subsequent work. The shared profile sources are unchanged by that adapter.
+GIGE-MEL-033 adds [explicit backend/profile binding](runtime-selection.md) for the
+single canonical `mono_free_running_v1` profile. Multiple independent profiles
+and dynamically loaded profile plugins remain subsequent work. The shared profile
+sources are unchanged by that adapter and by runtime selection.
 
 ## Preserved behavior
 
@@ -126,7 +128,7 @@ or acceptance semantics.
 | 1: shared profile (GIGE-MEL-024) | Extract existing SDK-free policy and run its pure tests by default | Existing behavior preserved; default and optional-adapter suites pass; installed package remains independent |
 | 2: typed device services (GIGE-MEL-025) | Shared snapshot/configuration orchestration over an internal typed feature interface, with an Aravis implementation | Recording-service tests prove required operations, ordering, fresh readback and error distinctions; actual Aravis tests remain passing |
 | 3: narrow Pleora backend | Implement that interface and native acquisition for the same initial camera/profile | The same unchanged profile and applicable MEL tests work with both actual SDKs |
-| 4: selection and device identity | Select backend and profile independently; match verified physical device identity | Reconnect through either backend without profile or MEL-client edits; incompatible requirements are diagnosed |
+| 4: selection and device identity (GIGE-MEL-033 foundation) | Explicit built-backend, exact device ID and canonical profile binding; no implicit open | Offline selector/native-fixture contracts; physical identity equivalence and cross-SDK hardware qualification remain pending |
 | 5: sensor capabilities | Add navigation wire protocol, additional payloads or other requested operations individually | Shared semantic tests plus device/SDK evidence for each advertised capability |
 | 6: optional binary plugins | Define loading, versioning, ownership and compatibility if independent distribution is needed | Profile lifetime, ABI mismatch and unload behavior are validated separately |
 

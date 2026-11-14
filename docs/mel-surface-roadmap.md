@@ -1,5 +1,15 @@
 # MEL surface inventory and implementation order
 
+## Internal selection (GIGE-MEL-033)
+
+An explicitly owned catalog now selects built `synthetic`, `aravis` and `pleora`
+backends with exact device identity and the sole `mono_free_running_v1` binding.
+This is [internal composition](runtime-selection.md), not a new MEL surface,
+factory name, dynamically loaded profile or binary ABI. The common provider and
+shared profile implementation remain unchanged. Multiple profiles, plugin ABI,
+cross-SDK physical-camera ownership qualification and production clocks remain
+future work.
+
 ## Optional Pleora backend (GIGE-MEL-025 integration)
 
 GIGE-MEL-027 selects PR #26 as the single canonical implementation and adds
@@ -36,7 +46,7 @@ consumed by Aravis and a default profile contract test. Host pool policy is
 separate and passed explicitly. This is a behavior-preserving extraction with
 no new MEL capability or production backend. GIGE-MEL-025 adds typed device
 services; the optional Pleora implementation above still needs qualification.
-Independent backend/profile selection and binary plugins remain subsequent work; see
+Internal backend/profile binding is implemented above; multiple profiles and binary plugins remain subsequent work; see
 [the sequence and acceptance criteria](camera-profile-portability.md).
 
 ## Backend-independent NavigationReport forwarding (GIGE-MEL-023)

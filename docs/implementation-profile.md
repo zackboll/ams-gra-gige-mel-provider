@@ -15,6 +15,12 @@ boundary and the remaining second-backend, selection and plugin work.
 
 ## Provider and discovery
 
+GIGE-MEL-033 adds [internal runtime backend/profile binding](runtime-selection.md),
+not a MEL factory or capability. A caller explicitly selects an available backend,
+exact device ID and the sole canonical `mono_free_running_v1` profile, then uses
+the unchanged `make_api_manager(settings, backend)` seam. Selection performs no
+camera I/O and does not alter profile diagnostics, native ownership or lifecycle.
+
 GIGE-MEL-027 consolidates Pleora on PR #26 only, transferring native GenApi and
 test-only MEL coverage without changing production timestamp admission or any
 advertised capability. See [disposition and remaining gates](pleora-consolidation.md).
