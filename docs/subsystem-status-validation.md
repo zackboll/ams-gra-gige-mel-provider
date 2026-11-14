@@ -144,7 +144,12 @@ with a delivery count alone.
   proving the suppressed prepared report consumed sequence 1 (a valid gap).
 - **Owners** (`subsystem_owners`): a Subsystem-only callback drops the final
   external Control and Health references. Scoped pins keep the objects alive
-  through the callback, mutation attempts reject, and the worker exits.
+  through the callback and mutation attempts reject. An enable-return gate
+  forces worker-side teardown; ordinary body completion is distinguished from
+  deferred readiness. A test-only self-detach reaper joins before assertions or
+  fixture destruction, including runtime shared-state cleanup. The independent
+  actual-detach reproducer and its stock-runtime instrumentation limitation are
+  documented in [GIGE-MEL-029](provider-thread-exit-tsan.md).
 - **Clock failure** (`subsystem_clock_failure`, executed injection): with a fresh
   fault requiring the UTC clock unavailable on the worker for one sample,
   Status/Detailed are published and BIT/Subsystem are suppressed. The diagnostic

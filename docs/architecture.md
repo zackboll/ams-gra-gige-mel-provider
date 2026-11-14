@@ -2,6 +2,13 @@
 
 ## Status
 
+The optional [Pleora backend](pleora-integration.md) implements the existing
+source interfaces using the same SDK-free profile and typed feature service.
+Its bounded copy leases retain no SDK objects, so native stop/close do not
+invalidate retained pixels. It is uninstalled and default-OFF. Licensed hardware
+qualification and production clock qualification remain pending; no provider
+factory or MEL advertisement changes.
+
 **GIGE-MEL-023:** [backend-independent navigation forwarding](navigation-backend-forwarding.md)
 adds project-owned navigation values and an optional device-side C++ navigation
 sink. The existing Image operation prepares acknowledgement before synchronous

@@ -9,3 +9,23 @@ __pycache__/
 .DS_Store
 # Private camera/host/network evidence must not be committed.
 /camera-evidence*/
+# Proprietary SDKs and local credentials must remain external. The Git-blob
+# guard also checks forced additions and renamed recognizable vendor content.
+/sdk/
+/sdks/
+/pleora-sdk/
+**/ebus_sdk/
+*.so
+*.so.*
+*.a
+*.o
+*.bin
+*.deb
+*.rpm
+*.run
+*.lic
+*.key
+*.zip
+*.tar
+*.tar.*
+*.tgz

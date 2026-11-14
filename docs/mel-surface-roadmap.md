@@ -1,5 +1,23 @@
 # MEL surface inventory and implementation order
 
+## Optional Pleora backend (GIGE-MEL-025 integration)
+
+GIGE-MEL-027 selects PR #26 as the single canonical implementation and adds
+native feature and test-clock-only MEL coverage from duplicate PR #25. It adds
+no MEL capability or production time qualification. See the
+[source/contract comparison](pleora-consolidation.md).
+
+An internal, default-OFF eBUS adapter now implements the shared typed feature
+service and native acquisition with bounded copy leases, without changing the
+shared profile or MEL provider. [Integration and qualification record](pleora-integration.md)
+distinguishes SDK-buffer tests from real watermarked Cognex Mono8 evaluation.
+Receiver evaluation is explicitly selected, default-off and not production-qualified;
+the SDK remains authoritative and development entitlement remains unresolved.
+P3 is **not complete**: licensed control/acquisition qualification and qualified
+camera timestamps remain pending. Sequential Aravis/Cognex evaluation results
+are recorded, not a production benchmark. No
+navigation transport, backend factory selection or new MEL capability is added.
+
 ## Typed device services (GIGE-MEL-025)
 
 The shared monochrome profile now selects aliases, builds fresh snapshots,
@@ -7,9 +25,8 @@ executes ordered configuration writes and reads actual state through an
 internal SDK-free typed feature interface. Aravis implements native access;
 recording-service tests cover orchestration without an SDK. Device locking,
 control loss, acquisition-command uncertainty and stream ownership remain
-adapter responsibilities. This adds no MEL capability or second backend;
-the next portability step is a narrow Pleora implementation of the same
-service and acquisition contracts. See
+adapter responsibilities. The optional Pleora implementation above consumes
+the same service and acquisition contracts but remains unqualified. See
 [camera-profile portability](camera-profile-portability.md).
 
 ## Shared camera-profile foundation (GIGE-MEL-024)
@@ -18,8 +35,8 @@ The existing monochrome/free-running profile is an internal SDK-free module,
 consumed by Aravis and a default profile contract test. Host pool policy is
 separate and passed explicitly. This is a behavior-preserving extraction with
 no new MEL capability or production backend. GIGE-MEL-025 adds typed device
-services; the Pleora adapter, independent backend/profile selection and optional
-binary plugins remain subsequent work; see
+services; the optional Pleora implementation above still needs qualification.
+Independent backend/profile selection and binary plugins remain subsequent work; see
 [the sequence and acceptance criteria](camera-profile-portability.md).
 
 ## Backend-independent NavigationReport forwarding (GIGE-MEL-023)
