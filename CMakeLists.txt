@@ -64,6 +64,8 @@ target_link_libraries(gige_mel_backend PUBLIC Threads::Threads PRIVATE $<BUILD_I
 # Internal camera-profile policy, compiled and tested without any camera SDK.
 # No MEL declarations, SDK handles, installed headers or plugin ABI are added.
 add_library(gige_mel_camera_profiles STATIC
+  src/profiles/camera_profile.cpp
+  src/profiles/frame_policy.cpp
   src/profiles/mono_free_running.cpp
   src/profiles/mono_free_running_device.cpp)
 set_target_properties(gige_mel_camera_profiles PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -170,7 +172,7 @@ endif()
 add_library(gige_mel_selection STATIC
   src/selection/backend_catalog.cpp src/selection/session_selection.cpp)
 target_include_directories(gige_mel_selection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(gige_mel_selection PUBLIC gige_mel_backend gige_mel_headers
+target_link_libraries(gige_mel_selection PUBLIC gige_mel_backend gige_mel_headers gige_mel_camera_profiles
   PRIVATE gige_mel_build_options)
 add_library(gige_mel_selection_builtins STATIC src/selection/builtin_backends.cpp)
 target_link_libraries(gige_mel_selection_builtins PUBLIC gige_mel_selection PRIVATE gige_mel_build_options)
@@ -204,6 +206,7 @@ if(BUILD_TESTING)
   endif()
   if(GIGE_MEL_BUILD_ARAVIS)
     target_link_libraries(aravis_adapter_tests PRIVATE gige_mel_selection)
+    target_link_libraries(aravis_stream_contract_tests PRIVATE gige_mel_selection)
   endif()
   if(GIGE_MEL_BUILD_PLEORA)
     target_link_libraries(pleora_contract_tests PRIVATE gige_mel_selection)

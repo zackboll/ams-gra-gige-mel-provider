@@ -1,3 +1,4 @@
+#include "profiles/mono_free_running.hpp"
 // Explicit SIMULATED Mono12 qualification. Stock Aravis Fake has no Mono12
 // enum or generator. Public DOM APIs add its enum; a public fill-pattern hook
 // records real SDK storage. The decoded-facts seam generates pixels after pop

@@ -9,6 +9,7 @@
 // successful MEL image publication. Optics below are VIRTUAL test values.
 #include <gige_mel/provider.hpp>
 #include "aravis_fake_support.hpp"
+#include "alternate_camera_profile.hpp"
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/health-status/HealthStatusChannel.h>
@@ -542,6 +543,32 @@ int main() {
               << "image profile\n";
     try {
         embedding_probe();
+        // The unchanged MEL provider sees the same backend/device abstraction;
+        // profile-specific admission is executed below it, not in a channel.
+        auto counts = std::make_shared<alternate_profile::Counts>();
+        auto camera = gige_mel::backend::aravis::make_backend_for_interface(
+            {"Fake", &arv_fake_interface_get_instance}, {}, alternate_profile::make(counts));
+        gige_mel::ProviderSettings settings;
+        settings.instance = "alternate-profile-embedding";
+        settings.device_id = std::string(aravis_fake::device_id);
+        auto manager = gige_mel::make_api_manager(settings, camera);
+        auto control = ir::getControl(settings.instance, manager);
+        CHECK(control && control->init() == ir::Return::Success);
+        const auto capabilities = control->getCapabilities();
+        const auto found = std::find_if(capabilities.begin(), capabilities.end(), [](const auto& cap) {
+            return cap.getChannelTypes() == std::vector{ir::ChannelType::CommandAndControl};
+        });
+        CHECK(found != capabilities.end());
+        ir::Config config;
+        config.setChanID(found->getChanID()); config.setChannelType(ir::ChannelType::CommandAndControl);
+        auto c2 = std::dynamic_pointer_cast<ir::C2Channel>(control->attachChannel(config));
+        CHECK(c2);
+        backend::CameraConfiguration request{300, 240, 0, 0, 25, 2ms};
+        CHECK(*response(c2->send(config_set(9001, request))) != ir::Return::Success);
+        request.frame_rate_hz = 20;
+        CHECK(*response(c2->send(config_set(9002, request))) == ir::Return::Success);
+        CHECK(counts->applies == 2 && counts->opened == 1);
+        CHECK(control->detachChannel(c2) == ir::Return::Success);
     } catch (const std::exception& error) {
         std::cerr << "FAIL Aravis MEL embedding probe: " << error.what() << '\n';
         return 1;

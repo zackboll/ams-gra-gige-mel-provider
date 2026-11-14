@@ -9,6 +9,8 @@
 #include "aravis_fake_support.hpp"
 #include "profiles/mono_free_running.hpp"
 #include "acquisition_policy.hpp"
+#include "selection/session_selection.hpp"
+#include "alternate_camera_profile.hpp"
 
 #include <arv.h>
 
@@ -1268,6 +1270,59 @@ void fatal_glib_log(const gchar* domain, GLogLevelFlags level, const gchar* mess
     std::abort();
 }
 
+void selected_profile_stream_lifetime() {
+    namespace selection = gige_mel::selection;
+    auto counts = std::make_shared<alternate_profile::Counts>();
+    auto force_odd = std::make_shared<std::atomic<bool>>(false);
+    auto camera = [&] {
+        selection::BackendCatalog catalog;
+        CHECK(catalog.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+        CHECK(catalog.register_backend("aravis", std::vector<std::string>{std::string(alternate_profile::id)},
+            [force_odd](selection::BackendCatalog::Profile p) {
+                aravis::TestHooks hooks;
+                hooks.decoded_facts = [force_odd](auto& facts) { if (force_odd->load()) facts.frame_id = 1; };
+                return aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, std::move(p));
+            }));
+        auto selected = catalog.create("aravis", alternate_profile::id);
+        CHECK(selected && counts->opened == 0);
+        return std::move(selected).value();
+    }(); // no native I/O, catalog gone
+    auto device = open_fake(*camera);
+    auto requested = device->configuration();
+    CHECK(requested);
+    requested.value().frame_rate_hz = 20;
+    CHECK(device->apply(requested.value()));
+    auto made = device->create_stream();
+    CHECK(made);
+    auto stream = std::move(made).value();
+    CHECK(stream->start(1));
+    force_odd->store(true);
+    auto rejected = stream->receive(150ms);
+    CHECK(!rejected && contains(rejected.error().message, "test profile rejects odd"));
+    force_odd->store(false);
+    auto frame = stream->receive(500ms);
+    CHECK(frame && frame.value().descriptor().native_frame_id % 2 == 0);
+    const std::vector<std::byte> saved(frame.value().bytes().begin(), frame.value().bytes().end());
+    stream->stop();
+    CHECK(device->close());
+    device.reset();
+    CHECK(counts->retired == 0); // stream still owns device profile state
+    stream.reset();
+    CHECK(counts->retired == 1 && counts->destroyed == 0);
+    CHECK(std::equal(saved.begin(), saved.end(), frame.value().bytes().begin()));
+    auto again = open_fake(*camera);
+    auto new_stream = again->create_stream();
+    CHECK(new_stream && !new_stream.value()->start(2)); // fresh native rate is >20
+    CHECK(counts->opened == 2 && counts->preflights == 2);
+    camera.reset(); // device/stream, not catalog/backend, now pin the profile
+    CHECK(counts->destroyed == 0);
+    CHECK(again->close());
+    again.reset();
+    CHECK(counts->destroyed == 0);
+    new_stream.value().reset();
+    CHECK(counts->destroyed == 1 && counts->states == counts->retired);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1282,6 +1337,7 @@ int main(int argc, char** argv) {
         g_log_set_handler(domain, static_cast<GLogLevelFlags>(G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING | G_LOG_FLAG_FATAL),
                           fatal_glib_log, nullptr);
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"selected profile stream lifetime and frame dispatch", selected_profile_stream_lifetime},
         {"A start, commands and single acquisition owner", start_and_commands},
         {"B real SDK pixels and descriptors", real_pixels_and_descriptors},
         {"C bounded pool, held pixels and release", pool_and_release},

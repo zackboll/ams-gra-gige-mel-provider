@@ -6,6 +6,7 @@
 #include "aravis_fake_support.hpp"
 #include "selection/session_selection.hpp"
 #include "selected_profile_contract.hpp"
+#include "alternate_camera_profile.hpp"
 
 #include <arv.h>
 
@@ -39,6 +40,11 @@ namespace {
     } while (false)
 
 bool contains(const std::string& text, std::string_view part) { return text.find(part) != std::string::npos; }
+
+template <class T> T take(backend::Result<T> result) {
+    if (!result) throw std::runtime_error(result.error().message);
+    return std::move(result).value();
+}
 
 std::shared_ptr<backend::ICameraDevice> open_fake(backend::ICameraBackend& camera) {
     auto opened = camera.open(aravis_fake::device_id);
@@ -387,8 +393,10 @@ void catalog_profile_selection() {
     hooks.before_write = [&](std::string_view feature, ArvDevice*) {
         writes.emplace_back(feature == "ExposureTimeAbs" ? "ExposureTime" : feature);
     };
-    CHECK(catalog.register_backend("aravis", std::string(selection::mono_free_running_v1),
-        [hooks] { return aravis_fake::make_backend(hooks); }));
+    CHECK(catalog.register_backend("aravis", std::vector<std::string>{std::string(selection::mono_free_running_v1)},
+        [hooks](selection::BackendCatalog::Profile p) {
+            return aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, std::move(p));
+        }));
     auto selected = selection::select_session(catalog,
         {"aravis", std::string(aravis_fake::device_id), std::string(selection::mono_free_running_v1), {}});
     CHECK(selected && observed->opened == 0 && writes.empty());
@@ -403,6 +411,60 @@ void catalog_profile_selection() {
     CHECK(device->close());
     auto reopened = open_fake(*other.value().backend);
     CHECK(reopened->close());
+
+    auto counts = std::make_shared<alternate_profile::Counts>();
+    auto alternate = [&] {
+        selection::BackendCatalog owned;
+        CHECK(owned.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+        CHECK(owned.register_backend("aravis", std::vector<std::string>{std::string(alternate_profile::id)},
+            [hooks](selection::BackendCatalog::Profile p) {
+                return aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, std::move(p));
+            }));
+        auto wrong = owned.create("aravis", selection::mono_free_running_v1);
+        CHECK(!wrong && counts->created == 0); // incompatible, not a fallback
+        auto session = selection::select_session(owned,
+            {"aravis", std::string(aravis_fake::device_id), std::string(alternate_profile::id), {}});
+        CHECK(session && counts->created == 1 && counts->opened == 0);
+        return std::move(session).value().backend;
+    }(); // catalog destroyed before open
+    device.reset(); reopened.reset();
+    auto alternate_device = open_fake(*alternate);
+    CHECK(alternate_device->capabilities().maximum_frame_rate_hz == 20);
+    auto request = take(alternate_device->configuration());
+    request.frame_rate_hz = 25;
+    writes.clear();
+    auto refused = alternate_device->apply(request);
+    CHECK(!refused && contains(refused.error().message, "test profile") && writes.empty());
+    request.frame_rate_hz = 20;
+    CHECK(alternate_device->apply(request));
+    CHECK(alternate_device->close());
+    alternate_device.reset();
+    CHECK(counts->retired == 1 && counts->destroyed == 0);
+    auto again = open_fake(*alternate);
+    CHECK(counts->opened == 2);
+    CHECK(again->close());
+    again.reset(); alternate.reset();
+    CHECK(counts->destroyed == 1 && counts->states == counts->retired);
+
+    class NullStateProfile final : public backend::profiles::ICameraProfile {
+    public:
+        std::string_view id() const noexcept override { return "test-null-state"; }
+        backend::Result<std::shared_ptr<const backend::profiles::ICameraProfileState>> open(
+            backend::device_features::IDeviceFeatures&) const override {
+            return std::shared_ptr<const backend::profiles::ICameraProfileState>{};
+        }
+    };
+    auto invalid = aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, {},
+                                                      std::make_shared<NullStateProfile>());
+    auto failed = invalid->open(aravis_fake::device_id);
+    CHECK(!failed && failed.error().code == backend::ErrorCode::invalid_state);
+    // Failed policy construction releases the native reservation, no fallback.
+    auto recovered = open_fake(*selected.value().backend);
+    CHECK(recovered->close());
+    bool null_rejected = false;
+    try { (void)aravis::make_backend(nullptr); }
+    catch (const std::invalid_argument&) { null_rejected = true; }
+    CHECK(null_rejected);
 }
 
 void ownership_and_failed_open() {

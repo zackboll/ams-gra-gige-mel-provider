@@ -1,5 +1,72 @@
 # Bootstrap validation record
 
+## Interchangeable source-level profiles (GIGE-MEL-034)
+
+Base: fetched main `7a2539a123dcb1a0cb1d5a7d7884d1b38c615c66`, tree
+`062bf6b9e239f86a29af0026671c71184ca97297`; PR #27 verified merged.
+Branch: `feature/gige-mel-034-camera-profile-interface`. The final commit/tree
+and complete **final-HEAD** results are recorded on the delivery PR after normal
+commit creation, avoiding a self-referential commit identity in this file.
+
+The [pre-implementation audit](tasks/GIGE-MEL-034-design.md) maps every hardcoded
+policy call. [Profile authoring](camera-profile-authoring.md) documents the
+implemented interface, owned type-safe per-device state, synchronous borrowed
+feature service, compatibility/injection and errors. The default pure policy
+algorithm bytes are unchanged except relocation of the unchanged pool planner
+to the neutral frame-policy module. No common provider, exported factory,
+installed header, pinned upstream or JSON dependency changes are made.
+
+Behavioral qualification extends existing tests rather than replacing them:
+
+* `device_feature_contract`: both concrete profiles, different capability and
+  apply/preflight admission, changed native state, failed open, state surviving
+  destruction of its parent profile and borrowed feature service.
+* `selection_contract`: independent exact profile registration, compatibility,
+  duplicate/missing IDs, null/mismatched/error/throwing profile factories,
+  independent instances, no unexpected backend construction and no fallback.
+* `aravis_adapter`: actual Fake open/apply via catalog injection, rejected 25 Hz
+  with no writes versus accepted default policy, 20 Hz capability limit, catalog
+  destruction, reopen and null state/open-failure reservation cleanup.
+* `aravis_stream_contract`: the same alternate implementation's odd-frame
+  rejection and even-frame admission through production receive, state/profile
+  lifetime, stop/close, retained bytes, fresh native-state preflight rejection.
+  The deterministic rejection forces only decoded test facts, not native buffers.
+* `aravis_mel_embedding`: unchanged MEL C2 path rejects 25 Hz and accepts 20 Hz
+  through the alternate implementation; existing timestamp-negative tests remain.
+* `pleora_sdk_contract`: actual GenApi feature service runs the default semantic
+  contract and the identical alternate profile; production copy stream rejects
+  odd and accepts even native SDK buffer IDs, retained bytes survive stop and
+  stream destruction, changed native state rejects before writes. This is not a
+  connected `PvDeviceGEV` open or a license/transport substitute. All eight named
+  native audit groups and the exact scoped GenApi TSan exception are preserved.
+
+Reproduce with separate `build/034-<lane>` directories, GCC 14.2.0, Debug and
+`BUILD_TESTING=ON`: `free-dev`, `free-asan`, `free-tsan`, `aravis-dev`,
+`pleora-dev`, `both-dev`, `both-asan`, `both-tsan`. ASan uses
+`GIGE_MEL_SANITIZERS=address,undefined`, TSan uses `thread`; runtime options are
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`,
+`UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`, and
+`TSAN_OPTIONS=halt_on_error=1`. SDK lanes explicitly enable their optional
+adapters using external Aravis 0.8.36, eBUS 6.5.3.7155 and matching GenApi 3.4.1
+headers. A separate Clang 19.1.7 SDK-free Debug lane checks compiler portability.
+No SDK provisioning/download or physical-camera test is performed.
+
+Each lane builds and runs its complete CTest suite, including existing profile,
+selection, provider portability, native/MEL integration, upstream/JSON integrity,
+publication-guard and isolation-verifier tests. SDK-enabled tests exercise real
+SDK fixtures, not physical cameras. Instrumented project code does not imply
+instrumented SDKs: existing Aravis handoff/loopback reporting blind spots and
+the audited GenApi exception remain explicitly applicable and unchanged.
+
+Additional qualification installs SDK-free and combined builds, builds/runs
+separate installed consumers without SDK discovery, runs the checked Aravis
+package verifier and independently checks installed headers/metadata/symbols and
+provider dependencies for Pleora/profile leakage. The authoring example is
+syntax-compiled, changed documentation links checked, pinned bytes independently
+verified, and `git diff --check` plus indexed/new-history proprietary guards run
+before publication. Logs/builds/SDK material stay outside Git. CI configured
+checks and physical qualification are not represented as executed local tests.
+
 ## Runtime selection (GIGE-MEL-033)
 
 Base: freshly fetched `origin/main` commit

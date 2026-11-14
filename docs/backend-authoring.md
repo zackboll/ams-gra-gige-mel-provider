@@ -84,7 +84,9 @@ The synthetic implementation validates the whole request before changing state. 
 
 ### Keep camera profiles separate from SDK mechanics
 
-For the first real SDK, factor feature translation into a small camera-profile helper under `ICameraDevice::apply`:
+The real adapters now dispatch feature translation through an owned
+`ICameraProfileState` under `ICameraDevice::apply`; see the required methods,
+registration and lifetime contract in [camera-profile authoring](camera-profile-authoring.md):
 
 | Shared intent | Typical profile decision | SDK adapter's job |
 | --- | --- | --- |
@@ -96,7 +98,10 @@ For the first real SDK, factor feature translation into a small camera-profile h
 
 SFNC is useful naming guidance, but SDK convenience methods can have broader effects than a single feature write. For example, Aravis documents its exposure API in microseconds and states that its frame-rate setter disables triggers. The adapter/profile must account for those behaviors; it cannot assume an exposure number is already nanoseconds or that a frame-rate update preserves trigger configuration. See the official [Aravis camera API][aravis-camera].
 
-The bootstrap has no generic feature-tree API and no configurable profile registry. Add them when justified. If a generic feature interface is introduced, preserve integer/float/bool/enum/string/command types, availability/writability, units, bounds/increments, and error provenance. Avoid a bare string-to-string map as the only control contract.
+The internal `IDeviceFeatures` service and explicitly owned profile registry are
+implemented; there is still no generic native feature-tree API or binary plugin
+ABI. Preserve typed values, availability/access, units, bounds/increments and
+error provenance. Avoid a bare string-to-string control map.
 
 ## Frame lease contract
 

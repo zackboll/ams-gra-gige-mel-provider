@@ -8,7 +8,8 @@
 // device ID) per process, across adapter instances; a second open is `busy`.
 #include "aravis_private.hpp"
 #include "acquisition_policy.hpp"
-#include "profiles/mono_free_running_device.hpp"
+#include "profiles/camera_profile.hpp"
+#include <stdexcept>
 
 #include <arv.h>
 
@@ -40,7 +41,7 @@
 namespace gige_mel::backend::aravis {
 namespace {
 
-namespace profile = profiles::mono_free_running;
+namespace profile = profiles;
 
 Error fail(ErrorCode code, std::string message) { return Error{code, std::move(message)}; }
 
@@ -674,9 +675,10 @@ struct NativeOpen {
 };
 
 struct DeviceCore {
-    DeviceCore(NativeOpen native, CameraCapabilities c, profile::NativeSnapshot e, std::shared_ptr<const TestHooks> h)
+    DeviceCore(NativeOpen native, CameraCapabilities c, std::shared_ptr<const profiles::ICameraProfileState> e,
+               std::shared_ptr<const profiles::ICameraProfile> p, std::shared_ptr<const TestHooks> h)
         : reservation(std::move(native.reservation)), device(std::move(native.device)), caps(c),
-          envelope(std::move(e)), hooks(std::move(h)), control_loss(std::move(native.control_loss)),
+          profile_owner(std::move(p)), policy(std::move(e)), hooks(std::move(h)), control_loss(std::move(native.control_loss)),
           loss_handler(std::exchange(native.loss_handler, 0)) {}
     ~DeviceCore() {
         if (device) {
@@ -692,7 +694,8 @@ struct DeviceCore {
     std::unique_ptr<Reservation> reservation;
     GObjectPtr<ArvDevice> device; // null after logical close
     const CameraCapabilities caps;
-    const profile::NativeSnapshot envelope;
+    const std::shared_ptr<const profiles::ICameraProfile> profile_owner;
+    const std::shared_ptr<const profiles::ICameraProfileState> policy;
     const std::shared_ptr<const TestHooks> hooks;
     const std::shared_ptr<ControlLoss> control_loss;
     gulong loss_handler{0}; // D; disconnected before releasing the native device
@@ -721,7 +724,7 @@ struct DeviceCore {
 // Fresh, truthful configuration (device lock held).
 Result<CameraConfiguration> read_configuration_locked(DeviceCore& core) {
     AravisDeviceFeatures features(core.device.get());
-    return profile::read_configuration(features, core.envelope, [&core]() -> Status {
+    return core.policy->configuration(features, [&core]() -> Status {
         if (core.lost()) return control_loss_error();
         return {};
     });
@@ -1043,20 +1046,13 @@ Status AravisStream::start(std::uint64_t configuration_generation) {
     }
     ArvDevice* device = core.device.get();
     AravisDeviceFeatures features(device);
-    auto snapshot = profile::read_snapshot(features);
-    if (!snapshot) return snapshot.error();
-    auto frozen = profile::acquisition_preflight(snapshot.value(), core.envelope);
+    auto frozen = core.policy->preflight(features);
     if (!frozen) return fail(frozen.error().code, frozen.error().message + "; no native stream was created");
-    auto mode = features.read_string_or_enum("AcquisitionMode");
-    if (!mode) return mode.error();
-    if (mode.value() != profile::acquisition_mode)
-        return fail(ErrorCode::unsupported, "AcquisitionMode is '" + mode.value() +
-                                                "'; the profile requires Continuous, which the adapter does not set");
     for (const char* command : {"AcquisitionStart", "AcquisitionStop"})
         if (auto node = command_node(device, command); !node) return node.error();
     auto payload = features.read_integer("PayloadSize");
     if (!payload) return payload.error();
-    auto pool = profile::plan_pool(payload.value(), frozen.value(), pool_buffers,
+    auto pool = profiles::plan_pool(payload.value(), frozen.value(), pool_buffers,
                                    maximum_frame_bytes, maximum_pool_bytes, core.caps.pixel_format);
     if (!pool) return pool.error();
     if (core.lost()) return control_loss_error(); // last admission check before native stream creation
@@ -1274,7 +1270,7 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
                     throw;
                 }
             }
-            const auto decision = profile::validate_frame(facts, run->configuration, run->pixel_format);
+            const auto decision = core_->policy->validate_frame(facts, run->configuration, run->pixel_format);
             if (decision.verdict == profile::FrameVerdict::accept) {
                 const auto* data = static_cast<const std::byte*>(arv_buffer_get_image_data(buffer.get(), nullptr));
                 FrameDescriptor d;
@@ -1349,9 +1345,9 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
 
 class AravisDevice final : public ICameraDevice {
 public:
-    AravisDevice(NativeOpen native, CameraCapabilities caps, profile::NativeSnapshot envelope,
-                 std::shared_ptr<const TestHooks> hooks)
-        : core_(std::make_shared<DeviceCore>(std::move(native), caps, std::move(envelope), std::move(hooks))) {}
+    AravisDevice(NativeOpen native, CameraCapabilities caps, std::shared_ptr<const profiles::ICameraProfileState> policy,
+                 std::shared_ptr<const profiles::ICameraProfile> owner, std::shared_ptr<const TestHooks> hooks)
+        : core_(std::make_shared<DeviceCore>(std::move(native), caps, std::move(policy), std::move(owner), std::move(hooks))) {}
     ~AravisDevice() override { (void)close(); }
     AravisDevice(const AravisDevice&) = delete;
     AravisDevice& operator=(const AravisDevice&) = delete;
@@ -1391,7 +1387,7 @@ public:
             if (core.lost()) return control_loss_error();
             return {};
         };
-        return profile::apply_configuration(features, request, core.envelope, check_connection, before_write);
+        return core.policy->apply(features, request, check_connection, before_write);
     }
 
     // Lightweight: no native stream, receiver, allocation or feature write.
@@ -1536,8 +1532,8 @@ private:
 
 class AravisBackend final : public ICameraBackend {
 public:
-    AravisBackend(InterfaceSource source, TestHooks hooks)
-        : source_(std::move(source)), hooks_(std::make_shared<const TestHooks>(std::move(hooks))) {}
+    AravisBackend(InterfaceSource source, TestHooks hooks, std::shared_ptr<const profiles::ICameraProfile> profile)
+        : profile_(std::move(profile)), source_(std::move(source)), hooks_(std::make_shared<const TestHooks>(std::move(hooks))) {}
     ~AravisBackend() override = default; // drops only its own interface reference
     AravisBackend(const AravisBackend&) = delete;
     AravisBackend& operator=(const AravisBackend&) = delete;
@@ -1574,17 +1570,21 @@ public:
         if (!native) return native.error();
         if (native.value().control_loss->lost.load()) return control_loss_error();
         AravisDeviceFeatures features(native.value().device.get());
-        auto snapshot = profile::read_snapshot(features);
+        auto policy = profile_->open(features);
         if (native.value().control_loss->lost.load()) return control_loss_error();
-        if (!snapshot) return fail(snapshot.error().code, "open '" + std::string(device_id) + "': " + snapshot.error().message);
-        auto caps = profile::capabilities_from(snapshot.value());
-        if (!caps) return fail(caps.error().code, "open '" + std::string(device_id) + "': unsupported camera profile: " + caps.error().message);
+        if (!policy) return fail(policy.error().code, "open '" + std::string(device_id) + "': " + policy.error().message);
+        if (!policy.value()) return fail(ErrorCode::invalid_state, "profile open returned null state");
+        auto caps = policy.value()->capabilities();
         // A current configuration that is not representable (e.g. a fractional
         // rate) does not prevent open: configuration() reports it explicitly
         // and apply() can recover with an exactly representable request.
         std::shared_ptr<ICameraDevice> device =
-            std::make_shared<AravisDevice>(std::move(native).value(), caps.value(), std::move(snapshot).value(), hooks_);
+            std::make_shared<AravisDevice>(std::move(native).value(), caps, std::move(policy).value(), profile_, hooks_);
         return device;
+    }
+
+    Result<std::shared_ptr<const profiles::ICameraProfileState>> open_profile(device_features::IDeviceFeatures& features) const {
+        return profile_->open(features);
     }
 
     // Exact-ID open with reservation; no profile validation (inspection uses it).
@@ -1643,27 +1643,25 @@ private:
         return interface_.get();
     }
 
+    const std::shared_ptr<const profiles::ICameraProfile> profile_;
     InterfaceSource source_;
     std::shared_ptr<const TestHooks> hooks_;
     GObjectPtr<ArvInterface> interface_; // guarded by interface_mutex(source_.name)
 };
 
-std::string integer_text(const profile::IntegerFeature& f) {
-    return std::to_string(f.value) + " [" + std::to_string(f.minimum) + ", " + std::to_string(f.maximum) + "] inc " +
-           std::to_string(f.increment);
-}
-
-std::string float_text(const profile::FloatFeature& f) {
-    char buffer[160];
-    std::snprintf(buffer, sizeof buffer, "%.17g [%.17g, %.17g]%s%s", f.value, f.minimum, f.maximum,
-                  f.unit ? " unit " : "", f.unit ? f.unit->c_str() : "");
-    return buffer;
-}
-
 } // namespace
 
 std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource source, TestHooks hooks) {
-    return std::make_shared<AravisBackend>(std::move(source), std::move(hooks));
+    return make_backend_for_interface(std::move(source), std::move(hooks), profiles::make_mono_free_running_profile());
+}
+
+std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource source, TestHooks hooks,
+    std::shared_ptr<const profiles::ICameraProfile> profile) {
+    if (!profile) throw std::invalid_argument("Aravis requires a camera profile");
+    return std::make_shared<AravisBackend>(std::move(source), std::move(hooks), std::move(profile));
+}
+std::shared_ptr<ICameraBackend> make_backend(std::shared_ptr<const profiles::ICameraProfile> profile) {
+    return make_backend_for_interface({"GigEVision", &arv_gv_interface_get_instance}, {}, std::move(profile));
 }
 
 std::shared_ptr<ICameraBackend> make_backend() {
@@ -1790,30 +1788,17 @@ Result<Inspection> inspect(ICameraBackend& backend, std::string_view device_id) 
         }
     }
     AravisDeviceFeatures features(device);
-    auto snapshot = profile::read_snapshot(features);
-    if (!snapshot) {
-        result.problems.push_back(snapshot.error().message);
-        return result; // the native reference and reservation are released here
+    auto policy = concrete->open_profile(features);
+    if (!policy) result.problems.push_back("unsupported profile: " + policy.error().message);
+    else if (!policy.value()) result.problems.push_back("profile open returned null state");
+    else {
+        const auto values = policy.value()->native_diagnostics();
+        result.native.insert(result.native.end(), values.begin(), values.end());
+        result.capabilities = policy.value()->capabilities();
+        auto actual = policy.value()->configuration(features, [] { return Status{}; });
+        if (actual) result.configuration = actual.value();
+        else result.problems.push_back("current configuration: " + actual.error().message);
     }
-    const auto& n = snapshot.value();
-    result.native.emplace_back("SensorWidth", std::to_string(n.sensor_width));
-    result.native.emplace_back("SensorHeight", std::to_string(n.sensor_height));
-    result.native.emplace_back("Width", integer_text(n.width));
-    result.native.emplace_back("Height", integer_text(n.height));
-    result.native.emplace_back("OffsetX", integer_text(n.offset_x));
-    result.native.emplace_back("OffsetY", integer_text(n.offset_y));
-    result.native.emplace_back(n.frame_rate_feature, float_text(n.frame_rate_hz));
-    result.native.emplace_back(n.exposure_feature, float_text(n.exposure_us));
-    result.native.emplace_back("PixelFormat", n.pixel_format + (n.mono8_available ? " (Mono8 available)" : " (Mono8 unavailable)"));
-    result.native.emplace_back("TriggerSelector", n.trigger_selector.value_or("<absent>"));
-    result.native.emplace_back("TriggerMode", n.trigger_mode.value_or("<absent>"));
-    result.native.emplace_back("ExposureAuto", n.exposure_auto.value_or("<absent>"));
-    result.native.emplace_back("AcquisitionFrameRateEnable",
-                               n.frame_rate_enable ? (*n.frame_rate_enable ? "true" : "false") : "<absent>");
-    if (auto caps = profile::capabilities_from(n)) result.capabilities = caps.value();
-    else result.problems.push_back("unsupported profile: " + caps.error().message);
-    if (auto actual = profile::configuration_from(n)) result.configuration = actual.value();
-    else result.problems.push_back("current configuration: " + actual.error().message);
     return result;
 }
 

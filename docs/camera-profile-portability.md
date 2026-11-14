@@ -28,10 +28,12 @@ error translation. It retains discovery, device ownership, acquisition-command
 uncertainty, streams, buffers and normalization of received-frame facts. A
 second SDK backend is now implemented by the optional [Pleora adapter](pleora-integration.md),
 but licensed camera-control and transport qualification remain pending.
-GIGE-MEL-033 adds [explicit backend/profile binding](runtime-selection.md) for the
-single canonical `mono_free_running_v1` profile. Multiple independent profiles
-and dynamically loaded profile plugins remain subsequent work. The shared profile
-sources are unchanged by that adapter and by runtime selection.
+GIGE-MEL-033 adds [explicit backend/profile binding](runtime-selection.md).
+GIGE-MEL-034 adds independently registered source-level `ICameraProfile`
+implementations and typed opaque device state, dispatched by both adapters.
+The default canonical selection ID remains `mono_free_running_v1`; its algorithms
+are retained. See [profile authoring](camera-profile-authoring.md). Dynamically
+loaded profile plugins remain separate future work.
 
 ## Preserved behavior
 
@@ -129,8 +131,9 @@ or acceptance semantics.
 | 2: typed device services (GIGE-MEL-025) | Shared snapshot/configuration orchestration over an internal typed feature interface, with an Aravis implementation | Recording-service tests prove required operations, ordering, fresh readback and error distinctions; actual Aravis tests remain passing |
 | 3: narrow Pleora backend | Implement that interface and native acquisition for the same initial camera/profile | The same unchanged profile and applicable MEL tests work with both actual SDKs |
 | 4: selection and device identity (GIGE-MEL-033 foundation) | Explicit built-backend, exact device ID and canonical profile binding; no implicit open | Offline selector/native-fixture contracts; physical identity equivalence and cross-SDK hardware qualification remain pending |
-| 5: sensor capabilities | Add navigation wire protocol, additional payloads or other requested operations individually | Shared semantic tests plus device/SDK evidence for each advertised capability |
-| 6: optional binary plugins | Define loading, versioning, ownership and compatibility if independent distribution is needed | Profile lifetime, ABI mismatch and unload behavior are validated separately |
+| 5: source-level profiles (GIGE-MEL-034) | Owned interface/state and independent registration/compatibility | Alternate test profile changes native configuration/frame admission in both SDK fixture paths |
+| 6: sensor capabilities | Add navigation wire protocol, additional payloads or other requested operations individually | Shared semantic tests plus device/SDK evidence for each advertised capability |
+| 7: optional binary plugins | Define loading, versioning, ownership and compatibility if independent distribution is needed | Profile lifetime, ABI mismatch and unload behavior are validated separately |
 
 Start with the same physical camera and profile through both SDKs. Compare
 configuration requests and actual readback, invalid requests, pixel layout,

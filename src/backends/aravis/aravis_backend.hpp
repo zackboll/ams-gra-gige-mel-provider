@@ -8,6 +8,7 @@
 // the common MEL provider rejects them; see docs/aravis-integration.md.
 
 #include <gige_mel/backend.hpp>
+#include "profiles/camera_profile.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -27,6 +28,7 @@ inline constexpr std::string_view backend_id = "aravis";
 // no discovery, open or configuration I/O and changes no process-wide Aravis
 // state (no interface enable flags, never arv_shutdown()).
 std::shared_ptr<ICameraBackend> make_backend();
+std::shared_ptr<ICameraBackend> make_backend(std::shared_ptr<const profiles::ICameraProfile>);
 
 // Version of the Aravis library actually loaded at run time ("0.8.36"), and
 // the version the adapter was compiled against.
