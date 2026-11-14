@@ -25,7 +25,24 @@ inline void arrange(ArvDevice* d) {
     add(d, add(d, ARV_DOM_NODE(arv_device_get_feature(d, "PixelFormat")), "EnumEntry", "Mono12"),
         "Value", nullptr, "17825797"); // fixture representation, never hardware byte-order evidence
     auto* rate = arv_device_get_feature(d, "AcquisitionFrameRate");
-    arv_dom_element_set_attribute(ARV_DOM_ELEMENT(rate), "Name", "AcquisitionFrameRateAbs");
+    std::string converter;
+    for (auto* child = arv_dom_node_get_first_child(ARV_DOM_NODE(rate)); child;
+         child = arv_dom_node_get_next_sibling(child)) {
+        if (std::string_view(arv_dom_node_get_node_name(child)) == "pValue") {
+            auto* linked = arv_gc_property_node_get_linked_node(ARV_GC_PROPERTY_NODE(child));
+            if (linked && ARV_IS_GC_FEATURE_NODE(linked))
+                converter = arv_gc_feature_node_get_name(ARV_GC_FEATURE_NODE(linked));
+        }
+    }
+    if (converter.empty()) throw std::runtime_error("Fake rate converter missing");
+    auto* abs = add(d, nullptr, "Float", "AcquisitionFrameRateAbs");
+    add(d, abs, "pValue", nullptr, converter.c_str());
+    add(d, abs, "Min", nullptr, "0.0149");
+    add(d, abs, "Max", nullptr, "1000000");
+    add(d, abs, "Unit", nullptr, "Hz");
+    // Never rename registered nodes: Aravis retains borrowed name hash keys.
+    add(d, add(d, nullptr, "Integer", "CognexAliasAbsent"), "Value", nullptr, "0");
+    add(d, ARV_DOM_NODE(rate), "pIsImplemented", nullptr, "CognexAliasAbsent");
     add(d, add(d, nullptr, "Integer", "CognexRateEnableValue"), "Value", nullptr, "1");
     add(d, add(d, nullptr, "Boolean", "AcquisitionFrameRateEnable"), "pValue", nullptr, "CognexRateEnableValue");
     GError* error = nullptr;

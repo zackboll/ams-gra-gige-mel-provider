@@ -68,6 +68,11 @@ Configure `build/036-LANE` with explicit `GIGE_MEL_BUILD_ARAVIS`,
 | both-tsan | ON | ON | thread |
 
 Native test trees run sequentially (shared simulator UDP port 3956).
+An exploratory ASan run caught a fixture-only Aravis DOM rename use-after-free:
+registered feature names are borrowed by the SDK's hash table. The fixture now
+adds a separate Abs node linked to the original period converter and marks the
+original alias unimplemented, without renaming any registered node. The final
+matrix is rerun on the corrected exact HEAD; no sanitizer/test weakening.
 Use `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`,
 `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`,
 `TSAN_OPTIONS=halt_on_error=1`. The unchanged scoped native GenApi audit first
