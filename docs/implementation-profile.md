@@ -1,5 +1,13 @@
 # Experimental image-stream profile, version 0.1
 
+## Cognex profile (GIGE-MEL-036)
+
+The optional [independent CIC-5000R module](../camera_profiles/cognex_cic_5000r/README.md)
+checks exact COGNEX/CIC-5000R/V3.7-1 identity and admits only actual Mono8 and
+1/2/4/5/8/10 Hz requests/acquisition. It never enables rate control or normalizes
+trigger/format/automation. Native readback and partial-write recovery remain
+truthful. This adds no MEL surface or physical/timestamp qualification.
+
 ## Explicit matched-C++ profile modules (GIGE-MEL-035)
 
 An opt-in Linux x86-64 loader now validates separately compiled camera-profile

@@ -128,7 +128,7 @@ std::size_t Port::write_attempts(std::optional<std::int64_t> address) const {
     }));
 }
 
-Fixture::Fixture() {
+Fixture::Fixture(bool cognex, std::string_view wrong_identity) {
     port.integer(width, 320);
     port.integer(height, 240);
     port.real(rate, 50.0);
@@ -141,7 +141,35 @@ Fixture::Fixture() {
     port.integer(frame_rate_enabled, 1);
     port.real(fixed_float, 1.0);
     port.integer(broken_implemented, 1);
-    map._LoadXMLFromString(xml);
+    std::string description = xml;
+    if (cognex) {
+        const auto replace = [&](const std::string& old, const std::string& value) {
+            const auto at = description.find(old);
+            if (at == std::string::npos) throw std::runtime_error("Cognex fixture replacement missing");
+            description.replace(at, old.size(), value);
+        };
+        replace("<Value>640</Value>", "<Value>2592</Value>");
+        replace("<Value>480</Value>", "<Value>1944</Value>");
+        replace("<Value>2</Value></Integer>", "<Value>64</Value></Integer>");
+        replace("<Integer Name=\"WidthIncrement\"><Value>2", "<Integer Name=\"WidthIncrement\"><Value>1");
+        replace("<Min>2</Min><pMax>HeightMax</pMax><Inc>2</Inc>", "<Min>64</Min><pMax>HeightMax</pMax><Inc>1</Inc>");
+        replace("<pMax>OffsetXMax</pMax><Inc>2</Inc>", "<pMax>OffsetXMax</pMax><Inc>1</Inc>");
+        replace("<pMax>OffsetYMax</pMax><Inc>2</Inc>", "<pMax>OffsetYMax</pMax><Inc>1</Inc>");
+        replace("Name=\"AcquisitionFrameRateAbs\"><pValue>RateReg</pValue><Min>1</Min><Max>200</Max>",
+                "Name=\"AcquisitionFrameRateAbs\"><pValue>RateReg</pValue><Min>0.0149</Min><Max>1000000</Max>");
+        replace("Name=\"ExposureTimeAbs\"><pValue>ExposureReg</pValue><Min>1</Min><pMax>ExposureMaximum</pMax>",
+                "Name=\"ExposureTimeAbs\"><pValue>ExposureReg</pValue><Min>35</Min><Max>999985</Max>");
+        std::string identities;
+        for (const auto& [name, value] : {std::pair{"DeviceVendorName", "COGNEX"},
+                {"DeviceModelName", "CIC-5000R"}, {"DeviceFirmwareVersion", "106349-08;U;CIC-5000R;V3.7-1;0"}})
+            identities += "<String Name=\"" + std::string(name) + "\"><Value>" +
+                (wrong_identity == name ? "wrong" : value) + "</Value></String>";
+        replace("</RegisterDescription>", identities + "</RegisterDescription>");
+        port.integer(width, 2592); port.integer(height, 1944);
+        port.integer(rate_implemented, 0); port.integer(exposure_implemented, 0);
+        port.real(rate, 10); port.real(exposure, 35000);
+    }
+    map._LoadXMLFromString(description.c_str());
     if (!map._Connect(&port, "Device")) throw std::runtime_error("could not connect original GenApi test port");
 }
 

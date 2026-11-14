@@ -9,6 +9,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <chrono>
@@ -810,9 +811,17 @@ void interchangeable_owned_profile_states() {
     retained.reset(); // destructor must not use borrowed services
 }
 
+#include "cognex_profile_tests.inc"
+
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--cognex-only") {
+        try { cognex_contract(); }
+        catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+        std::cout << "Cognex typed-fixture, policy and dynamic lifetime contracts passed\n";
+        return 0;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--dynamic-module-only") {
         try { dynamic_module_contract(); }
         catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

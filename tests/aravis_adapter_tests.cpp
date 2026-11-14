@@ -6,6 +6,7 @@
 #include "aravis_fake_support.hpp"
 #include "selection/session_selection.hpp"
 #include "selected_profile_contract.hpp"
+#include "cognex_aravis_fixture.hpp"
 #include "alternate_camera_profile.hpp"
 #include "selection/profile_loader.hpp"
 
@@ -383,6 +384,54 @@ void exact_selection() {
     CHECK(device->configuration().value() == fake_initial);
     CHECK(device->close());
     CHECK(observed->live() == 0); // logical close released the native device
+}
+
+void cognex_profile_selection() {
+    namespace selection = gige_mel::selection;
+    auto loaded = take(selection::load_profile_module(GIGE_MEL_COGNEX_MODULE));
+    std::vector<std::string> writes;
+    for (const auto* mismatch : {"DeviceVendorName", "DeviceModelName", "DeviceFirmwareVersion", ""}) {
+        aravis::TestHooks hooks;
+        hooks.after_native_open = [mismatch](ArvDevice* d) {
+            cognex_aravis::arrange(d);
+            if (*mismatch) cognex_aravis::string(d, mismatch, "wrong");
+        };
+        hooks.before_write = [&](std::string_view name, ArvDevice*) { writes.emplace_back(name); };
+        auto camera = aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, loaded.profile);
+        writes.clear();
+        auto opened = camera->open(aravis_fake::device_id);
+        if (*mismatch) {
+            CHECK(!opened && contains(opened.error().message, mismatch) && writes.empty());
+            continue;
+        }
+        CHECK(opened);
+        auto device = std::move(opened).value();
+        CHECK(device->capabilities().maximum_frame_rate_hz == 10);
+        auto request = take(device->configuration());
+        for (auto rate : {12u, 14u, 16u}) {
+            request.frame_rate_hz = rate;
+            CHECK(!device->apply(request) && writes.empty());
+        }
+        for (auto rate : {1u, 2u, 4u, 5u, 8u, 10u}) {
+            request.frame_rate_hz = rate;
+            CHECK(take(device->apply(request)) == request);
+            CHECK(take(device->configuration()) == request);
+        }
+        auto stream = take(device->create_stream());
+        native(*device, [](ArvDevice* d) { cognex_aravis::rate(d, 16); });
+        CHECK(take(device->configuration()).frame_rate_hz == 16);
+        auto rejected = stream->start(1);
+        CHECK(!rejected && contains(rejected.error().message, "AcquisitionFrameRateAbs"));
+        native(*device, [](ArvDevice* d) { cognex_aravis::rate(d, 10); });
+        native(*device, [](ArvDevice* d) { sdk_set_string(d, "PixelFormat", "Mono12"); });
+        CHECK(!stream->start(2)); // no implicit format repair
+        native(*device, [](ArvDevice* d) { sdk_set_string(d, "PixelFormat", "Mono8"); });
+        std::string native_message;
+        native(*device, [&](ArvDevice* d) { native_message = break_implementation_query(d, "Width"); });
+        auto failed = device->configuration();
+        CHECK(!failed && contains(failed.error().message, native_message));
+        CHECK(device->close());
+    }
 }
 
 void catalog_profile_selection() {
@@ -1198,6 +1247,7 @@ int main(int argc, char** argv) {
         {"construction without I/O and copied discovery", construction_and_discovery},
         {"exact device selection", exact_selection},
         {"catalog selection and shared profile semantics", catalog_profile_selection},
+        {"Cognex shared module through native Fake features", cognex_profile_selection},
         {"ownership and failed-open cleanup", ownership_and_failed_open},
         {"concurrent open across adapters", concurrent_open_is_serialized},
         {"real capabilities and two valid configurations", capabilities_and_configuration},

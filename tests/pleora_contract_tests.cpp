@@ -253,6 +253,66 @@ void cache_freshness_and_dynamic_constraint_order() {
 }
 
 void unchanged_profile_prevalidation_and_truthful_readback() {
+    // Same independently built Cognex binary as the Aravis lane. Production
+    // GenApi features and real PvBuffer copy/validation, not a connected camera.
+    {
+        auto loaded = take(gige_mel::selection::load_profile_module(GIGE_MEL_COGNEX_MODULE));
+        for (auto name : {"DeviceVendorName", "DeviceModelName", "DeviceFirmwareVersion"}) {
+            fixture::Fixture wrong(true, name);
+            pleora::Features view(*wrong.map._Ptr);
+            auto rejected_identity = loaded.profile->open(view);
+            CHECK(!rejected_identity && contains(rejected_identity.error().message, name));
+            CHECK(wrong.port.write_attempts() == 0);
+        }
+        fixture::Fixture camera(true);
+        pleora::Features view(*camera.map._Ptr);
+        auto state = take(loaded.profile->open(view));
+        CHECK(state->capabilities().maximum_frame_rate_hz == 10);
+        auto request = take(state->configuration(view, connected));
+        for (auto rate : {12u, 14u, 16u}) {
+            request.frame_rate_hz = rate;
+            rejected(state->apply(view, request, connected, ready), backend::ErrorCode::unsupported);
+            CHECK(camera.port.write_attempts() == 0);
+        }
+        for (auto rate : {1u, 2u, 4u, 5u, 8u, 10u}) {
+            request.frame_rate_hz = rate;
+            CHECK(take(state->apply(view, request, connected, ready)) == request);
+            CHECK(take(state->configuration(view, connected)) == request);
+            CHECK(take(state->preflight(view)) == request);
+        }
+        camera.port.real(fixture::rate, 16);
+        CHECK(take(state->configuration(view, connected)).frame_rate_hz == 16);
+        rejected(state->preflight(view), backend::ErrorCode::unsupported);
+        CHECK(state->apply(view, request, connected, ready));
+        camera.port.fail_write = fixture::exposure;
+        auto partial = state->apply(view, request, connected, ready);
+        rejected(partial, backend::ErrorCode::io_error, "injected test port write failure");
+        CHECK(contains(partial.error().message, "actual native configuration:"));
+        camera.port.fail_write.reset();
+        camera.port.fail_read = fixture::width;
+        rejected(state->configuration(view, connected), backend::ErrorCode::io_error, "injected test port read failure");
+        camera.port.fail_read.reset();
+        auto source = std::make_shared<pleora_controlled::Source>(backend::PixelFormat::mono8, request);
+        auto stream = pleora::make_stream(source, state);
+        CHECK(stream->start(1));
+        loaded = {}; state.reset(); // only the stream retains module/state
+        auto first = take(stream->receive(100ms));
+        auto second = take(stream->receive(100ms));
+        CHECK(first.descriptor().native_frame_id == 1 && second.descriptor().native_frame_id == 2);
+        const std::vector<std::byte> saved(first.bytes().begin(), first.bytes().end());
+        stream->stop(); stream.reset(); source.reset();
+        CHECK(std::equal(saved.begin(), saved.end(), first.bytes().begin()));
+        auto reopened = take(gige_mel::selection::load_profile_module(GIGE_MEL_COGNEX_MODULE));
+        camera.port.integer(fixture::pixel_format, profile::pfnc_mono12);
+        rejected(reopened.profile->open(view), backend::ErrorCode::unsupported, "Mono8");
+        camera.port.integer(fixture::pixel_format, profile::pfnc_mono8);
+        auto mono_state = take(reopened.profile->open(view));
+        auto mono12_source = std::make_shared<pleora_controlled::Source>(backend::PixelFormat::mono12, request);
+        auto mono12_stream = pleora::make_stream(mono12_source, mono_state);
+        CHECK(mono12_stream->start(2)); // controlled source bypasses camera preflight intentionally
+        rejected(mono12_stream->receive(100ms), backend::ErrorCode::unsupported, "Mono8");
+        mono12_stream->stop();
+    }
     // Select the real production factory without opening/discovery. Feature
     // semantics below use its native feature implementation over a local port;
     // this does not pretend to open a physical Pleora device offline.

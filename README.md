@@ -18,6 +18,11 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+The independently built [Cognex CIC-5000R module](camera_profiles/cognex_cic_5000r/README.md)
+adds exact model/firmware admission and conservative Mono8 1/2/4/5/8/10 Hz policy
+through either SDK. It is explicitly selected, never a fallback or factory change.
+Fixture qualification is separate from historical physical-camera evidence.
+
 An uninstalled [runtime selection example](docs/runtime-selection.md) now binds
 an exact backend/device ID to the canonical `mono_free_running_v1` profile using
 the existing C++ embedding seam. Run `gige_mel_select --list` to list compiled

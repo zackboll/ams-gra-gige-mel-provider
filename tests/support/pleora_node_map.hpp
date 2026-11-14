@@ -15,6 +15,7 @@
 #include <functional>
 #include <optional>
 #include <vector>
+#include <string_view>
 
 namespace pleora_node_map {
 
@@ -69,7 +70,7 @@ private:
 
 class Fixture {
 public:
-    Fixture();
+    explicit Fixture(bool cognex = false, std::string_view wrong_identity = {});
     // Port outlives the native map that references it.
     Port port;
     native::CNodeMapRef map;

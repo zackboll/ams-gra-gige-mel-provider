@@ -1,5 +1,10 @@
 # Camera-profile authoring (GIGE-MEL-034/035)
 
+The [Cognex CIC-5000R profile](../camera_profiles/cognex_cic_5000r/README.md)
+is a real-camera-specific module using this unchanged interface: exact identity,
+owned state, discrete-rate policy and shared representation algorithms without
+SDK dependencies. Its qualification record distinguishes fixtures from hardware.
+
 This is an **internal, uninstalled C++20 interface** for statically linked or
 explicitly loaded matched-toolchain Linux x86-64 implementations. It is not a
 permanently stable, cross-toolchain binary ABI.

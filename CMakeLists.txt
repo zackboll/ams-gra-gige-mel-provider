@@ -207,12 +207,34 @@ if(BUILD_TESTING)
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 2
     BUILD_ALWAYS TRUE INSTALL_COMMAND "")
   set(profile_test_module "${CMAKE_CURRENT_BINARY_DIR}/external-profile/librate_limited_profile.so")
+  ExternalProject_Add(gige_mel_cognex_profile
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/camera_profiles/cognex_cic_5000r
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/cognex-profile
+    CMAKE_ARGS -DGIGE_MEL_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
+      -DCMAKE_CXX_FLAGS_DEBUG=${CMAKE_CXX_FLAGS_DEBUG}
+      -DCMAKE_CXX_FLAGS_RELEASE=${CMAKE_CXX_FLAGS_RELEASE}
+      -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=${CMAKE_CXX_FLAGS_RELWITHDEBINFO}
+      -DCMAKE_CXX_FLAGS_MINSIZEREL=${CMAKE_CXX_FLAGS_MINSIZEREL}
+      -DGIGE_MEL_SANITIZERS=${GIGE_MEL_SANITIZERS}
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 2
+    BUILD_ALWAYS TRUE INSTALL_COMMAND "")
+  set(cognex_module "${CMAKE_CURRENT_BINARY_DIR}/cognex-profile/libcognex_cic_5000r.so")
+  foreach(target device_feature_tests aravis_adapter_tests aravis_stream_contract_tests pleora_contract_tests)
+    if(TARGET ${target})
+      target_compile_definitions(${target} PRIVATE GIGE_MEL_COGNEX_MODULE="${cognex_module}")
+      add_dependencies(${target} gige_mel_cognex_profile)
+    endif()
+  endforeach()
   target_link_libraries(device_feature_tests PRIVATE gige_mel_selection)
   target_compile_definitions(device_feature_tests PRIVATE
     GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
     GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile")
   add_dependencies(device_feature_tests gige_mel_external_test_profile)
   add_test(NAME dynamic_profile_module_contract COMMAND device_feature_tests --dynamic-module-only)
+  add_test(NAME cognex_profile_contract COMMAND device_feature_tests --cognex-only)
+  set_tests_properties(cognex_profile_contract PROPERTIES TIMEOUT 30)
   set_tests_properties(dynamic_profile_module_contract PROPERTIES TIMEOUT 30)
   add_executable(selection_tests tests/selection_tests.cpp)
   target_link_libraries(selection_tests PRIVATE gige_mel_selection gige_mel_provider gige_mel_build_options)
