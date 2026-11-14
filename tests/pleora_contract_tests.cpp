@@ -6,6 +6,9 @@
 #include "pleora_private.hpp"
 #include "pleora_node_map.hpp"
 #include "profiles/mono_free_running_device.hpp"
+#include "backends/pleora/pleora_backend.hpp"
+#include "selection/session_selection.hpp"
+#include "selected_profile_contract.hpp"
 
 #include <PvDeviceGEV.h>
 #include <PvGenParameterArray.h>
@@ -246,6 +249,33 @@ void cache_freshness_and_dynamic_constraint_order() {
 }
 
 void unchanged_profile_prevalidation_and_truthful_readback() {
+    // Select the real production factory without opening/discovery. Feature
+    // semantics below use its native feature implementation over a local port;
+    // this does not pretend to open a physical Pleora device offline.
+    namespace selection = gige_mel::selection;
+    selection::BackendCatalog catalog;
+    CHECK(catalog.register_backend("pleora", std::string(selection::mono_free_running_v1),
+        [] { return pleora::make_backend(); }));
+    auto selected = selection::select_session(catalog,
+        {"pleora", "00:11:22:33:44:55", std::string(selection::mono_free_running_v1), {}});
+    CHECK(selected && selected.value().backend->id() == "pleora");
+    {
+        fixture::Fixture semantic_camera;
+        pleora::Features semantic_view(*semantic_camera.map._Ptr);
+        const auto semantic_envelope = take(profile::read_snapshot(semantic_view));
+        selected_profile_contract([&](const auto& request) {
+                return profile::apply_configuration(semantic_view, request, semantic_envelope, connected, ready);
+            }, [&] { return profile::read_configuration(semantic_view, semantic_envelope, connected); },
+            [&] { semantic_camera.port.calls.clear(); }, [&] {
+                std::vector<std::string> names;
+                for (auto address : writes(semantic_camera.port)) {
+                    if (address == fixture::rate) names.emplace_back("AcquisitionFrameRate");
+                    else if (address == fixture::exposure) names.emplace_back("ExposureTime");
+                    else names.emplace_back("ROI");
+                }
+                return names;
+            });
+    }
     fixture::Fixture camera;
     pleora::Features view(*camera.map._Ptr);
     const auto envelope = take(profile::read_snapshot(view));

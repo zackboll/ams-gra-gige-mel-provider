@@ -18,6 +18,12 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+An uninstalled [runtime selection example](docs/runtime-selection.md) now binds
+an exact backend/device ID to the canonical `mono_free_running_v1` profile using
+the existing C++ embedding seam. Run `gige_mel_select --list` to list compiled
+backends without hardware I/O. Optional SDKs stay outside the installed provider;
+the exported MEL factory still accepts only `synthetic`.
+
 An optional, internal [Pleora eBUS backend](docs/pleora-integration.md) implements
 the same shared monochrome profile. It is OFF by default, requires an external
 licensed SDK, and is never installed/exported or selected by MEL factories.

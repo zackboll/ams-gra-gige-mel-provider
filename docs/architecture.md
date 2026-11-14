@@ -2,6 +2,12 @@
 
 ## Status
 
+GIGE-MEL-033 adds an explicitly owned SDK-free backend catalog and exact
+device/profile binding in a separate, uninstalled composition target. Optional
+factories are registered only when built; the provider and shared profile sources
+remain unchanged. [Runtime selection](runtime-selection.md) specifies validation,
+no-I/O selection, lifecycle, ownership boundaries and future plugin work.
+
 The optional [Pleora backend](pleora-integration.md) implements the existing
 source interfaces using the same SDK-free profile and typed feature service.
 Its bounded copy leases retain no SDK objects, so native stop/close do not

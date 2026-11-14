@@ -4,6 +4,8 @@
 // implementation of the Fake camera. Private hooks only arrange native state
 // through that same SDK or observe lifetime; they do not replace SDK I/O.
 #include "aravis_fake_support.hpp"
+#include "selection/session_selection.hpp"
+#include "selected_profile_contract.hpp"
 
 #include <arv.h>
 
@@ -374,6 +376,33 @@ void exact_selection() {
     CHECK(device->configuration().value() == fake_initial);
     CHECK(device->close());
     CHECK(observed->live() == 0); // logical close released the native device
+}
+
+void catalog_profile_selection() {
+    namespace selection = gige_mel::selection;
+    selection::BackendCatalog catalog;
+    auto observed = std::make_shared<NativeOpens>();
+    std::vector<std::string> writes;
+    auto hooks = observed->hooks();
+    hooks.before_write = [&](std::string_view feature, ArvDevice*) {
+        writes.emplace_back(feature == "ExposureTimeAbs" ? "ExposureTime" : feature);
+    };
+    CHECK(catalog.register_backend("aravis", std::string(selection::mono_free_running_v1),
+        [hooks] { return aravis_fake::make_backend(hooks); }));
+    auto selected = selection::select_session(catalog,
+        {"aravis", std::string(aravis_fake::device_id), std::string(selection::mono_free_running_v1), {}});
+    CHECK(selected && observed->opened == 0 && writes.empty());
+    auto device = open_fake(*selected.value().backend);
+    selected_profile_contract([&](const auto& request) { return device->apply(request); },
+        [&] { return device->configuration(); }, [&] { writes.clear(); }, [&] { return writes; });
+    auto other = selection::select_session(catalog,
+        {"aravis", std::string(aravis_fake::device_id), std::string(selection::mono_free_running_v1), {}});
+    CHECK(other);
+    auto conflicting = other.value().backend->open(aravis_fake::device_id);
+    CHECK(!conflicting && conflicting.error().code == backend::ErrorCode::busy);
+    CHECK(device->close());
+    auto reopened = open_fake(*other.value().backend);
+    CHECK(reopened->close());
 }
 
 void ownership_and_failed_open() {
@@ -1091,6 +1120,7 @@ int main(int argc, char** argv) {
         {"GVSP receive-buffer assessment and warning text (SDK-free, GIGE-MEL-019)", receive_buffer_assessment},
         {"construction without I/O and copied discovery", construction_and_discovery},
         {"exact device selection", exact_selection},
+        {"catalog selection and shared profile semantics", catalog_profile_selection},
         {"ownership and failed-open cleanup", ownership_and_failed_open},
         {"concurrent open across adapters", concurrent_open_is_serialized},
         {"real capabilities and two valid configurations", capabilities_and_configuration},

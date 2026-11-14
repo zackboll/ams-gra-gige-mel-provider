@@ -1,5 +1,62 @@
 # Bootstrap validation record
 
+## Runtime selection (GIGE-MEL-033)
+
+Base: freshly fetched `origin/main` commit
+`e450bff3a9445ac5c4d689efee2308cb4265ed03`, tree
+`dbdb14dae37c6f6fddd062ff5d6f2ca3aa752289`; GitHub confirms PR #26 merged
+at that commit. Work branch: `feature/gige-mel-033-backend-selection`.
+No published history, pinned dependencies, production adapters, provider,
+factories or shared profile source bytes changed.
+
+The [selection contract](runtime-selection.md) documents the API, target boundary,
+tests and remaining multiple-profile/plugin work. Qualification uses GCC 14.2.0
+on Debian 13 x86-64, existing external Aravis 0.8.36 and eBUS 6.5.3.7155 with
+matching external GenApi 3.4.1 headers. No SDK downloads or physical-camera
+tests are required or run. Sanitizers instrument project code, not vendor SDKs;
+existing Aravis boundary limitations and the exact audited native GenApi TSan
+exception remain unchanged.
+
+The final-HEAD results and exact final commit/tree are attached to the delivery
+PR, after committing normally, rather than embedding a self-referential commit
+identity here. Reproduction uses separate `build/033-<lane>` directories,
+`CMAKE_BUILD_TYPE=Debug`, `BUILD_TESTING=ON`, and the following lanes:
+
+| Lane | Optional adapters | Sanitizers |
+| --- | --- | --- |
+| free-dev | neither | none |
+| free-asan | neither | address,undefined |
+| free-tsan | neither | thread |
+| aravis-dev | Aravis only | none |
+| pleora-dev | Pleora only | none |
+| both-dev | Aravis and Pleora | none |
+| both-asan | Aravis and Pleora | address,undefined |
+| both-tsan | Aravis and Pleora | thread |
+
+Configure with the existing `GIGE_MEL_BUILD_ARAVIS`, `GIGE_MEL_BUILD_PLEORA`,
+`GIGE_MEL_PLEORA_SDK_ROOT`, `GIGE_MEL_PLEORA_GENICAM_INCLUDE_DIR` and
+`GIGE_MEL_SANITIZERS` settings; point `PKG_CONFIG_PATH` at the external Aravis
+pkg-config directory. Build with `cmake --build <directory> --parallel 2`, then
+`ctest --test-dir <directory> --parallel 1 --output-on-failure`. Serialize all
+SDK suites across build directories to avoid colliding on simulator UDP 3956.
+Use `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`,
+`UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`, and
+`TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1`.
+
+Package checks install SDK-free and combined builds to distinct external prefixes,
+configure/build/run separate installed consumers without `PKG_CONFIG_PATH`, run
+the existing package isolation verifier, and inspect both installed binaries'
+symbols/dependencies and installed non-documentation text/names for either SDK.
+Also run `scripts/check_proprietary.py --history <base>`, upstream/JSON integrity
+verification and `git diff --check`. A minimal tests/examples-OFF build is checked.
+
+Development corrections retained in the handoff: a test constructor initially
+needed an explicit interface pointer return type; the cross-fixture ordering
+request changed from unchanged Aravis 25 Hz to exactly representable 20 Hz to
+exercise period lengthening on both fixtures. A premature CTest invocation before
+the background optional build completed reported missing executables; the
+completed-build rerun passed. None is represented as a qualification pass.
+
 ## Unpacked Mono12 (GIGE-MEL-022)
 
 Started from freshly fetched origin/main
