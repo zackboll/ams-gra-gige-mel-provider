@@ -73,6 +73,10 @@ registered feature names are borrowed by the SDK's hash table. The fixture now
 adds a separate Abs node linked to the original period converter and marks the
 original alias unimplemented, without renaming any registered node. The final
 matrix is rerun on the corrected exact HEAD; no sanitizer/test weakening.
+Hosted GCC 13 Release also diagnosed a temporary-vector comparison in the new
+retained-frame test under `-Werror=free-nonheap-object`. Compare the retained
+span's size and bytes directly instead; the same assertion is preserved without
+suppressing the warning. Final-HEAD qualification includes this correction.
 Use `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`,
 `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`,
 `TSAN_OPTIONS=halt_on_error=1`. The unchanged scoped native GenApi audit first

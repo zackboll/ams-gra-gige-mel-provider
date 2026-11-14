@@ -1360,7 +1360,9 @@ void cognex_stream() {
     stream->stop();
     CHECK(device->close());
     loaded.value() = {}; camera.reset(); device.reset(); stream.reset();
-    CHECK(copy_bytes(first.value()) == saved); // native lease does not execute module code
+    const auto retained = first.value().bytes(); // native lease does not execute module code
+    CHECK(retained.size() == saved.size());
+    CHECK(std::equal(saved.begin(), saved.end(), retained.begin()));
 }
 
 } // namespace
