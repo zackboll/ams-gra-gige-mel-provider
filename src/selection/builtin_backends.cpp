@@ -15,13 +15,13 @@ backend::Result<BackendCatalog> make_builtin_catalog() {
                                           [] { return backend::make_synthetic_backend(); });
     if (!status) return status.error();
 #ifdef GIGE_MEL_SELECT_ARAVIS
-    status = catalog.register_backend("aravis", std::string(mono_free_running_v1),
-                                      [] { return backend::aravis::make_backend(); });
+    status = catalog.register_backend("aravis", std::vector<std::string>{std::string(mono_free_running_v1)},
+                                      [](BackendCatalog::Profile p) { return backend::aravis::make_backend(std::move(p)); });
     if (!status) return status.error();
 #endif
 #ifdef GIGE_MEL_SELECT_PLEORA
-    status = catalog.register_backend("pleora", std::string(mono_free_running_v1),
-                                      [] { return backend::pleora::make_backend(); });
+    status = catalog.register_backend("pleora", std::vector<std::string>{std::string(mono_free_running_v1)},
+                                      [](BackendCatalog::Profile p) { return backend::pleora::make_backend(std::move(p)); });
     if (!status) return status.error();
 #endif
     return catalog;

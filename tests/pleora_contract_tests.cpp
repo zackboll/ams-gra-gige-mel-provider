@@ -9,6 +9,8 @@
 #include "backends/pleora/pleora_backend.hpp"
 #include "selection/session_selection.hpp"
 #include "selected_profile_contract.hpp"
+#include "alternate_camera_profile.hpp"
+#include "pleora_controlled_backend.hpp"
 
 #include <PvDeviceGEV.h>
 #include <PvGenParameterArray.h>
@@ -254,18 +256,22 @@ void unchanged_profile_prevalidation_and_truthful_readback() {
     // this does not pretend to open a physical Pleora device offline.
     namespace selection = gige_mel::selection;
     selection::BackendCatalog catalog;
-    CHECK(catalog.register_backend("pleora", std::string(selection::mono_free_running_v1),
-        [] { return pleora::make_backend(); }));
+    std::shared_ptr<const backend::profiles::ICameraProfile> dispatched;
+    CHECK(catalog.register_backend("pleora", std::vector<std::string>{std::string(selection::mono_free_running_v1)},
+        [&](selection::BackendCatalog::Profile p) {
+            dispatched = p;
+            return pleora::make_backend(std::move(p));
+        }));
     auto selected = selection::select_session(catalog,
         {"pleora", "00:11:22:33:44:55", std::string(selection::mono_free_running_v1), {}});
     CHECK(selected && selected.value().backend->id() == "pleora");
     {
         fixture::Fixture semantic_camera;
         pleora::Features semantic_view(*semantic_camera.map._Ptr);
-        const auto semantic_envelope = take(profile::read_snapshot(semantic_view));
+        const auto semantic_state = take(dispatched->open(semantic_view));
         selected_profile_contract([&](const auto& request) {
-                return profile::apply_configuration(semantic_view, request, semantic_envelope, connected, ready);
-            }, [&] { return profile::read_configuration(semantic_view, semantic_envelope, connected); },
+                return semantic_state->apply(semantic_view, request, connected, ready);
+            }, [&] { return semantic_state->configuration(semantic_view, connected); },
             [&] { semantic_camera.port.calls.clear(); }, [&] {
                 std::vector<std::string> names;
                 for (auto address : writes(semantic_camera.port)) {
@@ -276,6 +282,63 @@ void unchanged_profile_prevalidation_and_truthful_readback() {
                 return names;
             });
     }
+    // Same selection/injection boundary, native Features and production copy
+    // stream. Local GenApi/PvBuffer fixtures do NOT emulate a connected PvDevice.
+    auto counts = std::make_shared<alternate_profile::Counts>();
+    std::weak_ptr<const backend::profiles::ICameraProfile> injected;
+    auto bound = [&] {
+        selection::BackendCatalog owned;
+        CHECK(owned.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+        CHECK(owned.register_backend("pleora", std::vector<std::string>{std::string(alternate_profile::id)},
+            [&](selection::BackendCatalog::Profile p) {
+                injected = p;
+                return pleora::make_backend(std::move(p));
+            }));
+        CHECK(!owned.create("pleora", selection::mono_free_running_v1));
+        CHECK(counts->created == 0);
+        return take(owned.create("pleora", alternate_profile::id));
+    }();
+    CHECK(!injected.expired() && counts->opened == 0); // catalog gone, no camera I/O
+    {
+        fixture::Fixture local;
+        pleora::Features native_features(*local.map._Ptr);
+        auto state = take(injected.lock()->open(native_features));
+        CHECK(state->capabilities().maximum_frame_rate_hz == 20);
+        auto requested = take(state->configuration(native_features, connected));
+        local.port.calls.clear();
+        rejected(state->apply(native_features, requested, connected, ready), backend::ErrorCode::unsupported, "test profile");
+        CHECK(local.port.write_attempts() == 0);
+        requested.frame_rate_hz = 20;
+        CHECK(take(state->apply(native_features, requested, connected, ready)) == requested);
+        CHECK(take(state->preflight(native_features)) == requested);
+        auto source = std::make_shared<pleora_controlled::Source>(backend::PixelFormat::mono8, requested);
+        auto stream = pleora::make_stream(source, state);
+        CHECK(stream->start(3));
+        rejected(stream->receive(50ms), backend::ErrorCode::unsupported, "test profile rejects odd");
+        auto frame = take(stream->receive(50ms));
+        CHECK(frame.descriptor().native_frame_id == 2);
+        const std::vector<std::byte> saved(frame.bytes().begin(), frame.bytes().end());
+        stream->stop(); stream.reset(); source.reset();
+        CHECK(std::equal(saved.begin(), saved.end(), frame.bytes().begin()));
+        local.port.real(fixture::rate, 25);
+        rejected(state->preflight(native_features), backend::ErrorCode::unsupported, "test profile native rate");
+        local.port.integer(fixture::trigger_mode, 1);
+        requested.frame_rate_hz = 10;
+        local.port.calls.clear();
+        rejected(state->apply(native_features, requested, connected, ready), backend::ErrorCode::unsupported, "TriggerMode");
+        CHECK(local.port.write_attempts() == 0);
+    }
+    CHECK(counts->states == counts->retired && counts->frames == 2);
+    bound.reset();
+    CHECK(injected.expired() && counts->destroyed == 1);
+    bool null_rejected = false;
+    try { (void)pleora::make_backend(nullptr); }
+    catch (const std::invalid_argument&) { null_rejected = true; }
+    CHECK(null_rejected);
+    null_rejected = false;
+    try { (void)pleora::make_stream(std::make_shared<pleora_controlled::Source>(backend::PixelFormat::mono8), nullptr); }
+    catch (const std::invalid_argument&) { null_rejected = true; }
+    CHECK(null_rejected);
     fixture::Fixture camera;
     pleora::Features view(*camera.map._Ptr);
     const auto envelope = take(profile::read_snapshot(view));

@@ -22,6 +22,7 @@ constexpr const char* xml = R"xml(<?xml version="1.0" encoding="utf-8"?>
  <Category Name="Root"><pFeature>Width</pFeature><pFeature>Height</pFeature><pFeature>ExposureTime</pFeature></Category>
  <Port Name="Device"/>
 
+ <String Name="AcquisitionMode"><Value>Continuous</Value></String>
  <Integer Name="SensorWidth"><ImposedAccessMode>RO</ImposedAccessMode><Value>640</Value></Integer>
  <Integer Name="SensorHeight"><ImposedAccessMode>RO</ImposedAccessMode><Value>480</Value></Integer>
  <Integer Name="WidthMinimum"><Value>2</Value></Integer>

@@ -5,7 +5,7 @@
 // selection lives in tests/support/aravis_fake_support.cpp, not here.
 
 #include "aravis_backend.hpp"
-#include "profiles/mono_free_running.hpp"
+#include "profiles/frame_policy.hpp"
 
 #include <arv.h>
 
@@ -71,7 +71,7 @@ struct TestHooks {
     // padding, short sizes the pinned Fake cannot produce). It never touches
     // the SDK buffer, so pixels and ownership stay genuine. Tests that use it
     // must say so.
-    std::function<void(profiles::mono_free_running::NativeFrameFacts&)> decoded_facts;
+    std::function<void(profiles::NativeFrameFacts&)> decoded_facts;
 
     // ---- GVSP socket receive buffer (GIGE-MEL-019).
     // TEST-ONLY request override, in bytes (1..INT_MAX), in place of
@@ -89,6 +89,8 @@ struct TestHooks {
 };
 
 std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource source, TestHooks hooks = {});
+std::shared_ptr<ICameraBackend> make_backend_for_interface(InterfaceSource, TestHooks,
+    std::shared_ptr<const profiles::ICameraProfile>);
 
 // Test support only: run fn with the open device's native handle while holding
 // the device's operation lock, e.g. to arrange native state or attach a GObject

@@ -2,6 +2,7 @@
 
 // Internal, uninstalled source interface. No SDK types or provider selection.
 #include <gige_mel/backend.hpp>
+#include "profiles/camera_profile.hpp"
 #include <functional>
 
 namespace gige_mel::backend::pleora {
@@ -14,5 +15,6 @@ struct Options {
     std::function<void(std::string_view)> diagnostic;
 };
 std::shared_ptr<ICameraBackend> make_backend(Options options = {});
+std::shared_ptr<ICameraBackend> make_backend(std::shared_ptr<const profiles::ICameraProfile>, Options options = {});
 
 } // namespace gige_mel::backend::pleora

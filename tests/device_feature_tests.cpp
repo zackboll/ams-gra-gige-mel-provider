@@ -3,6 +3,7 @@
 // used below. It does not simulate an SDK, acquisition or physical hardware.
 #include "device_features.hpp"
 #include "profiles/mono_free_running_device.hpp"
+#include "support/alternate_camera_profile.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -686,6 +687,53 @@ void final_readback_is_authoritative() {
     CHECK(contains(unreadable.error().message, "after writes:") && failed.writes().size() == 2);
 }
 
+void interchangeable_owned_profile_states() {
+    namespace p = backend::profiles;
+    auto device = baseline();
+    device.nodes["AcquisitionMode"] = text_node("Continuous");
+    auto mono = p::make_mono_free_running_profile();
+    auto counts = std::make_shared<alternate_profile::Counts>();
+    auto alternate = alternate_profile::make(counts);
+    auto mono_opened = mono->open(device);
+    auto alternate_opened = alternate->open(device);
+    CHECK(mono_opened && alternate_opened);
+    auto first = mono_opened.value();
+    auto second = alternate_opened.value();
+    CHECK(mono->id() == p::mono_free_running_v1 && alternate->id() == alternate_profile::id);
+    CHECK(first->capabilities().maximum_frame_rate_hz > second->capabilities().maximum_frame_rate_hz);
+    CHECK(first->preflight(device));
+    expect_error(second->preflight(device), backend::ErrorCode::unsupported, "test profile native rate");
+    auto request = initial;
+    device.calls.clear();
+    expect_error(second->apply(device, request, connected, allow_write), backend::ErrorCode::unsupported, "test profile");
+    CHECK(device.writes().empty());
+    CHECK(first->apply(device, request, connected, allow_write));
+    request.frame_rate_hz = 20;
+    CHECK(second->apply(device, request, connected, allow_write));
+    CHECK(second->preflight(device));
+    device.nodes["TriggerMode"].text = "On";
+    expect_error(second->configuration(device, connected), backend::ErrorCode::unsupported, "TriggerMode");
+    expect_error(second->preflight(device), backend::ErrorCode::unsupported, "TriggerMode");
+    device.calls.clear();
+    expect_error(second->apply(device, request, connected, allow_write), backend::ErrorCode::unsupported, "TriggerMode");
+    CHECK(device.writes().empty());
+    // No borrowed features or parent profile are required by immutable state.
+    alternate.reset(); mono.reset();
+    CHECK(counts->destroyed == 1 && second->capabilities().maximum_frame_rate_hz == 20);
+    auto broken = baseline();
+    broken.nodes.erase("Width");
+    CHECK(!p::make_mono_free_running_profile()->open(broken));
+    std::shared_ptr<const p::ICameraProfileState> retained;
+    {
+        auto temporary = baseline();
+        auto opened = alternate_profile::make()->open(temporary);
+        CHECK(opened);
+        retained = std::move(opened).value();
+    } // both feature service and parent implementation destroyed
+    CHECK(retained->capabilities().maximum_frame_rate_hz == 20);
+    retained.reset(); // destructor must not use borrowed services
+}
+
 } // namespace
 
 int main() {
@@ -698,6 +746,7 @@ int main() {
         {"ordered setters and live dependent bounds", ordered_writes_and_live_constraints},
         {"partial errors, no retry and connection/write guards", partial_failure_and_guard_boundaries},
         {"final native readback is authoritative", final_readback_is_authoritative},
+        {"interchangeable owned profile states", interchangeable_owned_profile_states},
     };
     for (const auto& [name, run] : tests) {
         try { run(); }

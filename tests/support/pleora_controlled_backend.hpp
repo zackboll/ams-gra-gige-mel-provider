@@ -13,13 +13,14 @@ using namespace std::chrono_literals;
 inline constexpr b::CameraConfiguration configuration{16, 8, 0, 0, 10, 1ms};
 class Source final : public p::NativeSource {
 public:
-    explicit Source(b::PixelFormat format) : format_(format) {}
+    explicit Source(b::PixelFormat format, b::CameraConfiguration config = configuration)
+        : format_(format), config_(config) {}
     b::Result<p::RunConfiguration> start() override {
-        const auto result = buffer_.GetImage()->Alloc(16, 8,
+        const auto result = buffer_.GetImage()->Alloc(config_.width, config_.height,
             format_ == b::PixelFormat::mono8 ? PvPixelMono8 : PvPixelMono12);
         if (!result.IsOK()) return p::native_error(result, "test allocation");
         std::memset(buffer_.GetImage()->GetDataPointer(), 0, buffer_.GetImage()->GetImageSize());
-        return p::RunConfiguration{configuration, format_, b::image_layout(format_, 16, 8)->image_bytes};
+        return p::RunConfiguration{config_, format_, b::image_layout(format_, config_.width, config_.height)->image_bytes};
     }
     b::Result<p::NativeBuffer> next(std::uint32_t) override {
         std::this_thread::sleep_for(2ms); // bounded deterministic source, no networking
@@ -27,7 +28,7 @@ public:
         (void)buffer_.SetBlockID(sequence_);
         (void)buffer_.SetTimestamp(987654321 + sequence_); // observed raw clock, NOT MEL time
         auto* data = buffer_.GetImage()->GetDataPointer();
-        for (unsigned i = 0; i < 128; ++i) {
+        for (unsigned i = 0; i < config_.width * config_.height; ++i) {
             const auto value = (i + sequence_) & (format_ == b::PixelFormat::mono8 ? 255u : 4095u);
             if (format_ == b::PixelFormat::mono8) data[i] = static_cast<std::uint8_t>(value);
             else { data[2*i] = static_cast<std::uint8_t>(value & 255u); data[2*i+1] = static_cast<std::uint8_t>(value >> 8); }
@@ -38,6 +39,7 @@ public:
     b::Status stop() override { return {}; }
 private:
     b::PixelFormat format_;
+    const b::CameraConfiguration config_;
     PvBuffer buffer_;
     std::uint64_t sequence_{0};
 };

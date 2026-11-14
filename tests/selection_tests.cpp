@@ -1,4 +1,5 @@
 #include "selection/session_selection.hpp"
+#include "support/alternate_camera_profile.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -147,11 +148,69 @@ void independent_sessions() {
     auto bad = take(s::select_session(catalog, {"synthetic", "synthetic", profile, {}}));
     rejected(bad.backend->open(bad.device_id), b::ErrorCode::not_found);
 }
+
+void independent_profile_registration() {
+    s::BackendCatalog catalog;
+    using Profile = s::BackendCatalog::Profile;
+    using Profiles = std::vector<std::string>;
+    auto counts = std::make_shared<alternate_profile::Counts>();
+    const std::string alternate{alternate_profile::id};
+    auto factory = [counts] { return alternate_profile::make(counts); };
+    rejected(catalog.register_profile("", factory), b::ErrorCode::invalid_argument);
+    rejected(catalog.register_profile(std::string{"id\0suffix", 9}, factory), b::ErrorCode::invalid_argument);
+    rejected(catalog.register_profile(alternate, {}), b::ErrorCode::invalid_argument);
+    CHECK(catalog.register_profile(alternate, factory));
+    rejected(catalog.register_profile(alternate, factory), b::ErrorCode::invalid_argument);
+    rejected(catalog.register_profile(profile, factory), b::ErrorCode::invalid_argument);
+    unsigned constructed = 0;
+    std::vector<Profile> injected;
+    auto constructor = [&](Profile p) -> s::BackendCatalog::BackendResult {
+        ++constructed;
+        injected.push_back(std::move(p));
+        return b::make_synthetic_backend(); // probe of injection only, not alternate synthetic support
+    };
+    rejected(catalog.register_backend("synthetic", Profiles{}, constructor), b::ErrorCode::invalid_argument);
+    rejected(catalog.register_backend("synthetic", Profiles{alternate, alternate}, constructor), b::ErrorCode::invalid_argument);
+    rejected(catalog.register_backend("synthetic", Profiles{"missing"}, constructor), b::ErrorCode::unsupported);
+    CHECK(catalog.register_backend("synthetic", Profiles{profile, alternate}, constructor));
+    CHECK(counts->created == 0 && constructed == 0);
+    for (const auto& wrong : {"test_rate_limited_v1 ", "Test_rate_limited_v1", "missing", ""})
+        rejected(catalog.create("synthetic", wrong), b::ErrorCode::unsupported);
+    CHECK(counts->created == 0 && constructed == 0);
+    CHECK(catalog.create("synthetic", alternate));
+    CHECK(catalog.create("synthetic", alternate));
+    CHECK(injected[0] != injected[1] && counts->created == 2 && counts->opened == 0);
+    CHECK(catalog.create("synthetic", profile));
+    CHECK(injected.back()->id() == profile);
+    injected.clear();
+    CHECK(counts->destroyed == 2);
+
+    CHECK(catalog.register_profile("null-profile", [] { return Profile{}; }));
+    CHECK(catalog.register_profile("wrong-profile", [] { return b::profiles::make_mono_free_running_profile(); }));
+    CHECK(catalog.register_profile("throw-profile", []() -> b::Result<Profile> { throw std::runtime_error("profile failure"); }));
+    CHECK(catalog.register_profile("bad-alloc-profile", []() -> b::Result<Profile> { throw std::bad_alloc{}; }));
+    CHECK(catalog.register_profile("unknown-profile", []() -> b::Result<Profile> { throw 42; }));
+    CHECK(catalog.register_profile("error-profile", []() -> b::Result<Profile> {
+        return b::Error{b::ErrorCode::unsupported, "profile creation rejected"};
+    }));
+    for (auto id : {"null-profile", "wrong-profile", "throw-profile", "bad-alloc-profile", "unknown-profile", "error-profile"}) {
+        const std::string backend_id{id};
+        CHECK(catalog.register_backend(backend_id, Profiles{id}, constructor));
+        auto failed = catalog.create(id, id);
+        CHECK(!failed);
+        if (backend_id == "null-profile" || backend_id == "wrong-profile")
+            CHECK(failed.error().code == b::ErrorCode::invalid_argument);
+        else if (backend_id == "bad-alloc-profile") CHECK(failed.error().code == b::ErrorCode::resource_exhausted);
+        else if (backend_id == "error-profile") CHECK(failed.error().message == "profile creation rejected");
+        else CHECK(failed.error().code == b::ErrorCode::io_error);
+    }
+    CHECK(constructed == 3); // invalid profiles never reach a backend constructor
+}
 }
 
 int main() {
     try {
-        validation(); mel_lifecycle(); binding_and_no_fallback(); independent_sessions();
+        validation(); mel_lifecycle(); binding_and_no_fallback(); independent_sessions(); independent_profile_registration();
         std::cout << "SDK-free selection contracts passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

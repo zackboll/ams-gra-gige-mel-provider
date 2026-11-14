@@ -1,12 +1,20 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-034 introduces an internal, SDK-independent source-level camera-profile
+interface with owned per-device policy state and explicit injection into Aravis
+and Pleora. Selection now executes independently registered implementations,
+not just profile IDs. The default monochrome algorithms and historical diagnostic
+ID are preserved. No MEL capability, channel, factory, buffer ownership or
+production timestamp qualification changes. See [profile authoring and lifetime](camera-profile-authoring.md)
+and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
+
 ## Internal selection (GIGE-MEL-033)
 
 An explicitly owned catalog now selects built `synthetic`, `aravis` and `pleora`
-backends with exact device identity and the sole `mono_free_running_v1` binding.
+backends with exact device identity and the default `mono_free_running_v1` binding.
 This is [internal composition](runtime-selection.md), not a new MEL surface,
-factory name, dynamically loaded profile or binary ABI. The common provider and
-shared profile implementation remain unchanged. Multiple profiles, plugin ABI,
+factory name, dynamically loaded profile or binary ABI. The common provider remains unchanged. Source-level profile dispatch is now
+implemented by GIGE-MEL-034. Plugin ABI,
 cross-SDK physical-camera ownership qualification and production clocks remain
 future work.
 
@@ -46,7 +54,8 @@ consumed by Aravis and a default profile contract test. Host pool policy is
 separate and passed explicitly. This is a behavior-preserving extraction with
 no new MEL capability or production backend. GIGE-MEL-025 adds typed device
 services; the optional Pleora implementation above still needs qualification.
-Internal backend/profile binding is implemented above; multiple profiles and binary plugins remain subsequent work; see
+Internal backend/profile binding and source-level profile dispatch are implemented
+above; binary plugins remain subsequent work; see
 [the sequence and acceptance criteria](camera-profile-portability.md).
 
 ## Backend-independent NavigationReport forwarding (GIGE-MEL-023)

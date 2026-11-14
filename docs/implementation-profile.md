@@ -1,5 +1,13 @@
 # Experimental image-stream profile, version 0.1
 
+GIGE-MEL-034 introduces an internal, SDK-independent source-level camera-profile
+interface with owned per-device policy state and explicit injection into Aravis
+and Pleora. Selection now executes independently registered implementations,
+not just profile IDs. The default monochrome algorithms and historical diagnostic
+ID are preserved. No MEL capability, channel, factory, buffer ownership or
+production timestamp qualification changes. See [profile authoring and lifetime](camera-profile-authoring.md)
+and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
+
 This document is the contract implemented by the bootstrap. It describes a
 useful development subset against the pinned IR/Common MEL 4.0 declarations.
 It is **not full MEL conformance**. Required functionality outside this subset
@@ -11,13 +19,14 @@ configuration-write and readback orchestration, with default recording-service
 tests. These changes preserve advertised MEL capabilities, factory selection,
 camera behavior and timestamp admission. See
 [camera-profile portability](camera-profile-portability.md) for the implemented
-boundary and the remaining second-backend, selection and plugin work.
+boundary, implemented selection and source-level dispatch, and remaining hardware
+qualification and binary-plugin work.
 
 ## Provider and discovery
 
 GIGE-MEL-033 adds [internal runtime backend/profile binding](runtime-selection.md),
 not a MEL factory or capability. A caller explicitly selects an available backend,
-exact device ID and the sole canonical `mono_free_running_v1` profile, then uses
+exact device ID and the default canonical `mono_free_running_v1` profile, then uses
 the unchanged `make_api_manager(settings, backend)` seam. Selection performs no
 camera I/O and does not alter profile diagnostics, native ownership or lifecycle.
 

@@ -1,5 +1,13 @@
 # Architecture and scope
 
+GIGE-MEL-034 introduces an internal, SDK-independent source-level camera-profile
+interface with owned per-device policy state and explicit injection into Aravis
+and Pleora. Selection now executes independently registered implementations,
+not just profile IDs. The default monochrome algorithms and historical diagnostic
+ID are preserved. No MEL capability, channel, factory, buffer ownership or
+production timestamp qualification changes. See [profile authoring and lifetime](camera-profile-authoring.md)
+and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
+
 ## Status
 
 GIGE-MEL-033 adds an explicitly owned SDK-free backend catalog and exact

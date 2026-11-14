@@ -27,6 +27,10 @@ public:
 };
 
 // Source ownership stays private; all callers use the same production stream.
+// The compatibility overload uses default monochrome frame admission for local
+// sources; production Device always passes the explicitly opened profile state.
 std::unique_ptr<IFrameStream> make_stream(std::shared_ptr<NativeSource> source);
+std::unique_ptr<IFrameStream> make_stream(std::shared_ptr<NativeSource>,
+    std::shared_ptr<const profiles::ICameraProfileState>);
 
 } // namespace gige_mel::backend::pleora

@@ -3,7 +3,7 @@
 #include "pleora_license.hpp"
 #include "pleora_stream.hpp"
 #include "pleora_private.hpp"
-#include "profiles/mono_free_running_device.hpp"
+#include "profiles/camera_profile.hpp"
 
 #include <PvDeviceGEV.h>
 #include <PvDeviceEventSink.h>
@@ -19,10 +19,11 @@
 #include <map>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 
 namespace gige_mel::backend::pleora {
 namespace {
-namespace profile = profiles::mono_free_running;
+namespace profile = profiles;
 std::mutex ownership_mutex;
 std::map<std::string, std::weak_ptr<void>, std::less<>> ownership;
 
@@ -39,7 +40,8 @@ struct State {
     std::unique_ptr<PvPipeline> pipeline;
     std::shared_ptr<void> reservation;
     std::weak_ptr<NativeSource> source;
-    profile::NativeSnapshot envelope;
+    std::shared_ptr<const profiles::ICameraProfile> profile_owner;
+    std::shared_ptr<const profiles::ICameraProfileState> policy;
     CameraCapabilities capabilities;
     std::optional<Error> fault;
     bool closed{false}, registered{false}, enabled{false}, command_attempted{false};
@@ -111,14 +113,8 @@ public:
         if (auto s = state_->connected(); !s) return s.error();
         if (state_->pipeline) return Error{ErrorCode::busy, "eBUS acquisition already active"};
         Features features(*state_->device->GetParameters());
-        auto snapshot = profile::read_snapshot(features);
-        if (!snapshot) return snapshot.error();
-        auto frozen = profile::acquisition_preflight(snapshot.value(), state_->envelope);
+        auto frozen = state_->policy->preflight(features);
         if (!frozen) return frozen.error();
-        auto mode = features.read_string_or_enum("AcquisitionMode");
-        if (!mode) return mode.error();
-        if (mode.value() != profile::acquisition_mode)
-            return Error{ErrorCode::unsupported, "eBUS requires AcquisitionMode=Continuous; no implicit write"};
         auto payload = features.read_integer("PayloadSize");
         if (!payload) return payload.error();
         auto plan = profile::plan_pool(payload.value(), frozen.value(), 8, 64 * 1024 * 1024,
@@ -193,14 +189,14 @@ public:
         if (auto s = state_->connected(); !s) return s.error();
         if (state_->pipeline) return Error{ErrorCode::busy, "eBUS configuration snapshot requires stopped acquisition"};
         Features features(*state_->device->GetParameters());
-        return profile::read_configuration(features, state_->envelope, [&] { return state_->connected(); });
+        return state_->policy->configuration(features, [&] { return state_->connected(); });
     }
     Result<CameraConfiguration> apply(const CameraConfiguration& request) override {
         std::lock_guard lock(state_->mutex);
         if (auto s = state_->connected(); !s) return s.error();
         if (state_->pipeline) return Error{ErrorCode::busy, "eBUS configuration writes require stopped acquisition"};
         Features features(*state_->device->GetParameters());
-        return profile::apply_configuration(features, request, state_->envelope,
+        return state_->policy->apply(features, request,
             [&] { return state_->connected(); }, [&](std::string_view) { return state_->connected(); });
     }
     Result<std::unique_ptr<IFrameStream>> create_stream() override {
@@ -209,7 +205,7 @@ public:
         if (!state_->source.expired()) return Error{ErrorCode::busy, "eBUS device already has a stream"};
         auto source = std::make_shared<Source>(state_);
         state_->source = source;
-        return make_stream(std::move(source));
+        return make_stream(std::move(source), state_->policy);
     }
     Status close() override {
         // Do not destroy a retrieved PvBuffer while Stream copies it. Serialize
@@ -224,7 +220,8 @@ private:
 
 class Backend final : public ICameraBackend {
 public:
-    explicit Backend(Options options) : options_(std::move(options)) {}
+    Backend(Options options, std::shared_ptr<const profiles::ICameraProfile> profile)
+        : options_(std::move(options)), profile_(std::move(profile)) {}
     std::string_view id() const noexcept override { return "pleora"; }
     Result<std::vector<DeviceInfo>> enumerate() override {
         if (compiled_version() != runtime_version())
@@ -253,6 +250,7 @@ public:
         if (compiled_version() != runtime_version())
             return Error{ErrorCode::unsupported, "eBUS header/runtime version mismatch; no open attempted"};
         auto state = std::make_shared<State>();
+        state->profile_owner = profile_;
         {
             std::lock_guard lock(ownership_mutex);
             auto& held = ownership[std::string(id)];
@@ -292,22 +290,26 @@ public:
                 report(name, value ? value.value() : value.error().message);
             }
         }
-        auto snapshot = profile::read_snapshot(features);
-        if (!snapshot) return snapshot.error();
-        auto capabilities = profile::capabilities_from(snapshot.value());
-        if (!capabilities) return capabilities.error();
+        auto policy = profile_->open(features);
+        if (!policy) return policy.error();
+        if (!policy.value()) return Error{ErrorCode::invalid_state, "profile open returned null state"};
         if (auto s = state->connected(); !s) return s.error();
-        state->envelope = snapshot.value();
-        state->capabilities = capabilities.value();
+        state->policy = std::move(policy).value();
+        state->capabilities = state->policy->capabilities();
         return std::shared_ptr<ICameraDevice>(std::make_shared<Device>(std::move(state)));
     }
 private:
     Options options_;
+    const std::shared_ptr<const profiles::ICameraProfile> profile_;
 };
 }
 
 std::shared_ptr<ICameraBackend> make_backend(Options options) {
-    return std::make_shared<Backend>(std::move(options));
+    return make_backend(profiles::make_mono_free_running_profile(), std::move(options));
+}
+std::shared_ptr<ICameraBackend> make_backend(std::shared_ptr<const profiles::ICameraProfile> profile, Options options) {
+    if (!profile) throw std::invalid_argument("Pleora requires a camera profile");
+    return std::make_shared<Backend>(std::move(options), std::move(profile));
 }
 std::string compiled_version() {
     return std::to_string(VERSION_MAJOR) + "." + std::to_string(VERSION_MINOR) + "." +

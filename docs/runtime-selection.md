@@ -1,25 +1,33 @@
-# Internal runtime backend and profile selection (GIGE-MEL-033)
+# Internal runtime backend and profile selection (GIGE-MEL-033/034)
 
 ## Scope and API
 
 This is build-local C++20 composition, not a new MEL consumer interface, public
-provider ABI, stable binary plugin contract or dynamic-library loader. Only one
-canonical profile binding exists: `mono_free_running_v1`. It selects the existing
+provider ABI, stable binary plugin contract or dynamic-library loader. The built-in
+canonical profile is `mono_free_running_v1`. It selects the existing
 monochrome/free-running policy; it does **not** rename the historical diagnostic
 identifier `aravis-mono8-free-running-v1`, select a new pixel format, qualify
 camera clocks or advertise new MEL capabilities.
 
 The explicitly owned `selection::BackendCatalog` in
-`src/selection/backend_catalog.hpp` knows only the SDK-free `ICameraBackend`
-contract. Registration supplies an exact backend ID, the supported canonical
-profile and a constructor. It rejects empty/NUL-containing IDs, missing callable
-constructors, duplicate IDs and unsupported profiles. Creation invokes only the
-selected constructor, preserves returned errors, translates exceptions, rejects
-null results and validates the returned backend ID. There is no fallback.
-Registration does not invoke constructors. Listing IDs does not invoke them
-either. Compose/register before sharing a catalog; concurrent mutation is not
-supported. Custom constructors must provide independent backends and perform no
-device I/O; the generic catalog cannot police arbitrary user callbacks.
+`src/selection/backend_catalog.hpp` owns separate profile factories and backend
+constructors. Each catalog initially registers the default monochrome profile.
+`register_profile(id, factory)` adds an exact ID; a profile factory creates a
+fresh `shared_ptr<const ICameraProfile>` for each selection. A backend registration
+supplies a list of compatible profile IDs and a constructor accepting that
+selected profile. Duplicate IDs, empty/NUL IDs, absent callables, unknown profiles
+and duplicate compatibility entries are rejected. Selection validates exact
+compatibility before calling either factory, checks profile/backend result IDs
+and nulls, preserves returned errors and translates constructor exceptions. No
+fallback or camera I/O occurs. Constructors must inject rather than discard the
+selected implementation; arbitrary application callbacks cannot be policed by
+the catalog. The legacy no-argument constructor overload admits only the default
+fixed-policy binding (used by synthetic and older embeddings).
+
+Register before concurrent reads; mutation is not synchronized. Custom factories
+must construct independent session objects without camera I/O. There is no
+process-global registration. See [profile authoring](camera-profile-authoring.md)
+for the implementation and ownership contract.
 
 `src/selection/builtin_backends.cpp` is the separate optional-SDK composition
 boundary. Its `make_builtin_catalog()` registers `synthetic` always, `aravis`
@@ -64,13 +72,21 @@ of all other factory names remain unchanged.
 
 ## Profile and ownership boundaries
 
-Both real adapters still compile/link the **same unchanged**
-`gige_mel_camera_profiles` implementation from
-`src/profiles/mono_free_running.{hpp,cpp}` and
-`src/profiles/mono_free_running_device.{hpp,cpp}`. That code owns aliases, units,
-configuration constraints, ordered writes, actual readback, pixel validation and
-frame admission. The synthetic backend implements its existing regression
-semantics; it does not pretend to have native feature nodes or a physical camera.
+Both real adapters consume the selected `ICameraProfile`, which opens an owned
+`ICameraProfileState` using a borrowed `IDeviceFeatures`. Open validation,
+capabilities, read/apply, preflight and frame admission dispatch through that
+state. Each concrete state privately owns its own snapshot type. The default
+implementation delegates to the existing monochrome algorithms, retaining aliases,
+units, ordering, readback, formats and historical diagnostic ID. Backend/device
+cores keep the profile alive; streams keep the state/core alive. Native leases
+retain their original storage owners and may outlive close and profile teardown.
+States must own their dependencies independently of their parent profile.
+
+Synthetic remains a fixed-policy regression backend with only its existing
+compatibility binding; it does not emulate native features or accept alternate
+profiles. Aravis and Pleora can each advertise multiple registered profiles.
+Static compatibility lists do not certify a physical device: feature discovery
+and device-specific admission occur only on explicit open.
 
 Switching means stop acquisition, release/retire the session using the existing
 lifecycle, close the current device, and create a new selection. There is no
@@ -120,9 +136,14 @@ error strings are asserted across SDKs. Pleora offline tests do not pretend to
 open a physical device. The existing eight-group native TSan audit and its
 single-function exception are unchanged.
 
-Multiple independently selectable profiles still require explicit profile
-implementations, compatibility/capability negotiation and per-adapter composition
-tests. Dynamic profiles additionally need a separately reviewed versioned ABI,
-loading/unloading, ownership and mismatch contracts. Neither exists here. No
-physical camera tests run implicitly; no new SDK/camera combination or production
-timestamp is qualified by these offline checks.
+GIGE-MEL-034's test-only `test_rate_limited_v1` composes the same representation
+algorithms with independent state, a <=20 Hz admission rule and odd-frame-ID
+rejection. It is registered through the same mechanism, executes in Aravis's
+actual Fake open/apply/receive path and Pleora's native feature/copy-stream
+fixtures, and is never included in production builtins. The unchanged provider
+is additionally exercised through MEL C2 with alternate admission. No connected
+Pleora open or physical-camera compatibility is claimed by offline fixtures.
+
+Dynamically loaded profiles would still require a separately reviewed versioned
+ABI, loader, unload and mismatch contracts. No physical camera tests run
+implicitly; no new SDK/camera combination or production timestamp is qualified.

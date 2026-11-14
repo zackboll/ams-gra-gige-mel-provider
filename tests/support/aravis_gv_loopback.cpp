@@ -303,7 +303,7 @@ SocketAudit require_socket_audit(std::string_view where, const UdpSocket* listen
 
 std::string loaded_sdk_library() { return object_of(reinterpret_cast<const void*>(&arv_get_major_version)); }
 std::string adapter_symbol_object() {
-    return object_of(reinterpret_cast<const void*>(&gige_mel::backend::aravis::make_backend));
+    return object_of(reinterpret_cast<const void*>(static_cast<std::shared_ptr<gige_mel::backend::ICameraBackend>(*)()>(&gige_mel::backend::aravis::make_backend)));
 }
 
 Simulator::Simulator(Options options) : options_(options) {

@@ -1,3 +1,4 @@
+#include "profiles/mono_free_running.hpp"
 // GIGE-MEL-011 GigE Vision LOOPBACK transport contract. The server is the
 // pinned Aravis 0.8.36 network camera simulator ArvGvFakeCamera bound to
 // 127.0.0.1 in this process (tests/support/aravis_gv_loopback.*). The client

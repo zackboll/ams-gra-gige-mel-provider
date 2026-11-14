@@ -1,3 +1,4 @@
+#include "profiles/mono_free_running.hpp"
 // GIGE-MEL-010 timestamp contract against the REAL Aravis 0.8.36 SDK and its
 // in-process Fake device. Three kinds of evidence are kept separate:
 //

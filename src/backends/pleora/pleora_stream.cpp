@@ -8,18 +8,21 @@
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 
 namespace gige_mel::backend::pleora {
 namespace {
-namespace profile = profiles::mono_free_running;
+namespace profile = profiles;
 using namespace std::chrono_literals;
+using FrameValidator = std::function<profiles::FrameDecision(const profiles::NativeFrameFacts&, const CameraConfiguration&, PixelFormat)>;
 constexpr std::size_t pool_size = 4;
 constexpr std::size_t frame_limit = 64 * 1024 * 1024;
 constexpr std::size_t pool_limit = 256 * 1024 * 1024;
 
 class Stream final : public IFrameStream {
 public:
-    explicit Stream(std::shared_ptr<NativeSource> source) : source_(std::move(source)) {}
+    Stream(std::shared_ptr<NativeSource> source, FrameValidator validate)
+        : source_(std::move(source)), validate_(std::move(validate)) {}
     ~Stream() override { stop(); }
     Status start(std::uint64_t configuration_generation) override {
         std::lock_guard lock(mutex_);
@@ -168,7 +171,7 @@ private:
                     ? ByteOrder::little_endian : ByteOrder::not_applicable;
             }
         }
-        const auto decision = profile::validate_frame(facts, run_.configuration, run_.format);
+        const auto decision = validate_(facts, run_.configuration, run_.format);
         if (decision.verdict == profile::FrameVerdict::incomplete) {
             ++statistics_.incomplete_frames;
             return Error{ErrorCode::timeout, "eBUS incomplete frame discarded: " + decision.reason};
@@ -206,6 +209,7 @@ private:
         return Error{ErrorCode::resource_exhausted, "eBUS host lease pool full"};
     }
     std::shared_ptr<NativeSource> source_;
+    const FrameValidator validate_;
     mutable std::mutex mutex_;
     std::atomic<bool> cancelled_{true};
     bool running_{false};
@@ -218,6 +222,14 @@ private:
 }
 
 std::unique_ptr<IFrameStream> make_stream(std::shared_ptr<NativeSource> source) {
-    return std::make_unique<Stream>(std::move(source));
+    return std::make_unique<Stream>(std::move(source), profiles::mono_free_running::validate_frame);
+}
+std::unique_ptr<IFrameStream> make_stream(std::shared_ptr<NativeSource> source,
+    std::shared_ptr<const profiles::ICameraProfileState> policy) {
+    if (!policy) throw std::invalid_argument("Pleora stream requires profile state");
+    return std::make_unique<Stream>(std::move(source),
+        [policy = std::move(policy)](const profiles::NativeFrameFacts& facts, const CameraConfiguration& frozen, PixelFormat format) {
+            return policy->validate_frame(facts, frozen, format);
+        });
 }
 } // namespace gige_mel::backend::pleora
