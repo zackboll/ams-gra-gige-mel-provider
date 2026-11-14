@@ -39,3 +39,31 @@ available, remove the exception and qualify the full unsuppressed suite.
 
 No production backend, exported interface or sanitizer instrumentation policy
 is changed.
+
+## GIGE-MEL-031 — native qualification guard corrections
+
+The existing SDK-host run at `130ae97` passed both native phases; no diagnostic
+format relaxation was needed. Review of all seven GIGE-MEL-030 files found
+test-runner guard deficiencies, not a production backend defect:
+
+- Search-path precedence alone did not prove actual dynamic-library selection.
+  Both phases now use glibc `LD_DEBUG=libs` initialization evidence to require
+  exactly the four fingerprinted runtime paths, including dynamically loaded
+  logging libraries. Inherited loader trace redirection/interposition is rejected.
+- Symbol/offset substrings anywhere in output were weaker than classification
+  of the actual warning. Matching now requires the observed two-mutex cycle,
+  all four acquisition stacks in order on the main thread, associated vendor
+  functions/offsets, one complete report, its exact summary frame and warning count.
+- Eight arbitrary PASS lines could hide a duplicate/missing group. Both phases
+  now require the eight named native groups in order and the full completion line.
+  Additional runtime/sanitizer diagnostics, crashes, nonzero statuses and timeouts
+  fail closed. Timeout failures retain captured partial output for diagnosis.
+
+SDK-free negative tests cover these paths and verify that a failed unsuppressed
+audit never reaches the suppressed phase. The single suppression directive and
+its one-CTest scope are unchanged. The runner uses Python 3.9-compatible standard
+library interfaces; loader tracing is specific to the already-qualified Linux/glibc
+SDK host and fails closed if the expected trace is unavailable.
+
+This implementation-session review is **not independent approval**. Final source
+identities, executed matrix and separate-review disposition are recorded in PR #26.
