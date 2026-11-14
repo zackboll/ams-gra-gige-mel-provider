@@ -275,7 +275,8 @@ reproducer and documentation (GCC 14.2, unless indicated):
 | Check | Result |
 | --- | --- |
 | Original native contract, repeated TSan with both stacks | **FAIL**, CTest 8 / child 66, same external inversion |
-| Complete combined Aravis + Pleora TSan | **24/25 passed, 1 failed** (`pleora_sdk_contract`); CTest 8, gate BLOCKED |
+| First complete combined Aravis + Pleora TSan | **24/25 passed, 1 failed** (`pleora_sdk_contract`); CTest 8, gate BLOCKED |
+| Post-commit combined TSan repeat at `17ea9961a4cdddb837436db4efb0caa51bf23744` | **23/25 passed, 2 failed** (`provider_contract`, `pleora_sdk_contract`); see additional blocker below |
 | Complete combined Aravis + Pleora ASan/UBSan | **25/25 passed**, leak detection and halt-on-error enabled |
 | Complete combined unsanitized Debug | **25/25 passed** |
 | Pleora-only Debug | **18/18 passed** |
@@ -290,11 +291,79 @@ reproducer and documentation (GCC 14.2, unless indicated):
 | Additional Pleora isolation check | Common provider dependencies/symbols and installed C++/CMake interfaces remain vendor-free |
 | Proposed files vs external SDK content | No exact file-content matches; scanner rules pass |
 
-The combined TSan run reported no additional races, invalid synchronization
-operations or different lock-order cycles. This is a statement about diagnostics
-observed in executed tests, not proof that uninstrumented vendor internals are
-race-free. Existing Aravis race-suppression policy is unchanged. Simulator tests
-were run sequentially across builds to avoid UDP 3956 collisions.
+The first combined TSan run reported no additional races, invalid synchronization
+operations or different lock-order cycles. **That observation did not hold on
+the post-commit repeat:** it also reported a `provider_contract` data race. No
+invalid synchronization or different lock-order cycle was reported. Existing
+Aravis race-suppression policy is unchanged. Simulator tests were run sequentially
+across builds to avoid UDP 3956 collisions.
+
+### Additional qualification blocker found on post-commit repeat
+
+This is separate from the conclusively isolated GenApi inversion and must not
+be hidden by a successful rerun. `provider_contract` reported:
+
+```text
+WARNING: ThreadSanitizer: data race
+Write of size 8, Health worker T276:
+ operator delete(void*, unsigned long)                    libtsan +0x9be2b
+ std::__new_allocator<..._State_baseV2...>::deallocate     provider_tests +0x3ff156
+ std::__allocated_ptr<...>::~__allocated_ptr              provider_tests +0x3e9cca
+ std::_Sp_counted_ptr_inplace<...>::_M_destroy             provider_tests +0x409c0e
+ <null>                                                  libstdc++.so.6 +0xdc591
+Previous atomic write of size 4, main thread:
+ __gnu_cxx::__exchange_and_add                            ext/atomicity.h:66
+ __gnu_cxx::__exchange_and_add_dispatch                   ext/atomicity.h:101
+ std::_Sp_counted_base<...>::_M_release                   shared_ptr_base.h:359
+ std::__shared_count<...>::~__shared_count                provider_tests +0x3858d8
+ std::__shared_ptr<...>::~__shared_ptr                    provider_tests +0x372257
+ std::shared_ptr<...>::~shared_ptr                        provider_tests +0x372283
+ std::promise<void>::~promise                            provider_tests +0x3726cb
+ subsystem_owners                                       provider_subsystem_tests.inc:824
+ main                                                   provider_tests.cpp:2862
+Worker creation:
+ pthread_create                                         libtsan +0x568a6
+ std::thread::_M_start_thread                            libstdc++.so.6 +0xe12f8
+ HealthChannelImpl::enable                              src/provider.cpp:1395
+ subsystem_owners                                       provider_subsystem_tests.inc:819
+ main                                                   provider_tests.cpp:2862
+```
+
+The test uses `promise::set_value_at_thread_exit()` and waits for the future
+before destroying its promises. The system libstdc++ thread-exit callback is
+not instrumented. Its SHA-256 is
+`972bb2a18b71140dab0240f8a1f68ab3fb1d56bcd4c4f824a91b70888faf5a00`,
+build ID `133b71e0013695cc7832680a74edb51008c4fc4c`.
+A local standard-library-only experiment (no SDK/provider/test support) with a
+detached `std::thread`, `set_value_at_thread_exit()`, timed future readiness wait,
+and ordinary promise destruction also reports a race under this GCC/libstdc++
+configuration. That suggests a separate standard-library instrumentation boundary;
+it does **not** conclusively resolve the exact reported control-block race or
+justify calling the provider failure a pass. Local experiment/logs are retained
+under `build/028-evidence/promise_exit.cpp` and `promise-exit-timed-tsan.log`.
+The independent experiment is:
+
+```cpp
+#include <future>
+#include <thread>
+int main() {
+    for (int i = 0; i < 5000; ++i) {
+        std::promise<void> done;
+        auto exited = done.get_future();
+        std::thread worker([&] { done.set_value_at_thread_exit(); });
+        worker.detach();
+        if (exited.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+            return 2;
+    }
+}
+```
+
+Compile with `g++ -std=c++20 -g -O0 -fsanitize=thread
+-fno-omit-frame-pointer -pthread` and run with the same `TSAN_OPTIONS` above.
+The immediate focused provider rerun passed all 100 cases. Repeated passing
+runs do not invalidate the earlier diagnostic. No test/production change or
+suppression was made on this evidence. Further isolation of this intermittent
+report remains a qualification blocker; “no new races” cannot be confirmed.
 
 Publication identity and final-HEAD checks are recorded in PR #26. Hosted CI runs
 on the new commit are distinguished there from the executed local hosted-equivalent
