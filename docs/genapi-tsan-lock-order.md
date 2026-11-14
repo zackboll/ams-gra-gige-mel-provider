@@ -300,6 +300,13 @@ across builds to avoid UDP 3956 collisions.
 
 ### Additional qualification blocker found on post-commit repeat
 
+**GIGE-MEL-029 follow-up:** [provider thread-exit investigation](provider-thread-exit-tsan.md)
+isolates the matching detached shared-state report to the uninstrumented runtime
+boundary and strengthens both final-owner tests with a native exit/cleanup
+barrier. The historical diagnostic below is retained. The independent GenApi
+inversion remains unresolved; stock detached-runtime TSan qualification remains
+limited as described in the follow-up.
+
 This is separate from the conclusively isolated GenApi inversion and must not
 be hidden by a successful rerun. `provider_contract` reported:
 

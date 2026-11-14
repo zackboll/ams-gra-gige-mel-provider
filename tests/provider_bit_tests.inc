@@ -511,7 +511,12 @@ void bit_health_owners() {
     std::weak_ptr<ir::Control> control = f.control;
     std::weak_ptr<ir::HealthStatusChannel> channel = health;
     std::promise<void> done; auto exited = done.get_future();
+    auto enabled = std::make_shared<WatchdogGate>();
+    test_join::SelfDetach worker;
+    TestCleanup cleanup{[&] { enabled->open(); }};
     CHECK(health->registerMetadataCallback(BitCallback{[&](auto& source,auto*) {
+        worker.arm();
+        enabled->enter_and_wait();
         expect_error(f.c2->send(ir::BIT_Command{42,{1},{},{}}),mel::ErrorCode::InvalidState);
         CHECK(health->registerMetadataCallback(BitCallback{}) == ir::Return::Fail);
         CHECK(f.c2->registerMetadataCallback(CatalogueCallback{}) == ir::Return::Fail);
@@ -521,7 +526,11 @@ void bit_health_owners() {
         done.set_value_at_thread_exit();
     }}) == ir::Return::Success);
     CHECK(health->enable() == ir::Return::Success);
+    worker.started();
+    enabled->open();
     CHECK(exited.wait_for(2s) == std::future_status::ready);
+    worker.join();
+    enabled->check();
     CHECK(control.expired() && channel.expired());
     CHECK(f.c2->registerMetadataCallback(BitCallback{}) == ir::Return::Fail);
     CHECK(f.c2->registerMetadataCallback(CatalogueCallback{}) == ir::Return::Fail);

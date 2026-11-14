@@ -807,18 +807,30 @@ void subsystem_owners() {
     std::weak_ptr<ir::HealthStatusChannel> channel = health;
     std::promise<bool> body; auto completed = body.get_future();
     std::promise<void> done; auto exited = done.get_future();
+    auto enabled = std::make_shared<WatchdogGate>(), callback = std::make_shared<WatchdogGate>();
+    test_join::SelfDetach worker; // Destroyed before promises and fixture on unwind.
+    TestCleanup cleanup{[&] { enabled->open(); callback->open(); }};
     CHECK(health->registerMetadataCallback(SubsystemCallback{[&](auto& source, auto*) {
+        worker.arm();
+        enabled->enter_and_wait(); // enable's temporary Control pin is gone.
         const auto bit = f.c2->send(ir::BIT_Command{42,{1},{},{}}).get();
         const bool rejected = !bit && bit.getError().getCode() == mel::ErrorCode::InvalidState &&
             health->registerMetadataCallback(SubsystemCallback{}) == ir::Return::Fail;
         f.control.reset(); health.reset();
         body.set_value(rejected && !control.expired() && !channel.expired() &&
                        *response(source.sendKeepAliveRep()) == ir::Return::Success);
+        callback->enter_and_wait();
         done.set_value_at_thread_exit();
     }}) == ir::Return::Success);
     CHECK(health->enable() == ir::Return::Success);
+    worker.started();
+    enabled->open();
     CHECK(completed.wait_for(2s) == std::future_status::ready && completed.get());
-    CHECK(exited.wait_for(2s) == std::future_status::ready); // Worker thread exited.
+    CHECK(exited.wait_for(0ms) == std::future_status::timeout); // Body completion is not exit.
+    callback->open();
+    CHECK(exited.wait_for(2s) == std::future_status::ready);
+    worker.join(); // Actual exit, including notification shared-state cleanup.
+    enabled->check(); callback->check();
     CHECK(control.expired() && channel.expired());
     expect_error(f.c2->send(ir::BIT_Command{42,{1},{},{}}), mel::ErrorCode::InvalidState);
 }
