@@ -1,6 +1,7 @@
 #pragma once
 
-// Internal source-level C++20 extension seam, never installed or a binary ABI.
+// Internal C++20 extension seam, not a stable binary ABI. Matched-toolchain
+// module use requires profile_module.hpp validation and independent state pins.
 #include "device_features.hpp"
 #include "frame_policy.hpp"
 #include <functional>

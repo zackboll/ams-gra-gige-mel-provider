@@ -1,5 +1,13 @@
 # Bootstrap validation record
 
+## Dynamic camera-profile modules (GIGE-MEL-035)
+
+The [module qualification record](tasks/GIGE-MEL-035-validation.md) documents
+the base identity, independent module build, behavioral/native receive evidence,
+negative compatibility and observed unload cases, reproduction matrix and
+limitations. Final-HEAD executed results and final commit/tree are recorded on
+the delivery PR; this document does not substitute configured checks for execution.
+
 ## Interchangeable source-level profiles (GIGE-MEL-034)
 
 Base: fetched main `7a2539a123dcb1a0cb1d5a7d7884d1b38c615c66`, tree

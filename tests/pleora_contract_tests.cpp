@@ -10,6 +10,8 @@
 #include "selection/session_selection.hpp"
 #include "selected_profile_contract.hpp"
 #include "alternate_camera_profile.hpp"
+#include "selection/profile_loader.hpp"
+#include "module_unload_probe.hpp"
 #include "pleora_controlled_backend.hpp"
 
 #include <PvDeviceGEV.h>
@@ -284,53 +286,77 @@ void unchanged_profile_prevalidation_and_truthful_readback() {
     }
     // Same selection/injection boundary, native Features and production copy
     // stream. Local GenApi/PvBuffer fixtures do NOT emulate a connected PvDevice.
-    auto counts = std::make_shared<alternate_profile::Counts>();
-    std::weak_ptr<const backend::profiles::ICameraProfile> injected;
-    auto bound = [&] {
-        selection::BackendCatalog owned;
-        CHECK(owned.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
-        CHECK(owned.register_backend("pleora", std::vector<std::string>{std::string(alternate_profile::id)},
-            [&](selection::BackendCatalog::Profile p) {
-                injected = p;
-                return pleora::make_backend(std::move(p));
-            }));
-        CHECK(!owned.create("pleora", selection::mono_free_running_v1));
-        CHECK(counts->created == 0);
-        return take(owned.create("pleora", alternate_profile::id));
-    }();
-    CHECK(!injected.expired() && counts->opened == 0); // catalog gone, no camera I/O
-    {
-        fixture::Fixture local;
-        pleora::Features native_features(*local.map._Ptr);
-        auto state = take(injected.lock()->open(native_features));
-        CHECK(state->capabilities().maximum_frame_rate_hz == 20);
-        auto requested = take(state->configuration(native_features, connected));
-        local.port.calls.clear();
-        rejected(state->apply(native_features, requested, connected, ready), backend::ErrorCode::unsupported, "test profile");
-        CHECK(local.port.write_attempts() == 0);
-        requested.frame_rate_hz = 20;
-        CHECK(take(state->apply(native_features, requested, connected, ready)) == requested);
-        CHECK(take(state->preflight(native_features)) == requested);
-        auto source = std::make_shared<pleora_controlled::Source>(backend::PixelFormat::mono8, requested);
-        auto stream = pleora::make_stream(source, state);
-        CHECK(stream->start(3));
-        rejected(stream->receive(50ms), backend::ErrorCode::unsupported, "test profile rejects odd");
-        auto frame = take(stream->receive(50ms));
-        CHECK(frame.descriptor().native_frame_id == 2);
-        const std::vector<std::byte> saved(frame.bytes().begin(), frame.bytes().end());
-        stream->stop(); stream.reset(); source.reset();
-        CHECK(std::equal(saved.begin(), saved.end(), frame.bytes().begin()));
-        local.port.real(fixture::rate, 25);
-        rejected(state->preflight(native_features), backend::ErrorCode::unsupported, "test profile native rate");
-        local.port.integer(fixture::trigger_mode, 1);
-        requested.frame_rate_hz = 10;
-        local.port.calls.clear();
-        rejected(state->apply(native_features, requested, connected, ready), backend::ErrorCode::unsupported, "TriggerMode");
-        CHECK(local.port.write_attempts() == 0);
+    for (bool dynamic : {false, true}) {
+        ModuleUnloadProbe unload(dynamic);
+        auto counts = std::make_shared<alternate_profile::Counts>();
+        std::weak_ptr<const backend::profiles::ICameraProfile> injected;
+        auto bound = [&] {
+            selection::BackendCatalog owned;
+            if (dynamic) {
+                auto loaded = take(selection::load_profile_module(GIGE_MEL_TEST_PROFILE_MODULE));
+                CHECK(loaded.profile->id() == alternate_profile::id);
+                CHECK(selection::register_loaded_profile(owned, loaded));
+            } else {
+                CHECK(owned.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+            }
+            CHECK(owned.register_backend("pleora", std::vector<std::string>{std::string(alternate_profile::id)},
+                [&](selection::BackendCatalog::Profile p) {
+                    injected = p;
+                    return pleora::make_backend(std::move(p));
+                }));
+            CHECK(!owned.create("pleora", selection::mono_free_running_v1));
+            if (!dynamic) CHECK(counts->created == 0);
+            return take(owned.create("pleora", alternate_profile::id));
+        }();
+        CHECK(!injected.expired() && counts->opened == 0); // catalog gone, no camera I/O
+        {
+            fixture::Fixture local;
+            pleora::Features native_features(*local.map._Ptr);
+            auto state = take(injected.lock()->open(native_features));
+            CHECK(state->capabilities().maximum_frame_rate_hz == 20);
+            auto requested = take(state->configuration(native_features, connected));
+            local.port.calls.clear();
+            rejected(state->apply(native_features, requested, connected, ready), backend::ErrorCode::unsupported, "test profile");
+            CHECK(local.port.write_attempts() == 0);
+            requested.frame_rate_hz = 20;
+            CHECK(take(state->apply(native_features, requested, connected, ready)) == requested);
+            local.port.fail_read = fixture::width;
+            auto failed_native = state->configuration(native_features, connected);
+            rejected(failed_native, backend::ErrorCode::io_error, "injected test port read failure");
+            CHECK(contains(failed_native.error().message, "Pleora"));
+            local.port.fail_read.reset();
+            CHECK(take(state->preflight(native_features)) == requested);
+            local.port.real(fixture::rate, 25);
+            rejected(state->preflight(native_features), backend::ErrorCode::unsupported, "test profile native rate");
+            local.port.integer(fixture::trigger_mode, 1);
+            auto changed = requested;
+            changed.frame_rate_hz = 10;
+            local.port.calls.clear();
+            rejected(state->apply(native_features, changed, connected, ready), backend::ErrorCode::unsupported, "TriggerMode");
+            CHECK(local.port.write_attempts() == 0);
+            local.port.integer(fixture::trigger_mode, 0);
+            local.port.real(fixture::rate, 20);
+            auto source = std::make_shared<pleora_controlled::Source>(backend::PixelFormat::mono8, requested);
+            auto stream = pleora::make_stream(source, state);
+            CHECK(stream->start(3));
+            bound.reset(); // no catalog/backend/profile remains
+            CHECK(injected.expired());
+            CHECK(state->capabilities().maximum_frame_rate_hz == 20);
+            state.reset(); // stream's frame validator must independently pin the state
+            unload.expect(0);
+            rejected(stream->receive(50ms), backend::ErrorCode::unsupported, "test profile rejects odd");
+            auto frame = take(stream->receive(50ms));
+            CHECK(frame.descriptor().native_frame_id == 2);
+            const std::vector<std::byte> saved(frame.bytes().begin(), frame.bytes().end());
+            stream->stop(); stream.reset(); source.reset();
+            unload.expect(1);
+            CHECK(std::equal(saved.begin(), saved.end(), frame.bytes().begin()));
     }
-    CHECK(counts->states == counts->retired && counts->frames == 2);
+    if (!dynamic) CHECK(counts->states == counts->retired && counts->frames == 2);
     bound.reset();
-    CHECK(injected.expired() && counts->destroyed == 1);
+    CHECK(injected.expired());
+    if (!dynamic) CHECK(counts->destroyed == 1);
+    }
     bool null_rejected = false;
     try { (void)pleora::make_backend(nullptr); }
     catch (const std::invalid_argument&) { null_rejected = true; }

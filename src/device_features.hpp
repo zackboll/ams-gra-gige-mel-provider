@@ -1,7 +1,7 @@
 #pragma once
 
 // Internal, SDK-free device feature access for camera profiles. This is a
-// source-level seam, not an installed API or a runtime plugin ABI.
+// C++ seam, not an installed API or a stable cross-toolchain plugin ABI.
 
 #include <gige_mel/backend.hpp>
 

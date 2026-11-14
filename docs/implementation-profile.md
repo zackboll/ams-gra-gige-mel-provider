@@ -1,5 +1,25 @@
 # Experimental image-stream profile, version 0.1
 
+## Explicit matched-C++ profile modules (GIGE-MEL-035)
+
+An opt-in Linux x86-64 loader now validates separately compiled camera-profile
+shared libraries through a versioned C-linkage discovery entry point, then uses
+the existing C++ profile interface under an explicitly matched compiler/stdlib/
+ABI/interface contract. This is not a stable cross-toolchain C ABI or a runtime
+backend plugin API. The installed common provider and exported MEL factories
+remain independent and unchanged. No new MEL capability or camera/clock
+qualification is claimed.
+
+Module profiles and independently surviving states each retain a host-owned
+shared RAII module pin. Plugin objects and shared_ptr deleters retire before the
+last pin attempts dlclose. Existing native stream/lease contracts are unchanged;
+retired native/copy frame storage remains valid without plugin code. There is no
+force unload, hot replacement, implicit search/discovery or fallback. See
+[profile authoring](camera-profile-authoring.md),
+[runtime loading](runtime-selection.md#explicit-module-loading), and the
+[pre-implementation boundary audit](tasks/GIGE-MEL-035-design.md).
+
+
 GIGE-MEL-034 introduces an internal, SDK-independent source-level camera-profile
 interface with owned per-device policy state and explicit injection into Aravis
 and Pleora. Selection now executes independently registered implementations,
@@ -20,7 +40,7 @@ tests. These changes preserve advertised MEL capabilities, factory selection,
 camera behavior and timestamp admission. See
 [camera-profile portability](camera-profile-portability.md) for the implemented
 boundary, implemented selection and source-level dispatch, and remaining hardware
-qualification and binary-plugin work.
+qualification and future stable cross-toolchain binary-plugin work.
 
 ## Provider and discovery
 

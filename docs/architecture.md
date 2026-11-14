@@ -1,5 +1,25 @@
 # Architecture and scope
 
+## Explicit matched-C++ profile modules (GIGE-MEL-035)
+
+An opt-in Linux x86-64 loader now validates separately compiled camera-profile
+shared libraries through a versioned C-linkage discovery entry point, then uses
+the existing C++ profile interface under an explicitly matched compiler/stdlib/
+ABI/interface contract. This is not a stable cross-toolchain C ABI or a runtime
+backend plugin API. The installed common provider and exported MEL factories
+remain independent and unchanged. No new MEL capability or camera/clock
+qualification is claimed.
+
+Module profiles and independently surviving states each retain a host-owned
+shared RAII module pin. Plugin objects and shared_ptr deleters retire before the
+last pin attempts dlclose. Existing native stream/lease contracts are unchanged;
+retired native/copy frame storage remains valid without plugin code. There is no
+force unload, hot replacement, implicit search/discovery or fallback. See
+[profile authoring](camera-profile-authoring.md),
+[runtime loading](runtime-selection.md#explicit-module-loading), and the
+[pre-implementation boundary audit](tasks/GIGE-MEL-035-design.md).
+
+
 GIGE-MEL-034 introduces an internal, SDK-independent source-level camera-profile
 interface with owned per-device policy state and explicit injection into Aravis
 and Pleora. Selection now executes independently registered implementations,
@@ -82,7 +102,7 @@ There are three contracts with different responsibilities:
 | MEL provider → internal camera backend | Device selection, normalized camera configuration, acquisition, frame metadata, and resource ownership | Project-owned C++ interface; adapters are rebuilt together with the provider |
 | SDK adapter → transport implementation | SDK initialization, device access, native feature operations, stream management, and native buffer lifetime | Qualify separately for each pinned SDK and supported camera family |
 
-The second boundary is **not a stable binary plugin ABI**. A virtual C++ interface is appropriate for adapters built with this project. It is not sufficient to promise compiler-independent plugin compatibility. A separately versioned plugin ABI would be a future design decision justified by a deployment requirement.
+The second boundary is **not a stable binary plugin ABI**. A virtual C++ interface is appropriate for adapters built with this project. It is not sufficient to promise compiler-independent plugin compatibility. GIGE-MEL-035 adds only the matched-C++ profile-module boundary above, not dynamic backend loading. A stable cross-toolchain plugin ABI remains a separate design decision.
 
 ## Native C++ factory ABI
 

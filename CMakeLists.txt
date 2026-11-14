@@ -169,11 +169,13 @@ if(GIGE_MEL_BUILD_PLEORA)
 endif()
 
 # Internal selection is never linked into or installed with the MEL provider.
+include(cmake/ProfileBuildIdentity.cmake)
+gige_mel_profile_identity(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/profile-include)
 add_library(gige_mel_selection STATIC
-  src/selection/backend_catalog.cpp src/selection/session_selection.cpp)
-target_include_directories(gige_mel_selection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  src/selection/backend_catalog.cpp src/selection/session_selection.cpp src/selection/profile_loader.cpp)
+target_include_directories(gige_mel_selection PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/profile-include)
 target_link_libraries(gige_mel_selection PUBLIC gige_mel_backend gige_mel_headers gige_mel_camera_profiles
-  PRIVATE gige_mel_build_options)
+  PRIVATE gige_mel_build_options ${CMAKE_DL_LIBS})
 add_library(gige_mel_selection_builtins STATIC src/selection/builtin_backends.cpp)
 target_link_libraries(gige_mel_selection_builtins PUBLIC gige_mel_selection PRIVATE gige_mel_build_options)
 if(GIGE_MEL_BUILD_ARAVIS)
@@ -189,27 +191,62 @@ if(GIGE_MEL_BUILD_EXAMPLES)
   target_link_libraries(gige_mel_select PRIVATE gige_mel_selection_builtins gige_mel_provider gige_mel_build_options)
 endif()
 if(BUILD_TESTING)
+  # A separate configure/build, not a target linked into the host executable.
+  include(ExternalProject)
+  ExternalProject_Add(gige_mel_external_test_profile
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples/profile_module
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/external-profile
+    CMAKE_ARGS -DGIGE_MEL_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
+      -DCMAKE_CXX_FLAGS_DEBUG=${CMAKE_CXX_FLAGS_DEBUG}
+      -DCMAKE_CXX_FLAGS_RELEASE=${CMAKE_CXX_FLAGS_RELEASE}
+      -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=${CMAKE_CXX_FLAGS_RELWITHDEBINFO}
+      -DCMAKE_CXX_FLAGS_MINSIZEREL=${CMAKE_CXX_FLAGS_MINSIZEREL}
+      -DGIGE_MEL_SANITIZERS=${GIGE_MEL_SANITIZERS} -DGIGE_MEL_MODULE_NEGATIVE_TESTS=ON
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 2
+    BUILD_ALWAYS TRUE INSTALL_COMMAND "")
+  set(profile_test_module "${CMAKE_CURRENT_BINARY_DIR}/external-profile/librate_limited_profile.so")
+  target_link_libraries(device_feature_tests PRIVATE gige_mel_selection)
+  target_compile_definitions(device_feature_tests PRIVATE
+    GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
+    GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile")
+  add_dependencies(device_feature_tests gige_mel_external_test_profile)
+  add_test(NAME dynamic_profile_module_contract COMMAND device_feature_tests --dynamic-module-only)
+  set_tests_properties(dynamic_profile_module_contract PROPERTIES TIMEOUT 30)
   add_executable(selection_tests tests/selection_tests.cpp)
   target_link_libraries(selection_tests PRIVATE gige_mel_selection gige_mel_provider gige_mel_build_options)
   add_test(NAME selection_contract COMMAND selection_tests)
   add_executable(builtin_selection_tests tests/builtin_selection_tests.cpp)
   target_compile_definitions(builtin_selection_tests PRIVATE
+    GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
+    GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile"
     GIGE_MEL_EXPECT_ARAVIS=$<BOOL:${GIGE_MEL_BUILD_ARAVIS}>
     GIGE_MEL_EXPECT_PLEORA=$<BOOL:${GIGE_MEL_BUILD_PLEORA}>)
   target_link_libraries(builtin_selection_tests PRIVATE gige_mel_selection_builtins gige_mel_build_options)
+  add_dependencies(builtin_selection_tests gige_mel_external_test_profile)
   add_test(NAME builtin_selection_contract COMMAND builtin_selection_tests)
   set_tests_properties(selection_contract builtin_selection_contract PROPERTIES TIMEOUT 30)
   if(GIGE_MEL_BUILD_EXAMPLES)
     add_test(NAME selection_example_list COMMAND gige_mel_select --list)
     add_test(NAME selection_example_bind COMMAND gige_mel_select synthetic synthetic-0 mono_free_running_v1)
     add_test(NAME selection_example_inspect COMMAND gige_mel_select synthetic synthetic-0 mono_free_running_v1 --inspect)
+    add_test(NAME selection_example_module_list COMMAND gige_mel_select --profile-module ${profile_test_module} --list)
+    add_test(NAME selection_example_module_no_fallback COMMAND gige_mel_select --profile-module ${profile_test_module} synthetic synthetic-0 test_rate_limited_v1)
+    set_tests_properties(selection_example_module_no_fallback PROPERTIES WILL_FAIL TRUE)
   endif()
   if(GIGE_MEL_BUILD_ARAVIS)
     target_link_libraries(aravis_adapter_tests PRIVATE gige_mel_selection)
     target_link_libraries(aravis_stream_contract_tests PRIVATE gige_mel_selection)
+    foreach(target aravis_adapter_tests aravis_stream_contract_tests)
+      target_compile_definitions(${target} PRIVATE GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}")
+      add_dependencies(${target} gige_mel_external_test_profile)
+    endforeach()
   endif()
   if(GIGE_MEL_BUILD_PLEORA)
     target_link_libraries(pleora_contract_tests PRIVATE gige_mel_selection)
+    target_compile_definitions(pleora_contract_tests PRIVATE GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}")
+    add_dependencies(pleora_contract_tests gige_mel_external_test_profile)
   endif()
 endif()
 if(GIGE_MEL_BUILD_PLEORA)
@@ -223,7 +260,7 @@ if(GIGE_MEL_BUILD_PLEORA)
     set_tests_properties(builtin_selection_contract PROPERTIES ENVIRONMENT
       "LD_LIBRARY_PATH=${pleora_runtime};GENICAM_ROOT_V3_4=${pleora_root}/lib/genicam;GENICAM_CACHE_V3_4=${CMAKE_CURRENT_BINARY_DIR}/genicam-cache")
     if(GIGE_MEL_BUILD_EXAMPLES)
-      set_tests_properties(selection_example_list selection_example_bind selection_example_inspect PROPERTIES ENVIRONMENT
+      set_tests_properties(selection_example_list selection_example_bind selection_example_inspect selection_example_module_list selection_example_module_no_fallback PROPERTIES ENVIRONMENT
         "LD_LIBRARY_PATH=${pleora_runtime};GENICAM_ROOT_V3_4=${pleora_root}/lib/genicam;GENICAM_CACHE_V3_4=${CMAKE_CURRENT_BINARY_DIR}/genicam-cache")
     endif()
   endif()

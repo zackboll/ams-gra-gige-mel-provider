@@ -3,7 +3,8 @@
 ## Scope and API
 
 This is build-local C++20 composition, not a new MEL consumer interface, public
-provider ABI, stable binary plugin contract or dynamic-library loader. The built-in
+provider ABI or stable cross-toolchain binary plugin contract. The opt-in
+matched-C++ module loader is described below. The built-in
 canonical profile is `mono_free_running_v1`. It selects the existing
 monochrome/free-running policy; it does **not** rename the historical diagnostic
 identifier `aravis-mono8-free-running-v1`, select a new pixel format, qualify
@@ -144,6 +145,56 @@ fixtures, and is never included in production builtins. The unchanged provider
 is additionally exercised through MEL C2 with alternate admission. No connected
 Pleora open or physical-camera compatibility is claimed by offline fixtures.
 
-Dynamically loaded profiles would still require a separately reviewed versioned
-ABI, loader, unload and mismatch contracts. No physical camera tests run
+No physical camera tests run
 implicitly; no new SDK/camera combination or production timestamp is qualified.
+
+## Explicit module loading
+
+`selection::load_profile_module(absolute_path)` in `src/selection/profile_loader.*`
+uses dlopen with `RTLD_NOW | RTLD_LOCAL`, dlsym of exactly
+`gige_mel_camera_profile_module_v1`, dlerror diagnostics and RAII dlclose.
+Relative, empty and embedded-NUL paths fail. Missing files/symbols, malformed or
+incompatible descriptors, factories and returned IDs fail without another profile
+being selected. Modules are trusted executable code: constructors may run before
+validation. There is no download, directory search, auto-discovery or sandbox.
+
+The returned `LoadedProfile` owns validated profile metadata and an independent
+profile factory. `register_loaded_profile(catalog, loaded)` registers its exact
+ID; duplicate IDs fail. Register before backend compatibility lists. The overload
+`make_builtin_catalog(vector<LoadedProfile>)` first registers modules, then composes
+only explicitly declared Aravis/Pleora compatibility; synthetic stays default-only.
+A custom composition must likewise explicitly declare and inject the selected
+profile. Compatibility promises source-contract support, not camera qualification.
+
+```cpp
+auto loaded = gige_mel::selection::load_profile_module("/absolute/profile.so");
+if (!loaded) throw std::runtime_error(loaded.error().message);
+auto catalog = gige_mel::selection::make_builtin_catalog({loaded.value()});
+if (!catalog) throw std::runtime_error(catalog.error().message);
+auto session = gige_mel::selection::select_session(catalog.value(), {
+    "aravis", "EXACT_DEVICE_ID", std::string(loaded.value().profile->id()), {}});
+```
+
+Use `pleora` and its exact MAC ID for the other adapter. Selection never opens
+or acquires. Each selected profile is a fresh module factory result. Dropping
+the LoadedProfile/catalog does not unload code used by devices or independent
+states. [Authoring](camera-profile-authoring.md#matched-c-dynamic-modules-v1-gige-mel-035)
+specifies exact compatibility, error and destruction ordering.
+
+The existing positional CLI is preserved:
+
+```sh
+./build/035-both-dev/gige_mel_select --profile-module /absolute/profile.so \
+  aravis EXACT_DEVICE_ID test_rate_limited_v1
+./build/035-both-dev/gige_mel_select --profile-module /absolute/profile.so \
+  pleora EXACT_MAC_ID test_rate_limited_v1
+```
+
+The optional module argument must precede the existing positional arguments (or
+`--list`). Without `--inspect`, this only loads/registers/selects and constructs
+a manager. No configuration writes, stream creation or acquisition is implicit.
+`--list` still lists compiled backends, not cameras. Built-in/zero-argument
+factories and exported MEL signatures remain unchanged. The selection/loader
+targets and module implementations are not installed with the common provider.
+See the [separate CMake project](../examples/profile_module/README.md) for a real
+independent build, required header bundle and matched build settings.

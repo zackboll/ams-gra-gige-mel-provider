@@ -14,12 +14,19 @@ template <class T> T take(gige_mel::backend::Result<T> result) {
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--help") {
-            std::cout << "Usage: gige_mel_select --list | BACKEND EXACT_DEVICE_ID PROFILE [--inspect]\n"
+            std::cout << "Usage: gige_mel_select [--profile-module /absolute/module.so] --list | BACKEND EXACT_DEVICE_ID PROFILE [--inspect]\n"
                          "Selection performs no device I/O. --inspect explicitly opens and reads,\n"
                          "then closes; it never applies configuration or starts acquisition.\n";
             return 0;
         }
-        auto catalog = take(gige_mel::selection::make_builtin_catalog());
+        std::vector<gige_mel::selection::LoadedProfile> modules;
+        if (argc > 1 && std::string_view(argv[1]) == "--profile-module") {
+            if (argc < 3) throw std::runtime_error("--profile-module requires an absolute path");
+            modules.push_back(take(gige_mel::selection::load_profile_module(argv[2])));
+            argc -= 2;
+            argv += 2;
+        }
+        auto catalog = take(gige_mel::selection::make_builtin_catalog(modules));
         std::cout << "Registered backends (no discovery):";
         for (const auto& id : catalog.backend_ids()) std::cout << ' ' << id;
         std::cout << '\n';

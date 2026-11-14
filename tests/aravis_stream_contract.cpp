@@ -11,6 +11,8 @@
 #include "acquisition_policy.hpp"
 #include "selection/session_selection.hpp"
 #include "alternate_camera_profile.hpp"
+#include "selection/profile_loader.hpp"
+#include "module_unload_probe.hpp"
 
 #include <arv.h>
 
@@ -1270,13 +1272,20 @@ void fatal_glib_log(const gchar* domain, GLogLevelFlags level, const gchar* mess
     std::abort();
 }
 
-void selected_profile_stream_lifetime() {
+void selected_profile_stream_lifetime(bool dynamic = false) {
     namespace selection = gige_mel::selection;
+    ModuleUnloadProbe unload(dynamic);
     auto counts = std::make_shared<alternate_profile::Counts>();
     auto force_odd = std::make_shared<std::atomic<bool>>(false);
     auto camera = [&] {
         selection::BackendCatalog catalog;
-        CHECK(catalog.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+        if (dynamic) {
+            auto loaded = selection::load_profile_module(GIGE_MEL_TEST_PROFILE_MODULE);
+            CHECK(loaded && loaded.value().profile->id() == alternate_profile::id);
+            CHECK(selection::register_loaded_profile(catalog, loaded.value()));
+        } else {
+            CHECK(catalog.register_profile(std::string(alternate_profile::id), [counts] { return alternate_profile::make(counts); }));
+        }
         CHECK(catalog.register_backend("aravis", std::vector<std::string>{std::string(alternate_profile::id)},
             [force_odd](selection::BackendCatalog::Profile p) {
                 aravis::TestHooks hooks;
@@ -1287,6 +1296,7 @@ void selected_profile_stream_lifetime() {
         CHECK(selected && counts->opened == 0);
         return std::move(selected).value();
     }(); // no native I/O, catalog gone
+    unload.expect(0);
     auto device = open_fake(*camera);
     auto requested = device->configuration();
     CHECK(requested);
@@ -1306,21 +1316,24 @@ void selected_profile_stream_lifetime() {
     stream->stop();
     CHECK(device->close());
     device.reset();
-    CHECK(counts->retired == 0); // stream still owns device profile state
+    if (!dynamic) CHECK(counts->retired == 0); // stream still owns device profile state
     stream.reset();
-    CHECK(counts->retired == 1 && counts->destroyed == 0);
+    unload.expect(0); // backend still owns factory, retained bytes remain readable
+    if (!dynamic) CHECK(counts->retired == 1 && counts->destroyed == 0);
     CHECK(std::equal(saved.begin(), saved.end(), frame.value().bytes().begin()));
     auto again = open_fake(*camera);
     auto new_stream = again->create_stream();
     CHECK(new_stream && !new_stream.value()->start(2)); // fresh native rate is >20
-    CHECK(counts->opened == 2 && counts->preflights == 2);
+    if (!dynamic) CHECK(counts->opened == 2 && counts->preflights == 2);
     camera.reset(); // device/stream, not catalog/backend, now pin the profile
-    CHECK(counts->destroyed == 0);
+    if (!dynamic) CHECK(counts->destroyed == 0);
     CHECK(again->close());
     again.reset();
-    CHECK(counts->destroyed == 0);
+    if (!dynamic) CHECK(counts->destroyed == 0);
     new_stream.value().reset();
-    CHECK(counts->destroyed == 1 && counts->states == counts->retired);
+    unload.expect(1); // no plugin code left; old frame's native storage remains valid
+    CHECK(std::equal(saved.begin(), saved.end(), frame.value().bytes().begin()));
+    if (!dynamic) CHECK(counts->destroyed == 1 && counts->states == counts->retired);
 }
 
 } // namespace
@@ -1337,7 +1350,8 @@ int main(int argc, char** argv) {
         g_log_set_handler(domain, static_cast<GLogLevelFlags>(G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING | G_LOG_FLAG_FATAL),
                           fatal_glib_log, nullptr);
     const std::vector<std::pair<const char*, void (*)()>> tests{
-        {"selected profile stream lifetime and frame dispatch", selected_profile_stream_lifetime},
+        {"selected profile stream lifetime and frame dispatch", [] { selected_profile_stream_lifetime(); }},
+        {"dynamic module native receive and lifetime", [] { selected_profile_stream_lifetime(true); }},
         {"A start, commands and single acquisition owner", start_and_commands},
         {"B real SDK pixels and descriptors", real_pixels_and_descriptors},
         {"C bounded pool, held pixels and release", pool_and_release},
