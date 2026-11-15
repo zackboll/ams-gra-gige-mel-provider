@@ -7,6 +7,7 @@
 // Aravis thread-safe. Ownership: one logically open device per (interface,
 // device ID) per process, across adapter instances; a second open is `busy`.
 #include "aravis_private.hpp"
+#include "device_registers.hpp"
 #include "acquisition_policy.hpp"
 #include "profiles/camera_profile.hpp"
 #include <stdexcept>
@@ -1343,7 +1344,55 @@ Result<FrameLease> AravisStream::receive_observed(std::chrono::milliseconds time
                                         std::to_string(run->stream_generation) + ")");
 }
 
-class AravisDevice final : public ICameraDevice {
+class AravisRegisters final : public device_registers::CheckedRegisters {
+public:
+    explicit AravisRegisters(DeviceCore& core) : core_(core) {}
+private:
+    device_registers::Status connected() const override {
+        if (core_.lost()) return control_loss_error();
+        if (!core_.device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+        return {};
+    }
+    device_registers::Status outcome(gboolean success, ErrorSlot& error, std::string_view operation) {
+        if (error.failed()) {
+            auto native = error.take();
+            auto diagnostic = translate(operation, {}, *native);
+            if (native->domain == ARV_DEVICE_ERROR &&
+                native->code == ARV_DEVICE_ERROR_PROTOCOL_ERROR_NOT_IMPLEMENTED)
+                diagnostic.code = ErrorCode::unsupported;
+            return diagnostic;
+        }
+        if (!success) return fail(ErrorCode::io_error, "Aravis " + std::string(operation) + " failed without GError");
+        return {};
+    }
+    device_registers::Result<std::uint32_t> native_read_register(std::uint64_t address) override {
+        ErrorSlot error;
+        guint32 value = 0;
+        const auto success = arv_device_read_register(core_.device.get(), address, &value, error.out());
+        if (auto s = outcome(success, error, "read_register"); !s) return s.error();
+        return value;
+    }
+    device_registers::Status native_write_register(std::uint64_t address, std::uint32_t value) override {
+        ErrorSlot error;
+        const auto success = arv_device_write_register(core_.device.get(), address, value, error.out());
+        return outcome(success, error, "write_register");
+    }
+    device_registers::Status native_read_memory(std::uint64_t address, std::span<std::byte> bytes) override {
+        ErrorSlot error;
+        const auto success = arv_device_read_memory(core_.device.get(), address,
+            static_cast<guint32>(bytes.size()), bytes.data(), error.out());
+        return outcome(success, error, "read_memory");
+    }
+    device_registers::Status native_write_memory(std::uint64_t address, std::span<const std::byte> bytes) override {
+        ErrorSlot error;
+        const auto success = arv_device_write_memory(core_.device.get(), address,
+            static_cast<guint32>(bytes.size()), bytes.data(), error.out());
+        return outcome(success, error, "write_memory");
+    }
+    DeviceCore& core_;
+};
+
+class AravisDevice final : public ICameraDevice, public device_registers::IRegisterDevice {
 public:
     AravisDevice(NativeOpen native, CameraCapabilities caps, std::shared_ptr<const profiles::ICameraProfileState> policy,
                  std::shared_ptr<const profiles::ICameraProfile> owner, std::shared_ptr<const TestHooks> hooks)
@@ -1354,6 +1403,16 @@ public:
 
     // Validated during open; immutable snapshot. No device I/O, also after close.
     CameraCapabilities capabilities() const override { return core_->caps; }
+
+    device_registers::Status with_registers(
+        const std::function<device_registers::Status(device_registers::IDeviceRegisters&)>& operation) override {
+        if (!operation) return fail(ErrorCode::invalid_argument, "empty register transaction");
+        std::lock_guard lock(core_->mutex);
+        if (core_->lost()) return control_loss_error();
+        if (!core_->device) return fail(ErrorCode::disconnected, "Aravis device is logically closed");
+        AravisRegisters registers(*core_);
+        return operation(registers);
+    }
 
     Result<CameraConfiguration> configuration() const override {
         std::lock_guard lock(core_->mutex);

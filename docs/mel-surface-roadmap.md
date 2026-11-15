@@ -1,5 +1,9 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-037 adds only an internal [register/memory transport](device-register-transport.md).
+Navigation wire encoding, sensor acknowledgement and MEL submission integration
+remain unimplemented; bounded execution and SDK-internal retries remain open.
+
 ## Cognex profile (GIGE-MEL-036)
 
 The first real-camera-specific [independent module](../camera_profiles/cognex_cic_5000r/README.md)

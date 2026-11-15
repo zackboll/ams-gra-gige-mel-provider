@@ -18,6 +18,11 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+An internal [register/memory transport](docs/device-register-transport.md) provides
+typed numeric words and exact byte transfers through both optional SDKs without
+changing MEL or profile v1. Navigation protocol/submission integration is excluded;
+pinned-SDK retry/deadline limits remain explicit qualification gates.
+
 The independently built [Cognex CIC-5000R module](camera_profiles/cognex_cic_5000r/README.md)
 adds exact model/firmware admission and conservative Mono8 1/2/4/5/8/10 Hz policy
 through either SDK. It is explicitly selected, never a fallback or factory change.

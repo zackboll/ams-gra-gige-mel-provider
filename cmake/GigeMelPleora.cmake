@@ -69,6 +69,15 @@ if(BUILD_TESTING)
     "LINKER:-rpath-link,${pleora_root}/lib"
     "LINKER:-rpath-link,${pleora_root}/lib/genicam/bin/Linux64_x64")
   add_test(NAME pleora_adapter_contract COMMAND pleora_adapter_tests)
+  add_executable(pleora_register_tests tests/pleora_register_tests.cpp)
+  target_include_directories(pleora_register_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_include_directories(pleora_register_tests SYSTEM PRIVATE "${pleora_include}" "${GIGE_MEL_PLEORA_GENICAM_INCLUDE_DIR}")
+  target_link_libraries(pleora_register_tests PRIVATE gige_mel_pleora gige_mel_build_options ${pleora_libraries})
+  target_link_options(pleora_register_tests PRIVATE "LINKER:-rpath-link,${pleora_root}/lib"
+    "LINKER:-rpath-link,${pleora_root}/lib/genicam/bin/Linux64_x64")
+  add_test(NAME pleora_register_contract COMMAND pleora_register_tests)
+  set_tests_properties(pleora_register_contract PROPERTIES TIMEOUT 30
+    ENVIRONMENT "LD_LIBRARY_PATH=${pleora_runtime};GENICAM_ROOT_V3_4=${pleora_root}/lib/genicam;GENICAM_CACHE_V3_4=${CMAKE_CURRENT_BINARY_DIR}/genicam-cache")
   set_tests_properties(pleora_adapter_contract PROPERTIES TIMEOUT 30
     ENVIRONMENT "LD_LIBRARY_PATH=${pleora_runtime};GENICAM_ROOT_V3_4=${pleora_root}/lib/genicam;GENICAM_CACHE_V3_4=${CMAKE_CURRENT_BINARY_DIR}/genicam-cache")
   add_executable(pleora_contract_tests tests/pleora_contract_tests.cpp tests/support/pleora_node_map.cpp)

@@ -24,6 +24,7 @@
 #include "aravis_gv_loopback.hpp"
 #include "acquisition_policy.hpp"
 #include "aravis_virtual_clock.hpp"
+#include "device_registers.hpp"
 
 #include <arv.h>
 #include <nlohmann/json.hpp>
@@ -330,6 +331,54 @@ std::uint64_t stream_info(ArvStream* stream, const char* name) {
 
 // ===========================================================================
 // A. Discovery and device ownership through real GigE Vision discovery/GVCP.
+void register_transport_over_gvcp() {
+    namespace registers = backend::device_registers;
+    lb::Simulator sim;
+    auto camera = aravis::make_backend();
+    CHECK(sim.discover(*camera).size() == 1);
+    auto device = open_device(*camera);
+    auto* service = dynamic_cast<registers::IRegisterDevice*>(device.get());
+    CHECK(service);
+    CHECK(service->with_registers([](registers::IDeviceRegisters& transport) -> registers::Status {
+        for (auto value : {0U, 0x812345efU, UINT32_MAX, 0x12345678U}) {
+            CHECK(transport.write_register(0x800, value));
+            auto read = transport.read_register(0x800);
+            CHECK(read && read.value() == value);
+        }
+        std::array<std::byte, 4096> bytes{};
+        for (std::size_t i = 0; i < bytes.size(); ++i)
+            bytes[i] = static_cast<std::byte>((i * 37 + i / 7) & 255);
+        bytes[0] = std::byte{0};
+        bytes[1] = std::byte{0x81};
+        CHECK(transport.write_memory(0x4000, bytes));
+        std::array<std::byte, 4096> output{};
+        CHECK(transport.read_memory(0x4000, output));
+        CHECK(bytes == output); // multiple native GVCP packets, exact bytes
+        CHECK(!transport.write_memory(0x4001, bytes));
+        CHECK(!transport.read_memory(0x4000, {}));
+        CHECK(!transport.read_register(0x100000000ULL));
+        return {};
+    }));
+    // Raw access is allowed while streaming without changing stream ownership.
+    auto stream_result = device->create_stream();
+    CHECK(stream_result);
+    auto stream = std::move(stream_result).value();
+    CHECK(stream->start(1));
+    CHECK(service->with_registers([](registers::IDeviceRegisters& transport) -> registers::Status {
+        CHECK(transport.write_register(0x800, 0x91abcdef));
+        auto read = transport.read_register(0x800);
+        CHECK(read && read.value() == 0x91abcdef);
+        return {};
+    }));
+    CHECK(stream->receive(2s));
+    CHECK(device->close());
+    CHECK(!service->with_registers([](auto&) -> registers::Status { throw std::runtime_error("closed callback"); }));
+    stream.reset();
+    device.reset();
+    camera.reset();
+    sim.finish();
+}
+
 void discovery_and_ownership() {
     lb::Simulator sim;
     {
@@ -2081,6 +2130,7 @@ int main(int argc, char** argv) {
         g_log_set_handler(domain, static_cast<GLogLevelFlags>(G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING | G_LOG_FLAG_FATAL),
                           fatal_glib_log, nullptr);
     const std::vector<std::pair<const char*, void (*)()>> tests{
+        {"T  register and exact memory transport over GVCP", register_transport_over_gvcp},
         {"A  GigE discovery, exact identity and device ownership (GVCP)", discovery_and_ownership},
         {"B  configuration through real GVCP", configuration_over_gvcp},
         {"C  real GVSP Mono8 transfer through ArvGvStream (every pixel)", gvsp_frame_transfer},
