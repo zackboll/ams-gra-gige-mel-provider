@@ -7,6 +7,7 @@
 #include "pleora_node_map.hpp"
 #include "profiles/mono_free_running_device.hpp"
 #include "backends/pleora/pleora_backend.hpp"
+#include "backends/pleora/pleora_registers.hpp"
 #include "selection/session_selection.hpp"
 #include "selected_profile_contract.hpp"
 #include "alternate_camera_profile.hpp"
@@ -18,6 +19,8 @@
 #include <PvGenParameterArray.h>
 #include <PvResult.h>
 
+#include <array>
+#include <cstddef>
 #include <chrono>
 #include <functional>
 #include <iostream>
@@ -63,6 +66,22 @@ template <class T> void rejected(const backend::Result<T>& result, backend::Erro
 const profile::ConnectionCheck connected = [] { return backend::Status{}; };
 const profile::BeforeWrite ready = [](std::string_view) { return backend::Status{}; };
 
+void disconnected_register_transport() {
+    // Genuine installed native API: disconnected device, no network/open.
+    // Keep this in the existing audited process, not a new suppression scope.
+    PvDeviceGEV device;
+    pleora::Registers registers(device, []() -> backend::Status { return {}; });
+    CHECK(!registers.read_register(0));
+    CHECK(!registers.write_register(0, 0x812345ef));
+    std::array<std::byte, 8> output{};
+    auto failed = registers.read_memory(0, output);
+    CHECK(!failed && failed.error().diagnostic.code == backend::ErrorCode::disconnected);
+    CHECK(contains(failed.error().diagnostic.message, "NOT_CONNECTED"));
+    failed = registers.write_memory(0, output);
+    CHECK(!failed && failed.error().write_completion ==
+                     backend::device_registers::WriteCompletion::uncertain);
+}
+
 std::vector<std::int64_t> writes(const fixture::Port& port) {
     std::vector<std::int64_t> result;
     for (const auto& call : port.calls) if (call.write) result.push_back(call.address);
@@ -106,6 +125,8 @@ void actual_ebus_parameter_array_and_result_translation() {
         CHECK(contains(error.message, "Width"));
         CHECK(contains(error.message, result.GetCodeString().GetAscii()));
     }
+    disconnected_register_transport();
+    std::cout << "Completed disconnected register/memory native checks (no camera transport).\n";
 }
 
 void integer_type_access_and_live_grid() {

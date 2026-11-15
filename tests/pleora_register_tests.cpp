@@ -1,7 +1,7 @@
-// Production-call boundary with native PvResult and actual disconnected device.
+// Production-call boundary with native PvResult, without native device construction.
 // Recording calls prove argument construction, NOT GVCP/camera acceptance.
+// Actual disconnected-device checks run in the audited pleora_sdk_contract.
 #include "backends/pleora/pleora_registers.hpp"
-#include <PvDeviceGEV.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -99,17 +99,6 @@ int main() {
         }
         CHECK(native.calls.back() == "wr"); // service destruction adds no I/O
 
-        // Genuine installed native API: disconnected device, no network/open.
-        PvDeviceGEV device;
-        p::Registers registers(device, []() -> b::Status { return {}; });
-        CHECK(!registers.read_register(0));
-        CHECK(!registers.write_register(0, 0x812345ef));
-        std::array<std::byte, 8> output{};
-        auto failed = registers.read_memory(0, output);
-        CHECK(!failed && failed.error().diagnostic.code == b::ErrorCode::disconnected);
-        CHECK(failed.error().diagnostic.message.find("NOT_CONNECTED") != std::string::npos);
-        failed = registers.write_memory(0, output);
-        CHECK(!failed && failed.error().write_completion == r::WriteCompletion::uncertain);
         std::cout << "native Pleora call-boundary contracts passed (no camera transport)\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

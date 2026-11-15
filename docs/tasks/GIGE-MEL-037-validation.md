@@ -42,8 +42,19 @@ reproduction list or configured CI.
   access while acquiring. Existing simulator wildcard discovery listener exception
   remains; client discovery restricted to loopback. No physical camera.
 * pleora_register_contract: production call boundary with recording native-shaped
-  calls, actual PvResult translation and actual disconnected PvDeviceGEV calls.
+  calls and actual PvResult translation. Actual disconnected PvDeviceGEV calls
+  run in pleora_sdk_contract's first group, including both audited TSan phases.
   Not connected-camera or GVCP qualification.
+
+## R1 sanitizer correction
+
+[R1 investigation and disposition](GIGE-MEL-037-R1.md) records the original
+failure, native identities and consolidation. No new exception or widened rule:
+the existing SDK-process completion guard is strengthened to require native
+register/memory checks, and all eight existing groups remain intact. SDK-free
+guard tests reject changed identities/stacks, additional diagnostics, incomplete
+checks, unexpected exits and timeouts. Exact corrected-HEAD qualification results
+belong on PR #31, separate from historical runs and from unresolved merge scope.
 
 ## Open technical gates
 

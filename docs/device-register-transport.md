@@ -98,6 +98,26 @@ This implementation adds no retries but cannot promise those properties. Do not
 compose into a production bounded INavigationSink until these gates are resolved.
 No global SDK communication/acquisition policy was changed to conceal this.
 
+### Development-only merge scope versus production qualification
+
+The service controls one application-level SDK call per valid operation, not
+SDK-internal packet splitting/retransmission or sensor protocol acceptance.
+The pinned public APIs do not establish a hard completion deadline. In particular,
+this service **cannot yet satisfy a production INavigationSink requirement for a
+guaranteed finite call bound**; limiting callback operation count is insufficient.
+
+These limits can technically be deferred for an explicitly development-only
+transport-foundation merge: the service is internal, no navigation sink is added,
+and installed MEL/profile capabilities remain unchanged. That scope requires
+explicit maintainer acceptance; it is not granted by passing fixture tests or
+this document. Until accepted, disposition remains QUALIFICATION_GAP. If strict
+no-wire-retry and hard execution bounds are mandatory for PR #31, it stays blocked.
+A separate transport architecture must provide explicit wire-attempt policy,
+bounded pending-ACK handling, deadline/cancellation and ownership-safe teardown
+(or a suitably controlled SDK), then qualify those properties independently.
+Sensor encoding/acknowledgement needs separate protocol and hardware acceptance.
+No unsupported SDK timeout/retry argument or global policy change is introduced.
+
 Sources: pinned [Aravis implementation](https://github.com/AravisProject/aravis/blob/0.8.36/src/arvgvdevice.c),
 [GVCP construction](https://github.com/AravisProject/aravis/blob/0.8.36/src/arvgvcp.c),
 and installed eBUS 6.5.3.7155 PvDeviceGEV.h/PvDevice.h. Proprietary headers remain
@@ -117,7 +137,11 @@ GVSP frames, with existing simulator wildcard-listener limitations unchanged.
 Pleora compiles the narrow production-call template against actual installed
 declarations. Recording calls verify address/size arguments, acknowledge=true,
 bytes, real PvResult translation and uncertain writes. Actual disconnected
-PvDeviceGEV calls verify genuine refusal/cleanup without discovery. This does
+PvDeviceGEV calls in `pleora_sdk_contract` verify genuine refusal/cleanup without
+discovery; `pleora_register_contract` retains all recording boundary checks with
+ordinary unsuppressed sanitizer behavior. The existing SDK-process audit requires
+completion of the disconnected register checks in both phases, as well as all
+eight original groups. See [R1 investigation](tasks/GIGE-MEL-037-R1.md). This does
 not qualify connected-device concurrency, camera acceptance, packetization or
 SDK-internal retry policy. Existing GenApi and buffer tests remain enabled.
 No physical camera was contacted, configured or captured.

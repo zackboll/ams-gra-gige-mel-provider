@@ -67,3 +67,21 @@ SDK host and fails closed if the expected trace is unavailable.
 
 This implementation-session review is **not independent approval**. Final source
 identities, executed matrix and separate-review disposition are recorded in PR #26.
+
+## GIGE-MEL-037-R1 — consolidate disconnected register testing
+
+The [independent register-process investigation](tasks/GIGE-MEL-037-R1.md) matched
+the existing warning contract and runtime hashes without relaxing it. All actual
+disconnected-device register/memory checks now run inside the first existing
+native group of `pleora_sdk_contract`, in every build including TSan. The runner
+additionally requires their unique completion marker before the first group's
+PASS line, in both phases; missing, duplicated or out-of-order markers fail.
+All eight original group names, their final completion, warning classification,
+four stack associations, five offsets, runtime hashes and suppression stay intact.
+
+`pleora_register_contract` keeps the complete recording-call boundary contract,
+real PvResult translation and ordinary unsuppressed TSan settings. No other
+CTest receives the exception. SDK-free negative tests additionally verify native
+register completion, fail-closed identity checks, both-phase timeout failures and
+that a bad baseline never advances to a scoped run. This is still a development
+exception for an external runtime, not a vendor fix or production qualification.
