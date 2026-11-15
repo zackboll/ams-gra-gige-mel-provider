@@ -177,6 +177,10 @@ if(BUILD_TESTING)
   add_test(NAME pleora_stream_audit_tooling_contract
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_stream_audit_tests.py)
   set_tests_properties(pleora_stream_audit_tooling_contract PROPERTIES TIMEOUT 30)
+  # GIGE-MEL-040-R2 SDK-free orchestration checks; never launches the native audit.
+  add_test(NAME pleora_tsan_stage_audit_tooling_contract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_tsan_stage_audit_tests.py)
+  set_tests_properties(pleora_tsan_stage_audit_tooling_contract PROPERTIES TIMEOUT 30)
   add_test(NAME pleora_tsan_exception_guard
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_tsan_exception_tests.py)
   set_tests_properties(pleora_tsan_exception_guard PROPERTIES TIMEOUT 30)

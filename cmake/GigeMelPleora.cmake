@@ -62,6 +62,14 @@ if(GIGE_MEL_PLEORA_STREAM_TRAFFIC_AUDIT)
   target_link_options(pleora_stream_only_audit PRIVATE "LINKER:-rpath-link,${pleora_root}/lib"
     "LINKER:-rpath-link,${pleora_root}/lib/genicam/bin/Linux64_x64")
   # Intentionally no add_test: requires a fresh namespace and independent capture.
+  # GIGE-MEL-040-R2 stage-selectable lifecycle harness: same option, same
+  # constraints, never installed, registered or launched by ordinary CTest/CI.
+  add_executable(pleora_tsan_stage_audit tests/pleora_tsan_stage_audit.cpp)
+  target_include_directories(pleora_tsan_stage_audit SYSTEM PRIVATE "${pleora_include}")
+  target_link_libraries(pleora_tsan_stage_audit PRIVATE gige_mel_build_options Threads::Threads
+    "${pleora_PvStream}" "${pleora_PvBuffer}" "${pleora_PvGenICam}" "${pleora_PvBase}")
+  target_link_options(pleora_tsan_stage_audit PRIVATE "LINKER:-rpath-link,${pleora_root}/lib"
+    "LINKER:-rpath-link,${pleora_root}/lib/genicam/bin/Linux64_x64")
 endif()
 add_executable(gige_mel_pleora_diagnostic tools/pleora_diagnostic.cpp)
 target_include_directories(gige_mel_pleora_diagnostic PRIVATE "${PROJECT_SOURCE_DIR}/src")
