@@ -18,6 +18,11 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+The optional [Pleora stream-only traffic audit](docs/pleora-stream-only-audit.md)
+observed native GVCP discovery during isolated unicast Open, which then failed to
+establish a loopback receiver. Passive reception remains **incomplete**, not a
+production architecture change or successful single-socket qualification.
+
 The independent [controlled GVCP experiment](docs/controlled-gvcp-transport.md)
 uses real loopback UDP to test explicit deadlines, cancellation and one-command
 transmission policy. It is not connected to production camera or navigation paths;

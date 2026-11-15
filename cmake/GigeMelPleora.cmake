@@ -54,6 +54,15 @@ target_link_libraries(gige_mel_pleora PRIVATE gige_mel_camera_profiles
 # RUNPATH on project executables does not resolve indirect SDK dependencies.
 # Use the vendor's external library directories in the launching environment.
 set(pleora_runtime "${pleora_root}/lib:${pleora_root}/lib/genicam/bin/Linux64_x64")
+if(GIGE_MEL_PLEORA_STREAM_TRAFFIC_AUDIT)
+  add_executable(pleora_stream_only_audit tests/pleora_stream_only_audit.cpp)
+  target_include_directories(pleora_stream_only_audit SYSTEM PRIVATE "${pleora_include}")
+  target_link_libraries(pleora_stream_only_audit PRIVATE gige_mel_build_options
+    "${pleora_PvStream}" "${pleora_PvBuffer}" "${pleora_PvGenICam}" "${pleora_PvBase}")
+  target_link_options(pleora_stream_only_audit PRIVATE "LINKER:-rpath-link,${pleora_root}/lib"
+    "LINKER:-rpath-link,${pleora_root}/lib/genicam/bin/Linux64_x64")
+  # Intentionally no add_test: requires a fresh namespace and independent capture.
+endif()
 add_executable(gige_mel_pleora_diagnostic tools/pleora_diagnostic.cpp)
 target_include_directories(gige_mel_pleora_diagnostic PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(gige_mel_pleora_diagnostic PRIVATE gige_mel_pleora gige_mel_build_options)
