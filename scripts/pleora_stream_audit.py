@@ -48,14 +48,33 @@ class Capture:
                 self.file.write(struct.pack("<IIII", now // 10**9, now % 10**9 // 1000, len(data), len(data)))
                 self.file.write(data)
                 item = {"time_ns": now, "interface": address[0], "packet_type": address[2], "hex": data.hex()}
+                item.update(frame_length=len(data), direction="outgoing" if address[2] == 4 else "incoming")
+                if len(data) >= 14:
+                    item.update(destination_mac=data[:6].hex(":"), source_mac=data[6:12].hex(":"),
+                                ether_type=f"0x{int.from_bytes(data[12:14], 'big'):04x}")
+                if len(data) >= 42 and data[12:14] == b"\x08\x06":
+                    item.update(arp_operation=int.from_bytes(data[20:22], "big"),
+                                source=socket.inet_ntoa(data[28:32]), destination=socket.inet_ntoa(data[38:42]))
+                if len(data) >= 54 and data[12:14] == b"\x86\xdd":
+                    item.update(source=socket.inet_ntop(socket.AF_INET6, data[22:38]),
+                                destination=socket.inet_ntop(socket.AF_INET6, data[38:54]),
+                                protocol=data[20], payload_length=int.from_bytes(data[18:20], "big"))
+                    next_header, offset = data[20], 54
+                    if next_header == 0 and len(data) >= offset + 2:
+                        next_header, offset = data[offset], offset + (data[offset + 1] + 1) * 8
+                    if next_header == 58 and len(data) >= offset + 2:
+                        item.update(icmpv6_type=data[offset], icmpv6_code=data[offset + 1])
                 if len(data) >= 34 and data[12:14] == b"\x08\x00":
                     offset = 14 + (data[14] & 15) * 4
                     item.update(source=socket.inet_ntoa(data[26:30]), destination=socket.inet_ntoa(data[30:34]),
                                 protocol=data[23])
+                    if data[23] == 1 and len(data) >= offset + 2:
+                        item.update(icmp_type=data[offset], icmp_code=data[offset + 1])
                     if data[23] == 17 and len(data) >= offset + 8:
                         source, dest, length, _ = struct.unpack_from("!HHHH", data, offset)
                         payload = data[offset + 8:offset + length]
-                        item.update(source_port=source, destination_port=dest)
+                        item.update(source_port=source, destination_port=dest, udp_length=length,
+                                    payload_length=len(payload))
                         if (source == 3956 or dest == 3956) and len(payload) >= 8:
                             flags, command, size, request = struct.unpack_from("!HHHH", payload)
                             item.update(gvcp_command=f"0x{command:04x}", request_id=request,

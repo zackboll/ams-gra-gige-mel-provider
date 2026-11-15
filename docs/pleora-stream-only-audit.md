@@ -1,5 +1,53 @@
 # Pleora stream-only traffic investigation — GIGE-MEL-040
 
+## R1 virtual-Ethernet follow-up
+
+The [R1 design](tasks/GIGE-MEL-040-R1-design.md) and
+[measured validation](tasks/GIGE-MEL-040-R1-validation.md) preserve the original
+evidence below but narrow its Open blocker. Genuine eBUS 6.5.3.7155 **Open/Close
+succeeds on an isolated veth receiver with a responding synthetic endpoint**.
+The repeat loopback trace receives the full discovery ACK, enumerates only lo,
+then fails before data-port bind. A minimal endpoint-consistent ACK suffices on
+veth; a full software camera is not necessary for Open. This supports a
+loopback-specific interface/reachability limitation, not general veth rejection.
+The exact closed-source acceptance predicate is not proven.
+
+Successful Open still sends discovery **and register/memory reads**, including
+the tested documented multicast overload. Strict Gate C remains **FAIL**; queries
+are not proof of unauthorized writes. Gate A now passes for the bounded ordinary
+veth Open/Close modes, while Gate B remains incomplete for faults/coexistence.
+Actual deterministic GVSP produces a genuine PvBuffer with **1538 NO_LICENSE**,
+not usable pixels. Resend availability/default/disable cannot be qualified:
+RequestMissingPackets is unavailable/unreadable/unwritable. Unsuppressed native
+TSan also encounters a new fatal check at Pipeline.Stop; no exception is added.
+Overall **AUDIT_INCOMPLETE / NATIVE_RECEIVE_PENDING** remains unchanged, and no
+production adapter, ownership, MEL, profile, acquisition or timestamp policy changes.
+
+The separate test-only [veth coordinator](../scripts/pleora_veth_audit.py) requires
+explicit execution; ordinary CTest/CI never creates this topology or runs the
+native audit. Both disposable network namespaces contain only lo and their veth
+endpoint, no default route or physical NIC. Example (external prerequisites must
+already exist, output must be new and outside the repository):
+
+```sh
+python3 /home/zboll/git/ams-gra-gige-mel-provider/scripts/pleora_veth_audit.py \
+  --sdk /home/zboll/sdk/pleora/ebus_sdk \
+  --binary /home/zboll/git/ams-gra-gige-mel-provider/build/040-audit/pleora_stream_only_audit \
+  --output /tmp/new-private-040r1-evidence --scenario validated --variant fixed
+```
+
+Scenarios: `absent`, `minimal`, `validated`, `aravis` (requires an explicit external
+`--aravis-library` for pinned 0.8.36). Variants: `fixed`, `auto`, `simple`,
+`multicast`. `--mode disabled` requests a setting, not proof it took effect.
+`--frames` explicitly adds separately logged deterministic synthetic GVSP in the
+unicast Aravis scenario, not camera acquisition or ownership emulation. Optional
+`--strace` identifies an external observational tracer. Failures are nonzero;
+current runs remain nonpassing for the documented native feature/license gates.
+Private captures/diagnostics/returned bytes must not be published. No broad host
+network workaround is permitted if namespace creation fails.
+
+## Original 040 record (retained historical evidence)
+
 **Disposition: AUDIT_INCOMPLETE / NATIVE_RECEIVE_PENDING. Architecture outcome C.**
 The actual native unicast Open path transmits a GVCP discovery command even without
 an application-side PvDeviceGEV. It fails to establish a loopback data receiver.
