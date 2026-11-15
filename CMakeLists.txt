@@ -16,6 +16,10 @@ option(GIGE_MEL_BUILD_EXAMPLES "Build the native dynamically loaded capture exam
 option(GIGE_MEL_WARNINGS_AS_ERRORS "Treat warnings in project code as errors" ON)
 option(GIGE_MEL_BUILD_ARAVIS "Build the optional, internal Aravis 0.8.36 camera-control adapter, its SDK tests and diagnostic tool" OFF)
 option(GIGE_MEL_BUILD_PLEORA "Build the optional Pleora eBUS backend" OFF)
+option(GIGE_MEL_PLEORA_STREAM_TRAFFIC_AUDIT "Build the uninstalled, explicitly launched isolated native stream audit" OFF)
+if(GIGE_MEL_PLEORA_STREAM_TRAFFIC_AUDIT AND NOT GIGE_MEL_BUILD_PLEORA)
+  message(FATAL_ERROR "Stream audit requires explicit GIGE_MEL_BUILD_PLEORA and its pinned external runtime prerequisites")
+endif()
 set(GIGE_MEL_PLEORA_SDK_ROOT "" CACHE PATH "External Pleora SDK installation")
 set(GIGE_MEL_SANITIZERS "" CACHE STRING "Compiler sanitizers, e.g. address,undefined or thread")
 
@@ -170,6 +174,9 @@ if(BUILD_TESTING)
   add_test(NAME pleora_tooling_contract
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_tooling_tests.py)
   set_tests_properties(pleora_tooling_contract PROPERTIES TIMEOUT 30)
+  add_test(NAME pleora_stream_audit_tooling_contract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_stream_audit_tests.py)
+  set_tests_properties(pleora_stream_audit_tooling_contract PROPERTIES TIMEOUT 30)
   add_test(NAME pleora_tsan_exception_guard
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_tsan_exception_tests.py)
   set_tests_properties(pleora_tsan_exception_guard PROPERTIES TIMEOUT 30)

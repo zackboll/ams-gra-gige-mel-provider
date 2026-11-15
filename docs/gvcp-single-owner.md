@@ -1,5 +1,10 @@
 # Experimental single-owner GVCP session (GIGE-MEL-039)
 
+Follow-up [GIGE-MEL-040 native traffic investigation](pleora-stream-only-audit.md)
+observes SDK-generated GVCP discovery during Pleora stream-only Open. Successful
+loopback reception/coexistence remains blocked; strict zero-additional-GVCP traffic
+fails for that attempted unicast path. No production ownership policy changes.
+
 **Loopback feasibility only. No physical-camera or production integration.**
 The uninstalled [owner](../src/transport/gvcp_control_owner.hpp) uses the unchanged
 [038 client](controlled-gvcp-transport.md). Only tests link its static target;
