@@ -5,6 +5,16 @@ observes SDK-generated GVCP discovery during Pleora stream-only Open. Successful
 loopback reception/coexistence remains blocked; strict zero-additional-GVCP traffic
 fails for that attempted unicast path. No production ownership policy changes.
 
+[040-R1 virtual-Ethernet qualification](tasks/GIGE-MEL-040-R1-validation.md)
+subsequently observes successful stream-only Open/Close with synthetic responding
+endpoints. Discovery and bootstrap reads still fail strict zero-additional-GVCP,
+including the tested multicast mode. Genuine buffer delivery reports NO_LICENSE;
+resend control, native sanitizer completion and controller coexistence remain
+unqualified. Read-only queries do not prove competing write authority, but this
+does not relax the strict command-path criterion or recommend production ownership
+integration. The fixture-only 039 identity model was not substituted for camera
+ownership evidence.
+
 **Loopback feasibility only. No physical-camera or production integration.**
 The uninstalled [owner](../src/transport/gvcp_control_owner.hpp) uses the unchanged
 [038 client](controlled-gvcp-transport.md). Only tests link its static target;
