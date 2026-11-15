@@ -26,6 +26,16 @@ No physical-camera tests are enabled or executed.
 
 ## Server-observed contracts
 
+* R1 correlated negative ACKs: ordinary register write (5 commands), applied claim
+  (3), explicit privilege heartbeat read (5), and explicit identity heartbeat read
+  (6). The independent server retains the same controller in all four cases;
+  the write's bytes and the claim's side effect remain applied. Caller records
+  exact device status `0x8006` and `OutcomeUnresolved`; subsequent write/heartbeat/
+  acquire are refused without transmission. Repeated shutdown stays `unresolved`,
+  emits no release and never falsely reports `control_lost` or `not_owned`.
+  Existing-controller pre-claim refusal is terminal `NotOwned`, not `ControlLost`.
+  The new ordinary-write regression failed against reviewed HEAD's implementation
+  before the correction; all final-HEAD results are recorded on PR #33.
 * Successful acquisition, explicit heartbeat, numeric register read/write and
   exact asymmetric 336-byte memory read/write, release: exactly 11 commands,
   request IDs 1..11 and identical source IP/port throughout. Construction sends

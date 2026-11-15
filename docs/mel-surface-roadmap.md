@@ -3,6 +3,8 @@
 GIGE-MEL-039 adds a [loopback-only single-owner authority](gvcp-single-owner.md),
 not a MEL capability. Shared control/heartbeat and retirement evidence does not
 qualify physical ownership, SDK integration, stale-session fencing or navigation.
+R1 preserves unresolved ownership on negative device ACKs; it adds no production
+capability or wire-protocol change.
 
 GIGE-MEL-038 adds an independent [controlled GVCP feasibility artifact](controlled-gvcp-transport.md),
 restricted in code to loopback. Packet-level deadline/cancellation evidence does

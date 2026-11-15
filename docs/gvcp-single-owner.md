@@ -29,6 +29,7 @@ sides, not negotiated or inferred from hardware.
 
 ```text
 NotStarted -> ClaimingControl -> Owned
+                    |-> NotOwned (no claim transmitted; terminal)
                     |              |-> ControlLost
                     |              |-> OutcomeUnresolved
                     +--------------+
@@ -40,6 +41,17 @@ acquisition procedure begins. No silent reacquisition, transition retry, socket
 recreation, ID reset or automatic replay. A successful write ACK alone never
 establishes owned state. A global privilege bit cannot identify a controller.
 Closed means locally retired; unresolved close is **not** clean release.
+
+`ControlLost` requires successful privilege/identity readback demonstrating loss,
+or the defined local lease-expiry transition. A correlated negative device ACK
+does not prove controller identity, privilege loss, or absence of side effects.
+Ordinary command failures and failed heartbeat reads fence the session as
+`OutcomeUnresolved`; the explicit heartbeat wrapper preserves that classification.
+Any transmitted claim failure, including a negative ACK, is unresolved: the server
+may have applied the claim. No retry, reacquisition or release follows uncertainty,
+and repeated shutdown retains `unresolved`, not `control_lost` or `not_owned`.
+Pre-claim failure (or a claim never transmitted) is terminal `NotOwned` with close
+outcome `not_owned`, not a claim that previously established control was lost.
 
 ## Serialization, heartbeat and deadlines
 

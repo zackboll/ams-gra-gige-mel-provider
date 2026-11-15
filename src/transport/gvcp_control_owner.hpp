@@ -12,7 +12,7 @@ inline constexpr std::uint32_t fixture_magic_address = 0xffff0000;
 inline constexpr std::uint32_t fixture_magic = 0x534f0039;
 inline constexpr std::uint32_t fixture_identity_address = 0xffff0004;
 inline constexpr std::uint32_t control_privilege_address = 0x00000a00;
-enum class OwnerState { NotStarted, ClaimingControl, Owned, ControlLost,
+enum class OwnerState { NotStarted, ClaimingControl, NotOwned, Owned, ControlLost,
                         OutcomeUnresolved, Closing, Closed };
 enum class CloseOutcome { not_owned, released, control_lost, unresolved };
 struct HeartbeatPolicy {

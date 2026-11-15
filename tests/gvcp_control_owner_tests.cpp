@@ -34,7 +34,7 @@ Bytes ack(unsigned command, unsigned id, Bytes payload, unsigned status = 0) {
 gv::TransactionOptions budget(std::chrono::milliseconds duration = 1s, std::stop_token stop = {}) {
     return {gv::Clock::now() + duration, stop};
 }
-enum class Fault { good, drop, pending, stale, hostile_then_good, delay };
+enum class Fault { good, drop, pending, stale, hostile_then_good, delay, negative };
 struct Event { unsigned command, id; std::uint32_t address, value, ip; std::uint16_t port; bool accepted; };
 struct Device {
     struct Scheduled { gv::Clock::time_point at; Bytes bytes; sockaddr_in peer; };
@@ -86,6 +86,11 @@ struct Device {
     }
     void set_fault(std::size_t index, Fault fault) { std::lock_guard lock(mutex); faults[index] = fault; }
     Bytes value(std::uint32_t a) { std::lock_guard lock(mutex); return memory[a]; }
+    bool retains_controller() {
+        std::lock_guard lock(mutex);
+        return !events.empty() && privilege == 2 && controller_ip == events.back().ip &&
+            controller_port == events.back().port && losses == 0;
+    }
     void handle(const Bytes& b, sockaddr_in peer) {
         CHECK(b.size() >= 12 && b[0] == std::byte{0x42} && b[1] == std::byte{1});
         CHECK(get16(b, 4) == b.size() - 8);
@@ -130,6 +135,9 @@ struct Device {
         };
         const auto it = faults.find(index); const auto fault = it == faults.end() ? Fault::good : it->second;
         switch (fault) {
+        // Apply/observe the request normally, but return a correlated error.
+        // A negative ACK alone cannot prove that ownership or effects changed.
+        case Fault::negative: queue(ack(command + 1, id, {}, 0x8006)); return;
         case Fault::drop: return;
         case Fault::pending:
             for (int i = 0; i < 100; ++i) queue(ack(0x89, id, word(60000)), i * 3ms);
@@ -190,6 +198,8 @@ void success() {
 void competition() {
     Device d; auto a = owner(d), b = owner(d);
     CHECK(a->acquire(budget())); CHECK(!b->acquire(budget()));
+    CHECK(b->state() == gv::OwnerState::NotOwned);
+    CHECK(!b->acquire(budget())); // Pre-claim refusal is terminal, not control loss.
     CHECK(!b->write_register(0x100, 8, budget()));
     auto rogue = gv::Client::create("127.0.0.1", d.port); CHECK(rogue);
     auto r = rogue.value()->write_register(0x100, 9, budget()); CHECK(!r && r.error().device_status == 0x8006);
@@ -244,6 +254,39 @@ void heartbeat_faults() {
     CHECK(!c->write_register(0x100, 3, budget())); CHECK(c->shutdown() == gv::CloseOutcome::control_lost);
     CHECK(revoked.snapshot().size() == 6 && revoked.releases == 0);
     std::cout << "heartbeat drop/pending/stale fail closed; identity revoked despite privilege=2; no release to new controller PASS\n";
+}
+void negative_acknowledgements() {
+    // Long fixture/local lease keeps these assertions independent of scheduler expiry.
+    for (unsigned scenario = 0; scenario < 4; ++scenario) {
+        const bool claim = scenario == 1;
+        const std::size_t fault_index = claim ? 2 : scenario == 3 ? 5 : 4;
+        Device d({{fault_index, Fault::negative}}, 5s);
+        auto c = owner(d, {5s, 1s, 500ms, 100ms});
+        if (!claim) CHECK(c->acquire(budget()));
+        auto result = claim ? c->acquire(budget()) : scenario == 0 ?
+            c->write_register(0x100, 0x91ab23cd, budget()) : c->heartbeat(budget());
+        CHECK(!result && result.error().code == gv::ErrorCode::device);
+        CHECK(result.error().transmitted && result.error().device_status == 0x8006);
+        CHECK(c->state() == gv::OwnerState::OutcomeUnresolved);
+        CHECK(d.retains_controller() && d.claims == 1 && d.releases == 0);
+        if (scenario == 0) CHECK(d.writes == 1 && d.value(0x100) == word(0x91ab23cd));
+        auto events = d.snapshot(); CHECK(events.size() == fault_index + 1);
+        CHECK(events.back().accepted);
+        CHECK(events.back().command == (scenario < 2 ? 0x82U : 0x80U));
+        CHECK(events.back().address == (scenario == 0 ? 0x100U : scenario == 3 ? 0xffff0004U : 0xa00U));
+        CHECK(!c->write_register(0x100, 7, budget()));
+        CHECK(!c->heartbeat(budget())); CHECK(!c->acquire(budget()));
+        CHECK(c->shutdown() == gv::CloseOutcome::unresolved);
+        CHECK(c->shutdown() == gv::CloseOutcome::unresolved);
+        CHECK(d.retains_controller() && d.releases == 0);
+        retired(*c, d); CHECK(d.snapshot().size() == events.size());
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            CHECK(events[i].id == i + 1 && events[i].port == events[0].port && events[i].ip == events[0].ip);
+        }
+        std::cout << "negative ACK " << (claim ? "applied claim" : scenario == 0 ? "ordinary write" :
+            scenario == 2 ? "privilege heartbeat" : "identity heartbeat")
+            << ": server retains controller; unresolved; no retry/release or false control loss PASS\n";
+    }
 }
 void scheduling() {
     Device d({}, 180ms);
@@ -342,7 +385,7 @@ void resources_and_exhaustion() {
 }
 int main() {
     try {
-        success(); competition(); transitions(); heartbeat_faults(); scheduling(); concurrency();
+        success(); competition(); transitions(); heartbeat_faults(); negative_acknowledgements(); scheduling(); concurrency();
         termination_and_hostile(); resources_and_exhaustion(); return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

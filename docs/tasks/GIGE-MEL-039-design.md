@@ -23,9 +23,11 @@ queries. Its monotonic expiry runs independently of delayed ACKs.
 
 ## Authority and states
 
-`NotStarted -> ClaimingControl -> Owned`; failure ends in `ControlLost` (confirmed
-refusal/revocation or expired local evidence) or `OutcomeUnresolved` (transmitted
-transition without definitive completion/identity). No implicit reacquisition.
+`NotStarted -> ClaimingControl -> Owned`; failure ends in `NotOwned` (no claim
+transmitted), `ControlLost` (successful readback demonstrating revocation or expired
+local evidence), or `OutcomeUnresolved` (ambiguous command/heartbeat failure or
+transmitted transition without definitive completion/identity). Negative device
+ACKs alone never establish loss or prove an unapplied claim. No implicit reacquisition.
 `Closing -> Closed` retires resources; a separate persistent close outcome retains
 unresolved acquisition/release rather than laundering it into clean shutdown.
 

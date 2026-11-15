@@ -33,8 +33,9 @@ OwnerState ControlOwner::state() const { std::lock_guard lock(mutex_); return st
 void ControlOwner::failed(const Failure& error) {
     if (error.code == ErrorCode::invalid_argument || error.code == ErrorCode::busy ||
         (!error.transmitted && (error.code == ErrorCode::cancelled || error.code == ErrorCode::timeout))) return;
-    state_ = error.code == ErrorCode::device ? OwnerState::ControlLost : OwnerState::OutcomeUnresolved;
-    outcome_ = state_ == OwnerState::ControlLost ? CloseOutcome::control_lost : CloseOutcome::unresolved;
+    // Neither a negative ACK nor a transport failure proves controller identity.
+    state_ = OwnerState::OutcomeUnresolved;
+    outcome_ = CloseOutcome::unresolved;
 }
 Status ControlOwner::acquire(TransactionOptions options) {
     if (!valid(options)) return refusal(ErrorCode::invalid_argument);
@@ -51,7 +52,7 @@ Status ControlOwner::acquire(TransactionOptions options) {
     options.deadline = std::min(options.deadline, Clock::now() + policy_.command_budget);
     try {
         auto reject = [&](Failure error, bool transition) -> Status {
-            state_ = transition ? OwnerState::OutcomeUnresolved : OwnerState::ControlLost;
+            state_ = transition ? OwnerState::OutcomeUnresolved : OwnerState::NotOwned;
             outcome_ = transition ? CloseOutcome::unresolved : CloseOutcome::not_owned;
             return error;
         };
@@ -63,7 +64,7 @@ Status ControlOwner::acquire(TransactionOptions options) {
         if (prior.value() != 0) return reject(refusal(), false);
         const auto started = Clock::now();
         auto claim = client_->write_register(control_privilege_address, 2, options);
-        if (!claim) return reject(claim.error(), claim.error().transmitted && claim.error().code != ErrorCode::device);
+        if (!claim) return reject(claim.error(), claim.error().transmitted);
         auto identity = client_->read_register(fixture_identity_address, options);
         if (!identity) return reject(identity.error(), true);
         if (identity.value() != 1) return reject(refusal(), true);
@@ -121,7 +122,8 @@ template<class F> auto ControlOwner::operation(TransactionOptions options, F&& a
     options.deadline = std::min({options.deadline, lease_end_, Clock::now() + policy_.command_budget});
     try {
         auto result = action(options);
-        if (!result) failed(result.error());
+        // refresh() already classifies readback evidence or uncertainty. Preserve it.
+        if (!result && state_ == OwnerState::Owned) failed(result.error());
         if (state_ == OwnerState::Owned && Clock::now() >= lease_end_) {
             state_ = OwnerState::ControlLost; outcome_ = CloseOutcome::control_lost;
         }

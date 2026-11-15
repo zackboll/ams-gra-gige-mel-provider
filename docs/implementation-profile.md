@@ -8,6 +8,10 @@ profile or production backend capability changes. Fixture endpoint identity is
 not physical-camera identity; SDK integration and cross-session fencing remain
 unqualified.
 
+R1 ownership classification treats negative device ACKs as unresolved, not proof
+of control loss. Only successful ownership readback or the defined local lease
+expiry establishes loss; uncertain sessions never retry, reacquire or release.
+
 ## Independent controlled transport experiment (GIGE-MEL-038)
 
 A separate [loopback-only controlled GVCP prototype](controlled-gvcp-transport.md)
