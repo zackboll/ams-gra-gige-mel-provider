@@ -20,6 +20,10 @@ Actual deterministic GVSP produces a genuine PvBuffer with **1538 NO_LICENSE**,
 not usable pixels. Resend availability/default/disable cannot be qualified:
 RequestMissingPackets is unavailable/unreadable/unwritable. Unsuppressed native
 TSan also encounters a new fatal check at Pipeline.Stop; no exception is added.
+The [R2 native TSan investigation](pleora-native-tsan-investigation.md) reduces it
+to plain Open/Close (S2). It also observes eBUS joining and then detaching the same
+`pthread_t`, which it classifies as a vendor thread-lifecycle failure. Native TSan
+remains blocked.
 Overall **AUDIT_INCOMPLETE / NATIVE_RECEIVE_PENDING** remains unchanged, and no
 production adapter, ownership, MEL, profile, acquisition or timestamp policy changes.
 
