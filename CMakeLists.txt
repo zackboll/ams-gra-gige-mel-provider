@@ -34,6 +34,18 @@ elseif(GIGE_MEL_SANITIZERS)
   message(FATAL_ERROR "Sanitizer options require GCC or Clang")
 endif()
 
+# Independent feasibility artifact: never linked to production or installed.
+add_library(gige_mel_controlled_gvcp STATIC src/transport/controlled_gvcp.cpp)
+target_include_directories(gige_mel_controlled_gvcp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(gige_mel_controlled_gvcp PRIVATE gige_mel_build_options Threads::Threads)
+if(BUILD_TESTING)
+  add_executable(controlled_gvcp_tests tests/controlled_gvcp_tests.cpp)
+  target_link_libraries(controlled_gvcp_tests PRIVATE gige_mel_controlled_gvcp gige_mel_build_options Threads::Threads)
+  add_test(NAME controlled_gvcp_parser COMMAND controlled_gvcp_tests parser)
+  add_test(NAME controlled_gvcp_loopback COMMAND controlled_gvcp_tests loopback)
+  set_tests_properties(controlled_gvcp_parser controlled_gvcp_loopback PROPERTIES TIMEOUT 30)
+endif()
+
 # Never fetch dependencies at configure/build time. The manifest is reviewed
 # together with the code and covers the unmodified, minimal header closure.
 add_custom_target(verify_upstream ALL
