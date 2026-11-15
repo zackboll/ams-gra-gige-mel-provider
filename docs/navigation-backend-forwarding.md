@@ -2,6 +2,11 @@
 
 ## Implemented interface
 
+The separate [register/memory foundation](device-register-transport.md) now exists
+on both optional SDK devices. It is not connected to this forwarding path and
+implements no navigation sink or wire protocol. Its SDK retry/deadline limitations
+must be resolved before production bounded submission can use it.
+
 The existing MEL ImageChannel NavigationReport entry point optionally forwards
 validated navigation reports to a backend navigation sink. The MEL declarations,
 factory signatures, capability advertisement and response layout are unchanged.

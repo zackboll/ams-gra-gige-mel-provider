@@ -26,6 +26,7 @@ EXPECTED_RUNTIME_HASHES = {
 }
 SUPPRESSION = "deadlock:log4cpp_GenICam::Category::addAppender"
 COMPLETED = "Passed 8 actual-runtime offline groups; no camera/stream/MEL hardware qualification."
+REGISTER_COMPLETED = "Completed disconnected register/memory native checks (no camera transport)."
 GROUPS = (
     "eBUS parameter array and native status mapping",
     "integer type/access/current grid",
@@ -100,6 +101,8 @@ def verify_completion(output: str) -> None:
         raise QualificationError("Native contract did not complete all eight groups")
     if [line for line in lines if line.startswith("PASS ")] != [f"PASS {name}" for name in GROUPS]:
         raise QualificationError("Native contract must pass each of the eight distinct groups in order")
+    if lines.count(REGISTER_COMPLETED) != 1 or lines.index(REGISTER_COMPLETED) > lines.index(f"PASS {GROUPS[0]}"):
+        raise QualificationError("First native group must complete disconnected register/memory checks exactly once")
     if lines.index(COMPLETED) < lines.index(f"PASS {GROUPS[-1]}"):
         raise QualificationError("Native completion precedes the final group")
 

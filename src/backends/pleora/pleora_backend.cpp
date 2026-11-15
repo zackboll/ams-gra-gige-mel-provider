@@ -3,6 +3,7 @@
 #include "pleora_license.hpp"
 #include "pleora_stream.hpp"
 #include "pleora_private.hpp"
+#include "pleora_registers.hpp"
 #include "profiles/camera_profile.hpp"
 
 #include <PvDeviceGEV.h>
@@ -179,11 +180,19 @@ private:
     std::unique_lock<std::mutex> buffer_guard_;
 };
 
-class Device final : public ICameraDevice {
+class Device final : public ICameraDevice, public device_registers::IRegisterDevice {
 public:
     explicit Device(std::shared_ptr<State> state) : state_(std::move(state)) {}
     ~Device() override { try { (void)close(); } catch (...) {} }
     CameraCapabilities capabilities() const override { return state_->capabilities; }
+    device_registers::Status with_registers(
+        const std::function<device_registers::Status(device_registers::IDeviceRegisters&)>& operation) override {
+        if (!operation) return Error{ErrorCode::invalid_argument, "empty register transaction"};
+        std::lock_guard lock(state_->mutex);
+        if (auto s = state_->connected(); !s) return s.error();
+        Registers registers(*state_->device, [&] { return state_->connected(); });
+        return operation(registers);
+    }
     Result<CameraConfiguration> configuration() const override {
         std::lock_guard lock(state_->mutex);
         if (auto s = state_->connected(); !s) return s.error();

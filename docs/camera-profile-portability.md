@@ -174,6 +174,11 @@ compatibility; a stable cross-toolchain ABI remains a separate architecture deci
 
 ## Navigation integration
 
+The internal [register/memory service](device-register-transport.md) now supplies
+SDK-independent words and exact bytes through borrowed serialized transactions.
+It changes no profile v1 interface, connects no navigation sink and defines no
+sensor addresses. SDK boundedness/retry gates precede production composition.
+
 The optional [navigation sink](navigation-backend-forwarding.md) is the semantic
 entry point for a future composed camera device. A camera profile may define
 the sensor's field encoding, register/feature mapping, staging, commit and

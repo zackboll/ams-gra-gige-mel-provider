@@ -46,6 +46,10 @@ if(BUILD_TESTING)
   add_executable(aravis_adapter_tests tests/aravis_adapter_tests.cpp)
   target_link_libraries(aravis_adapter_tests PRIVATE gige_mel_aravis_test_support gige_mel_build_options Threads::Threads)
   add_test(NAME aravis_adapter COMMAND aravis_adapter_tests)
+  add_executable(aravis_register_tests tests/aravis_register_tests.cpp)
+  target_link_libraries(aravis_register_tests PRIVATE gige_mel_aravis_test_support gige_mel_build_options Threads::Threads)
+  add_test(NAME aravis_register_contract COMMAND aravis_register_tests)
+  set_tests_properties(aravis_register_contract PROPERTIES TIMEOUT 30)
 
   add_executable(aravis_embedding_probe tests/aravis_embedding_probe.cpp tests/support/tsan_uninstrumented_sdk.cpp)
   target_link_libraries(aravis_embedding_probe PRIVATE gige_mel_provider gige_mel_aravis_test_support

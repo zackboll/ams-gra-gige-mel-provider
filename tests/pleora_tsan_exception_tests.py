@@ -14,7 +14,7 @@ import pleora_tsan_exception as exception
 
 
 PASS_LINES = "".join(f"PASS {name}\n" for name in exception.GROUPS)
-SUCCESS = PASS_LINES + exception.COMPLETED + "\n"
+SUCCESS = exception.REGISTER_COMPLETED + "\n" + PASS_LINES + exception.COMPLETED + "\n"
 # Original project-owned diagnostic structure, transcribed from the native run.
 VENDOR_REPORT = ("""==================
 WARNING: ThreadSanitizer: lock-order-inversion (potential deadlock) (pid=123)
@@ -80,6 +80,17 @@ class ScopedExceptionTests(unittest.TestCase):
             with self.assertRaises(exception.QualificationError):
                 verify(code, output.replace(exception.GROUPS[1], exception.GROUPS[0]))
 
+    def test_disconnected_register_checks_required_in_both_phases(self):
+        marker = exception.REGISTER_COMPLETED + "\n"
+        for verify, code, output in ((exception.verify_unsuppressed, 66, VENDOR_REPORT),
+                                     (exception.verify_suppressed, 0, SUCCESS)):
+            for changed in (output.replace(marker, ""), output + marker,
+                            output.replace(marker, "") + marker,
+                            output.replace(marker, "Completed only register reads.\n")):
+                with self.subTest(phase=verify.__name__, output=changed):
+                    with self.assertRaises(exception.QualificationError):
+                        verify(code, changed)
+
     def test_additional_diagnostics_and_crashes_fail_in_both_phases(self):
         for verify, code, output in ((exception.verify_unsuppressed, 66, VENDOR_REPORT),
                                      (exception.verify_suppressed, 0, SUCCESS)):
@@ -136,6 +147,9 @@ class ScopedExceptionTests(unittest.TestCase):
             argv = ["runner", "--runtime-dir", str(root), "--suppression-file", str(root / "rule"),
                     "--contract", str(executable)]
             for failure in ((66, VENDOR_REPORT + "WARNING: unrelated\n"),
+                            (66, VENDOR_REPORT.replace(exception.REGISTER_COMPLETED, "")),
+                            (66, VENDOR_REPORT.replace("0x1a75f", "0x1a760")),
+                            (0, VENDOR_REPORT), (-11, VENDOR_REPORT),
                             subprocess.TimeoutExpired("contract", 50, output=b"partial execution")):
                 with mock.patch.object(sys, "argv", argv), \
                      mock.patch.object(exception, "verify_runtime"), \
@@ -177,6 +191,44 @@ class ScopedExceptionTests(unittest.TestCase):
                     self.assertEqual(scoped, "halt_on_error=1:exitcode=66:second_deadlock_stack=1:"
                                      f"suppressions={rule}")
 
+    def test_identity_failure_never_reaches_scoped_phase(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "contract"
+            executable.touch()
+            argv = ["runner", "--runtime-dir", str(root), "--suppression-file", str(root / "rule"),
+                    "--contract", str(executable)]
+            for guard, calls in (("verify_runtime", 0), ("verify_loaded_runtime", 1)):
+                with mock.patch.object(sys, "argv", argv), \
+                     mock.patch.object(exception, "verify_runtime"), \
+                     mock.patch.object(exception, "verify_suppression"), \
+                     mock.patch.object(exception, "verify_environment"), \
+                     mock.patch.object(exception, "verify_loaded_runtime"), \
+                     mock.patch.object(exception, guard, side_effect=exception.QualificationError("identity")), \
+                     mock.patch.object(exception, "run_contract", return_value=(66, VENDOR_REPORT)) as run, \
+                     mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+                    self.assertEqual(exception.main(), 1)
+                    self.assertEqual(run.call_count, calls)
+
+    def test_scoped_timeout_cannot_accept_completed_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "contract"
+            executable.touch()
+            (root / "rule").touch()
+            argv = ["runner", "--runtime-dir", str(root), "--suppression-file", str(root / "rule"),
+                    "--contract", str(executable)]
+            with mock.patch.object(sys, "argv", argv), \
+                 mock.patch.object(exception, "verify_runtime"), \
+                 mock.patch.object(exception, "verify_suppression"), \
+                 mock.patch.object(exception, "verify_environment"), \
+                 mock.patch.object(exception, "verify_loaded_runtime"), \
+                 mock.patch.object(exception, "run_contract", side_effect=[
+                     (66, VENDOR_REPORT), subprocess.TimeoutExpired("contract", 50, output=SUCCESS.encode())
+                 ]) as run, mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+                self.assertEqual(exception.main(), 1)
+                self.assertEqual(run.call_count, 2)
+
     def test_single_suppression_rule_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             rule = Path(temporary) / "only.supp"
@@ -196,10 +248,12 @@ class ScopedExceptionTests(unittest.TestCase):
                 (root / name).write_bytes(content)
                 expected[name] = hashlib.sha256(content).hexdigest()
             exception.verify_runtime(root, expected)
-            changed = next(iter(expected))
-            (root / changed).write_bytes(b"different")
-            with self.assertRaises(exception.QualificationError):
-                exception.verify_runtime(root, expected)
+            for changed in expected:
+                with self.subTest(library=changed):
+                    (root / changed).write_bytes(b"different")
+                    with self.assertRaises(exception.QualificationError):
+                        exception.verify_runtime(root, expected)
+                    (root / changed).write_bytes(changed.encode("utf-8"))
 
     def test_unreviewed_tsan_flags_or_library_overrides_fail(self):
         with tempfile.TemporaryDirectory() as temporary:

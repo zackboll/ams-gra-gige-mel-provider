@@ -1,5 +1,12 @@
 # Experimental image-stream profile, version 0.1
 
+## Internal register transport (GIGE-MEL-037)
+
+An optional [SDK-independent register/memory transaction service](device-register-transport.md)
+is available on explicitly opened Aravis/Pleora devices. No MEL or profile module
+v1 capability, navigation protocol, sink or timestamp behavior changes. SDK-internal
+retry and hard-deadline limitations remain explicit open qualification gates.
+
 ## Cognex profile (GIGE-MEL-036)
 
 The optional [independent CIC-5000R module](../camera_profiles/cognex_cic_5000r/README.md)

@@ -1,5 +1,10 @@
 # Architecture and scope
 
+GIGE-MEL-037 adds an optional [internal register/memory service](device-register-transport.md)
+on explicitly opened SDK devices. Whole transactions borrow a service under the
+existing native-device mutex; no installed interface, profile v1 ABI or navigation
+sink changes. Native retry/deadline limits remain documented open gates.
+
 ## Explicit matched-C++ profile modules (GIGE-MEL-035)
 
 An opt-in Linux x86-64 loader now validates separately compiled camera-profile
