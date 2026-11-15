@@ -1,5 +1,13 @@
 # Camera profiles across SDK backends
 
+## Experimental ownership feasibility (GIGE-MEL-039)
+
+The [single-owner experiment](gvcp-single-owner.md) is loopback-only, not a profile
+service. No ABI, Cognex or production control path changes. Aravis lacks a public
+passive receiver seam; Pleora stream-only multicast receiving still needs GVCP
+traffic qualification. Sensor generation/ownership, external configuration, stream
+lifetime and stale-session fencing remain production gates.
+
 ## Explicit matched-C++ profile modules (GIGE-MEL-035)
 
 An opt-in Linux x86-64 loader now validates separately compiled camera-profile

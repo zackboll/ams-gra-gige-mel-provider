@@ -1,5 +1,9 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-039 adds a [loopback-only single-owner authority](gvcp-single-owner.md),
+not a MEL capability. Shared control/heartbeat and retirement evidence does not
+qualify physical ownership, SDK integration, stale-session fencing or navigation.
+
 GIGE-MEL-038 adds an independent [controlled GVCP feasibility artifact](controlled-gvcp-transport.md),
 restricted in code to loopback. Packet-level deadline/cancellation evidence does
 not add a MEL capability or production navigation path. SDK camera ownership and

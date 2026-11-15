@@ -35,7 +35,8 @@ elseif(GIGE_MEL_SANITIZERS)
 endif()
 
 # Independent feasibility artifact: never linked to production or installed.
-add_library(gige_mel_controlled_gvcp STATIC src/transport/controlled_gvcp.cpp)
+add_library(gige_mel_controlled_gvcp STATIC src/transport/controlled_gvcp.cpp
+  src/transport/gvcp_control_owner.cpp)
 target_include_directories(gige_mel_controlled_gvcp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(gige_mel_controlled_gvcp PRIVATE gige_mel_build_options Threads::Threads)
 if(BUILD_TESTING)
@@ -44,6 +45,10 @@ if(BUILD_TESTING)
   add_test(NAME controlled_gvcp_parser COMMAND controlled_gvcp_tests parser)
   add_test(NAME controlled_gvcp_loopback COMMAND controlled_gvcp_tests loopback)
   set_tests_properties(controlled_gvcp_parser controlled_gvcp_loopback PROPERTIES TIMEOUT 30)
+  add_executable(gvcp_control_owner_tests tests/gvcp_control_owner_tests.cpp)
+  target_link_libraries(gvcp_control_owner_tests PRIVATE gige_mel_controlled_gvcp gige_mel_build_options Threads::Threads)
+  add_test(NAME gvcp_single_owner COMMAND gvcp_control_owner_tests)
+  set_tests_properties(gvcp_single_owner PROPERTIES TIMEOUT 90)
 endif()
 
 # Never fetch dependencies at configure/build time. The manifest is reviewed

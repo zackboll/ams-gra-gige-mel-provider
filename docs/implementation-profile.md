@@ -1,5 +1,13 @@
 # Experimental image-stream profile, version 0.1
 
+## Experimental single-owner session (GIGE-MEL-039)
+
+An uninstalled [loopback-only owner](gvcp-single-owner.md) coordinates control,
+heartbeat, register/memory traffic and retirement through one 038 client. No MEL,
+profile or production backend capability changes. Fixture endpoint identity is
+not physical-camera identity; SDK integration and cross-session fencing remain
+unqualified.
+
 ## Independent controlled transport experiment (GIGE-MEL-038)
 
 A separate [loopback-only controlled GVCP prototype](controlled-gvcp-transport.md)

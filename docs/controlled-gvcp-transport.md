@@ -1,5 +1,10 @@
 # Controlled GVCP feasibility transport (GIGE-MEL-038)
 
+GIGE-MEL-039 adds an independent [single-owner session](gvcp-single-owner.md)
+above this unchanged client: fixture-only explicit acquisition, shared-socket
+heartbeat, fenced uncertainty and joined shutdown. Physical SDK ownership and
+cross-session stale packets remain gates; see its SDK feasibility decision.
+
 **Experimental loopback artifact, not a production device service.** The existing
 [GIGE-MEL-037 service](device-register-transport.md) remains unchanged. No SDK,
 MEL, profile ABI v1, Cognex policy, navigation sink, frame timestamp, acquisition
