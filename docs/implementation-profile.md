@@ -1,5 +1,13 @@
 # Experimental image-stream profile, version 0.1
 
+## Independent controlled transport experiment (GIGE-MEL-038)
+
+A separate [loopback-only controlled GVCP prototype](controlled-gvcp-transport.md)
+tests one-transmission transactions, absolute deadlines, cancellation and write
+uncertainty without SDKs. It is uninstalled and not connected to production
+devices or navigation. Native ownership compatibility remains an integration gate;
+all existing MEL, profile ABI v1 and camera behavior is unchanged.
+
 ## Internal register transport (GIGE-MEL-037)
 
 An optional [SDK-independent register/memory transaction service](device-register-transport.md)

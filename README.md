@@ -18,6 +18,11 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+The independent [controlled GVCP experiment](docs/controlled-gvcp-transport.md)
+uses real loopback UDP to test explicit deadlines, cancellation and one-command
+transmission policy. It is not connected to production camera or navigation paths;
+safe SDK ownership integration remains unresolved.
+
 An internal [register/memory transport](docs/device-register-transport.md) provides
 typed numeric words and exact byte transfers through both optional SDKs without
 changing MEL or profile v1. Navigation protocol/submission integration is excluded;

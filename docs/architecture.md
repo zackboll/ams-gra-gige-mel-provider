@@ -1,5 +1,10 @@
 # Architecture and scope
 
+GIGE-MEL-038 introduces a separate [controlled GVCP loopback experiment](controlled-gvcp-transport.md),
+not a provider dependency or camera service. Its one-send/deadline contract is
+independently tested; SDK ownership and sensor navigation integration remain
+unqualified. Existing installed interfaces and profile ABI v1 are unchanged.
+
 GIGE-MEL-037 adds an optional [internal register/memory service](device-register-transport.md)
 on explicitly opened SDK devices. Whole transactions borrow a service under the
 existing native-device mutex; no installed interface, profile v1 ABI or navigation

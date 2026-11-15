@@ -1,5 +1,10 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-038 adds an independent [controlled GVCP feasibility artifact](controlled-gvcp-transport.md),
+restricted in code to loopback. Packet-level deadline/cancellation evidence does
+not add a MEL capability or production navigation path. SDK camera ownership and
+sensor protocol/acceptance remain explicit next-integration blockers.
+
 GIGE-MEL-037 adds only an internal [register/memory transport](device-register-transport.md).
 Navigation wire encoding, sensor acknowledgement and MEL submission integration
 remain unimplemented; bounded execution and SDK-internal retries remain open.
