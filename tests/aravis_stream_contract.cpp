@@ -7,6 +7,7 @@
 // pinned Fake cannot emit those payloads. No project-generated frame replaces
 // positive streaming. GLib warnings/criticals are fatal (see main()).
 #include "aravis_fake_support.hpp"
+#include "cognex_aravis_fixture.hpp"
 #include "profiles/mono_free_running.hpp"
 #include "acquisition_policy.hpp"
 #include "selection/session_selection.hpp"
@@ -1336,6 +1337,34 @@ void selected_profile_stream_lifetime(bool dynamic = false) {
     if (!dynamic) CHECK(counts->destroyed == 1 && counts->states == counts->retired);
 }
 
+void cognex_stream() {
+    auto loaded = gige_mel::selection::load_profile_module(GIGE_MEL_COGNEX_MODULE);
+    CHECK(loaded);
+    aravis::TestHooks hooks;
+    hooks.after_native_open = cognex_aravis::arrange;
+    auto camera = aravis::make_backend_for_interface({"Fake", &arv_fake_interface_get_instance}, hooks, loaded.value().profile);
+    auto device = open_fake(*camera);
+    auto request = oracle;
+    request.frame_rate_hz = 10;
+    CHECK(device->apply(request));
+    auto made = device->create_stream();
+    CHECK(made);
+    auto stream = std::move(made).value();
+    CHECK(stream->start(1));
+    auto first = stream->receive(500ms);
+    auto second = stream->receive(500ms);
+    CHECK(first && second);
+    CHECK(first.value().descriptor().native_frame_id + 1 == second.value().descriptor().native_frame_id);
+    CHECK(pixels_match(first.value()) && pixels_match(second.value()));
+    const auto saved = copy_bytes(first.value());
+    stream->stop();
+    CHECK(device->close());
+    loaded.value() = {}; camera.reset(); device.reset(); stream.reset();
+    const auto retained = first.value().bytes(); // native lease does not execute module code
+    CHECK(retained.size() == saved.size());
+    CHECK(std::equal(saved.begin(), saved.end(), retained.begin()));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1352,6 +1381,7 @@ int main(int argc, char** argv) {
     const std::vector<std::pair<const char*, void (*)()>> tests{
         {"selected profile stream lifetime and frame dispatch", [] { selected_profile_stream_lifetime(); }},
         {"dynamic module native receive and lifetime", [] { selected_profile_stream_lifetime(true); }},
+        {"Cognex module native frame IDs and lease lifetime", cognex_stream},
         {"A start, commands and single acquisition owner", start_and_commands},
         {"B real SDK pixels and descriptors", real_pixels_and_descriptors},
         {"C bounded pool, held pixels and release", pool_and_release},

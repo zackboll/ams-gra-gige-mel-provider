@@ -1,5 +1,11 @@
 # Physical camera record: Cognex CIC-5000R (GIGE-MEL-018)
 
+**GIGE-MEL-036:** the [independent Cognex profile](../camera_profiles/cognex_cic_5000r/README.md)
+now applies exact observed identity/firmware and conservative Mono8 discrete-rate
+policy through either SDK. Its new tests are fixtures, not new physical evidence.
+Historical statements below describe their original milestone, not a qualification
+of this module. The initial policy excludes exactly representable 16 Hz explicitly.
+
 **GIGE-MEL-022:** physical Mono12 capture and native endianness/readback remain
 **pending owner authorization**. No camera writes or physical captures were
 performed for this feature. Format advertisement alone is insufficient. The

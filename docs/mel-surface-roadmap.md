@@ -1,5 +1,13 @@
 # MEL surface inventory and implementation order
 
+## Cognex profile (GIGE-MEL-036)
+
+The first real-camera-specific [independent module](../camera_profiles/cognex_cic_5000r/README.md)
+adds exact CIC-5000R firmware identity, Mono8-only and conservative discrete-rate
+admission through both existing SDKs. This is internal camera policy, not a new
+MEL capability or factory. Production timestamp, licensed hardware qualification,
+Mono12 native byte order and additional firmware compatibility remain pending.
+
 ## Explicit matched-C++ profile modules (GIGE-MEL-035)
 
 An opt-in Linux x86-64 loader now validates separately compiled camera-profile
