@@ -1,5 +1,12 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-041 adds no MEL capability. It classifies the required Health
+`DiscreteStatus` and `MFA_SecurityAuditRecord` registrations as blocked by the
+pinned capability enumeration (and, for security audit, by a missing provider
+event source). Both remain NotSupported and unadvertised, under executable
+classification tests. `HealthStatusChannel` remains partial. See the
+[design](tasks/GIGE-MEL-041-design.md).
+
 GIGE-MEL-039 adds a [loopback-only single-owner authority](gvcp-single-owner.md),
 not a MEL capability. Shared control/heartbeat and retirement evidence does not
 qualify physical ownership, SDK integration, stale-session fencing or navigation.
@@ -280,8 +287,8 @@ The `LOS3D_KinematicsType` registration takes its `std::function` by `const&`; m
 | `mel::MFA_Status` | Required | Partial: sampled observed provider readiness/acquisition state; no hardware health claim |
 | `mel::BIT_Status` | Required | Partial: latest software result/current faults on existing Health worker; hardware BIT remains future work |
 | `SubsystemStatusResp` | Required | Partial: one provider **software** subsystem/CSCI with version 0.1.0, current readiness, committed BIT-state revision and prepared-report sequence ([profile](subsystem-status.md)); physical device/transport inventory, dependent subsystems, assigned criticality and connection probing remain P1/P2 work |
-| `mel::DiscreteStatus` | Required | P1: define meaningful supported discrete state |
-| `mel::MFA_SecurityAuditRecord` | Required | P1: define which actual provider events generate records |
+| `mel::DiscreteStatus` | Required | **Unresolved, blocked (GIGE-MEL-041):** NotSupported and unadvertised. No pinned capability enumerator, and no discrete provider source beyond existing reports. A candidate software-only profile is held for upstream resolution ([design](tasks/GIGE-MEL-041-design.md#3-discretestatus-semantics-analysis)) |
+| `mel::MFA_SecurityAuditRecord` | Required | **Unresolved, blocked (GIGE-MEL-041):** NotSupported and unadvertised. No pinned capability enumerator **and** no genuine provider security event source ([investigation](tasks/GIGE-MEL-041-design.md#4-security-audit-record-event-source-investigation)) |
 | `mel::MFA_StatusDetailed` | Required | Partial: schema-1 provider diagnostics; no transport/hardware metrics |
 | `NUC_TempData` | Optional | P4 if the selected sensor provides it |
 
@@ -350,6 +357,15 @@ A set of consecutive frames or a GigE multipart payload is not automatically a v
 `ChannelCapability` covers identity, image width/height, signal bit depth, byte pitch, buffer/image sizes, bands/format, sensor types, platform/location, channel types, task queue depth, distortion/NUC availability, metadata, band information, and navigation frames. Populate it from the selected source and implemented profile; do not blindly publish SDK feature discovery.
 
 The pinned [ChannelMetadataCapabilityType][metadata-enum] lacks entries corresponding to `CalibrationConfiguration`, `CalibrationStatus`, `NUC_TempData`, `DiscreteStatus`, and `MFA_SecurityAuditRecord`, despite declarations of those callbacks. **Do not repurpose reserved enum values.** A conformance/deployment decision or upstream resolution is needed when those surfaces are implemented, and tests must check both registration and advertisement behavior.
+
+GIGE-MEL-041 classified the two **required** members of this set
+(`DiscreteStatus`, `MFA_SecurityAuditRecord`) as `BLOCKED_BY_UPSTREAM_CAPABILITY_ENUM`.
+Both keep returning NotSupported and are unadvertised.
+
+* Compile-time tripwires fail the build if a future pinned revision adds a
+  corresponding enumerator, or if a reserved value moves.
+* A [prepared upstream issue](tasks/GIGE-MEL-041-design.md#6-prepared-upstream-issue-not-filed-by-this-task)
+  requests explicit enumerators.
 
 ### Error and future behavior
 

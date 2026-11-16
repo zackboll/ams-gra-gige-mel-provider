@@ -162,6 +162,8 @@ if(BUILD_TESTING)
   target_link_libraries(loader_tests PRIVATE gige_mel_headers gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
   add_dependencies(loader_tests gige_mel_provider)
   add_test(NAME native_loader COMMAND loader_tests $<TARGET_FILE:gige_mel_provider>)
+  # GIGE-MEL-041: blocked required Health metadata through published MEL only.
+  add_test(NAME native_loader_required_metadata COMMAND loader_tests $<TARGET_FILE:gige_mel_provider> --required-metadata-only)
   add_test(NAME upstream_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify)
   add_test(NAME json_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py)
   # Fixture-based regressions for the package-isolation verifier (no SDK needed).
@@ -188,7 +190,7 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
   set_tests_properties(backend_contract camera_profile_contract device_feature_contract provider_contract provider_backend_portability configuration_public_api
-    native_loader PROPERTIES TIMEOUT 30)
+    native_loader native_loader_required_metadata PROPERTIES TIMEOUT 30)
 endif()
 
 # Optional Aravis camera-control foundation (GIGE-MEL-008). OFF by default:
