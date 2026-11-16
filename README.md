@@ -18,6 +18,11 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+A default-OFF [GenTL consumer feasibility probe](docs/tasks/GIGE-MEL-GENTL-001-design.md)
+(`-DGIGE_MEL_BUILD_GENTL_PROBE=ON`, after `scripts/provision_gentl_header.sh`)
+loads an explicit `.cti` producer for diagnostics only. It is not a backend and
+is never selected or installed.
+
 The optional [Pleora stream-only traffic audit](docs/pleora-stream-only-audit.md)
 observed native GVCP discovery during isolated unicast Open, which then failed to
 establish a loopback receiver. Passive reception remains **incomplete**, not a

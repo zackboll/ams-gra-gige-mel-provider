@@ -1,5 +1,11 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-GENTL-001 evaluates a generic GenTL consumer backend
+([design](tasks/GIGE-MEL-GENTL-001-design.md)). It adds no MEL surface or
+backend. The recommended next step is GIGE-MEL-GENTL-002 (an internal backend
+foundation, not selectable by default), conditional on a qualified producer and
+a GenApi decision.
+
 GIGE-MEL-039 adds a [loopback-only single-owner authority](gvcp-single-owner.md),
 not a MEL capability. Shared control/heartbeat and retirement evidence does not
 qualify physical ownership, SDK integration, stale-session fencing or navigation.
