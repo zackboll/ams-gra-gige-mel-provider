@@ -1,5 +1,36 @@
 # Experimental image-stream profile, version 0.1
 
+## Unsupported C2 command status (GIGE-MEL-042)
+
+No capability, factory, ABI, backend or advertisement changes.
+
+The five unsupported C2 commands keep their exact upstream signatures and still
+return a ready `ErrorCode::Unsupported` future of their upstream response type:
+
+* `CalibrationConfigurationCmd`
+* `CalibrationStatusCmd`
+* `CameraProtectCmd`
+* `EraseCommand`
+* `SystemTrackDataResponse` (its `RequestFor<CommandStatus>` future carries the
+  error, not a successful status)
+
+Once admitted, each request now also publishes one terminal `CommandStatus`
+through the existing C2 callback contract. The status has the exact
+`commandID`, `CommandState::Rejected`, `CannotComply::CapabilityUnavailable`,
+and the future's description. Admission precedence is shared with
+ConfigSet/BIT/ModeCmd: a provider callback context, a closing Control or a
+detached channel gives `InvalidState` and no status. Rejection performs no
+backend I/O and changes no provider state except existing callback-failure
+accounting.
+
+This is a **provider-defined consistency enhancement**, not newly established
+MEL conformance. Calibration, camera protection, erase and system-track input
+remain unimplemented and unadvertised. Their metadata registrations stay
+`NotSupported`. The GIGE-MEL-041 Health classification below is unchanged.
+
+See the [design](tasks/GIGE-MEL-042-design.md) and the
+[validation record](tasks/GIGE-MEL-042-validation.md).
+
 ## Required Health metadata classification (GIGE-MEL-041)
 
 No capability, factory, ABI or Health behavior changes.
@@ -292,8 +323,10 @@ camera acquisition.
 C2 also implements versioned `ConfigSetCommand` and terminal `CommandStatus` for
 C2 ConfigSet and CameraCommand. The exact provider-defined schema, working payload,
 future/reason mapping, partial-failure rules and callback scope are specified in
-[configuration and status](configuration.md). No other C2 command status scope,
-command history, update/delete protocol, or duplicate-ID cache is implemented.
+[configuration and status](configuration.md). Besides the BIT_Command and ModeCmd
+subsets, the only other status scope is the terminal rejection of the five
+unsupported C2 commands (GIGE-MEL-042). No command history, update/delete
+protocol, or duplicate-ID cache is implemented.
 
 Both C2 and Image commands enter the same serialized runtime. Every
 `CameraCommand` is a **complete snapshot**, with explicit dimensions, offsets,
@@ -466,7 +499,9 @@ documented BIT_Command and ModeCmd subsets, and metadata other than communicatio
 Image camera/navigation receipt responses and qualified known-empty BadPixelList
 and C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT_Configuration/BIT_Status or Health
 MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
-return unsupported.
+return unsupported. The five unsupported C2 commands additionally publish a
+correlated Rejected/CapabilityUnavailable CommandStatus; that does not make
+them supported or advertised.
 Some of these are upstream **required** methods, not optional capabilities; this
 is why the implementation is called a bootstrap rather than conformant MEL.
 

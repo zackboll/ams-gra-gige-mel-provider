@@ -10,6 +10,7 @@
 #include "public_navigation_demo.hpp"
 #include "public_bad_pixel_demo.hpp"
 #include "public_required_metadata_demo.hpp"
+#include "public_c2_unsupported_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -226,6 +227,9 @@ void run(const char* library_path, const std::string& mode) {
         demonstrate_bit(session.control, mode == "--expect-no-bit"); return;
     }
     if (mode == "--required-metadata-only") { demonstrate_required_metadata_blocked(session.control); return; }
+    if (mode == "--c2-unsupported-only" || mode == "--expect-no-c2-unsupported-status") {
+        demonstrate_c2_unsupported(session.control, mode == "--expect-no-c2-unsupported-status"); return;
+    }
     if (mode == "--subsystem-only" || mode == "--expect-no-subsystem") {
         demonstrate_subsystem(session.control, mode == "--expect-no-subsystem"); return;
     }
@@ -234,6 +238,7 @@ void run(const char* library_path, const std::string& mode) {
     demonstrate_bit(session.control);
     demonstrate_subsystem(session.control);
     demonstrate_required_metadata_blocked(session.control);
+    demonstrate_c2_unsupported(session.control);
     demonstrate_mode(session.control, buffer_factory("synthetic", session.manager));
     demonstrate_navigation(session.control);
     demonstrate_bad_pixels(session.control);
@@ -302,8 +307,10 @@ int main(int argc, char** argv) {
             mode == "--bit-only" ? "PASS: public MEL BIT catalogue, acceptance, completed result and Health faults\n" :
             mode == "--expect-no-subsystem" ? "PASS: baseline SubsystemStatusResp unadvertised; valid registration NotSupported\n" :
             mode == "--required-metadata-only" ? "PASS: public MEL DiscreteStatus/MFA_SecurityAuditRecord NotSupported and unadvertised; reserved values unused\n" :
+            mode == "--c2-unsupported-only" ? "PASS: public MEL five unsupported C2 commands: ready typed Unsupported futures, correlated Rejected/CapabilityUnavailable CommandStatus, unadvertised\n" :
+            mode == "--expect-no-c2-unsupported-status" ? "PASS: unchanged baseline five unsupported C2 commands return Unsupported without CommandStatus\n" :
             mode == "--subsystem-only" ? "PASS: public MEL SubsystemStatusResp inventory, stable BIT_report and updated revision\n" :
-            "PASS: native factory loading, BIT, Health snapshots, SubsystemStatusResp, navigation receipt/echo/callback/stale rejection, one-shot zero-entry BadPixelList, registered Mono8 delivery, and teardown\n");
+            "PASS: native factory loading, BIT, Health snapshots, SubsystemStatusResp, unsupported C2 rejection status, navigation receipt/echo/callback/stale rejection, one-shot zero-entry BadPixelList, registered Mono8 delivery, and teardown\n");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
