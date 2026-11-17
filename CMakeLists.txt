@@ -21,6 +21,7 @@ if(GIGE_MEL_PLEORA_STREAM_TRAFFIC_AUDIT AND NOT GIGE_MEL_BUILD_PLEORA)
   message(FATAL_ERROR "Stream audit requires explicit GIGE_MEL_BUILD_PLEORA and its pinned external runtime prerequisites")
 endif()
 set(GIGE_MEL_PLEORA_SDK_ROOT "" CACHE PATH "External Pleora SDK installation")
+option(GIGE_MEL_BUILD_GENTL_PROBE "Build the uninstalled GIGE-MEL-GENTL-001 GenTL feasibility probe, its fixture producer and tests (requires the provisioned EMVA GenTL.h)" OFF)
 set(GIGE_MEL_SANITIZERS "" CACHE STRING "Compiler sanitizers, e.g. address,undefined or thread")
 
 add_library(gige_mel_build_options INTERFACE)
@@ -188,6 +189,9 @@ if(BUILD_TESTING)
   add_test(NAME pleora_tsan_exception_guard
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/pleora_tsan_exception_tests.py)
   set_tests_properties(pleora_tsan_exception_guard PROPERTIES TIMEOUT 30)
+  add_test(NAME gentl_default_isolation
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/gentl_isolation_tests.py)
+  set_tests_properties(gentl_default_isolation PROPERTIES TIMEOUT 30)
   add_test(NAME aravis_evidence_offline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
@@ -203,6 +207,10 @@ if(GIGE_MEL_BUILD_ARAVIS)
 endif()
 if(GIGE_MEL_BUILD_PLEORA)
   include(cmake/GigeMelPleora.cmake)
+endif()
+# GenTL feasibility only (GIGE-MEL-GENTL-001): never a backend, never selected.
+if(GIGE_MEL_BUILD_GENTL_PROBE)
+  include(cmake/GigeMelGenTL.cmake)
 endif()
 
 # Internal selection is never linked into or installed with the MEL provider.
