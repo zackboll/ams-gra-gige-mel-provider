@@ -9,6 +9,7 @@
 #include "public_mode_demo.hpp"
 #include "public_navigation_demo.hpp"
 #include "public_bad_pixel_demo.hpp"
+#include "public_required_metadata_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -224,6 +225,7 @@ void run(const char* library_path, const std::string& mode) {
     if (mode == "--bit-only" || mode == "--expect-no-bit") {
         demonstrate_bit(session.control, mode == "--expect-no-bit"); return;
     }
+    if (mode == "--required-metadata-only") { demonstrate_required_metadata_blocked(session.control); return; }
     if (mode == "--subsystem-only" || mode == "--expect-no-subsystem") {
         demonstrate_subsystem(session.control, mode == "--expect-no-subsystem"); return;
     }
@@ -231,6 +233,7 @@ void run(const char* library_path, const std::string& mode) {
     if (!mode.empty()) return;
     demonstrate_bit(session.control);
     demonstrate_subsystem(session.control);
+    demonstrate_required_metadata_blocked(session.control);
     demonstrate_mode(session.control, buffer_factory("synthetic", session.manager));
     demonstrate_navigation(session.control);
     demonstrate_bad_pixels(session.control);
@@ -298,6 +301,7 @@ int main(int argc, char** argv) {
             mode == "--expect-no-bit" ? "PASS: baseline BIT metadata/registrations absent; valid initiation Unsupported\n" :
             mode == "--bit-only" ? "PASS: public MEL BIT catalogue, acceptance, completed result and Health faults\n" :
             mode == "--expect-no-subsystem" ? "PASS: baseline SubsystemStatusResp unadvertised; valid registration NotSupported\n" :
+            mode == "--required-metadata-only" ? "PASS: public MEL DiscreteStatus/MFA_SecurityAuditRecord NotSupported and unadvertised; reserved values unused\n" :
             mode == "--subsystem-only" ? "PASS: public MEL SubsystemStatusResp inventory, stable BIT_report and updated revision\n" :
             "PASS: native factory loading, BIT, Health snapshots, SubsystemStatusResp, navigation receipt/echo/callback/stale rejection, one-shot zero-entry BadPixelList, registered Mono8 delivery, and teardown\n");
         return 0;

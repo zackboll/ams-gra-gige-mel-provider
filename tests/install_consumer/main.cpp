@@ -6,6 +6,7 @@
 #include "../public_mode_demo.hpp"
 #include "../public_navigation_demo.hpp"
 #include "../public_bad_pixel_demo.hpp"
+#include "../public_required_metadata_demo.hpp"
 
 #include <iostream>
 
@@ -18,7 +19,7 @@ int main() {
         return 1;
     }
     namespace ir = ams::iface::irmel;
-    try { demonstrate_health(control); demonstrate_bit(control); demonstrate_subsystem(control); demonstrate_mode(control, ir::getBuffer("synthetic", manager)); demonstrate_navigation(control); demonstrate_bad_pixels(control); }
+    try { demonstrate_health(control); demonstrate_bit(control); demonstrate_subsystem(control); demonstrate_required_metadata_blocked(control); demonstrate_mode(control, ir::getBuffer("synthetic", manager)); demonstrate_navigation(control); demonstrate_bad_pixels(control); }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 6; }
     ir::Config config;
     for (const auto& capability : control->getCapabilities()) {
@@ -42,5 +43,5 @@ int main() {
     auto result = c2->send(command).get();
     if (!result || *result.get() != ir::Return::Success || !accepted || statuses != 1) return 4;
     if (control->detachChannel(c2) != ir::Return::Success) return 5;
-    std::cout << "PASS: installed package, factories, BIT catalogue/results/Health faults, Health snapshots, SubsystemStatusResp, active Standby/Accepted/retained bytes/release/restart, navigation receipt/echo/callback/stale rejection, one-shot zero-entry BadPixelList, ConfigSet and correlated CommandStatus (published MEL only)\n";
+    std::cout << "PASS: installed package, factories, BIT catalogue/results/Health faults, Health snapshots, SubsystemStatusResp, blocked DiscreteStatus/MFA_SecurityAuditRecord NotSupported and unadvertised, active Standby/Accepted/retained bytes/release/restart, navigation receipt/echo/callback/stale rejection, one-shot zero-entry BadPixelList, ConfigSet and correlated CommandStatus (published MEL only)\n";
 }
