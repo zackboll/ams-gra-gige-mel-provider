@@ -34,6 +34,28 @@ another manager's callback, fails. There is no replacement or unregister API.
 The other four registrations return NotSupported: LFStatus, DiscreteStatus,
 MFA_SecurityAuditRecord, and NUC_TempData.
 
+### Required metadata status (GIGE-MEL-041)
+
+| Registration | Annotation | Status | Reason |
+| --- | --- | --- | --- |
+| `MFA_Status`, `MFA_StatusDetailed`, `BIT_Status`, `SubsystemStatusResp` | Required | **Partially supported** | Software-provider profiles described here and in the linked documents |
+| `DiscreteStatus` | Required | **Unresolved:** NotSupported, unadvertised | `BLOCKED_BY_UPSTREAM_CAPABILITY_ENUM`: no pinned enumerator; no discrete provider source beyond existing reports |
+| `MFA_SecurityAuditRecord` | Required | **Unresolved:** NotSupported, unadvertised | `BLOCKED_BY_UPSTREAM_CAPABILITY_ENUM`, and no genuine provider security event source |
+| `LFStatus` | Required if local functions | NotSupported | No local functions |
+| `NUC_TempData` | Optional | NotSupported | No sensor source |
+
+The pinned `ChannelMetadataCapabilityType` has no enumerator for
+`DiscreteStatus` or `MFA_SecurityAuditRecord`, and `ChannelCapability` expects
+unadvertised registrations to return NotSupported. Reserved values are not
+repurposed. For these two blocked surfaces, NotSupported takes precedence over
+lifecycle state: empty, repeated, callback-context, detached and
+post-destruction calls all return NotSupported. Nothing is retained, invoked or
+recorded in diagnostics.
+
+See the [GIGE-MEL-041 design](tasks/GIGE-MEL-041-design.md) for the contract
+analysis, event-source investigation and prepared upstream issue, and the
+[validation record](tasks/GIGE-MEL-041-validation.md).
+
 Inherited keep-alive and correlated communications remain available even while
 Health reporting is disabled. Health accepts no image buffers: both register
 and unregister return NotSupported on an attached usable channel, without

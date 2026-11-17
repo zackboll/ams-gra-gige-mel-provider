@@ -22,9 +22,11 @@
 #include <map>
 #include <mutex>
 #include <numbers>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1780,6 +1782,7 @@ void status_suppression_and_lifetime_pins() {
 #include "provider_health_tests.inc"
 #include "provider_bit_tests.inc"
 #include "provider_subsystem_tests.inc"
+#include "provider_required_metadata_tests.inc"
 #include "provider_bad_pixel_tests.inc"
 
 ir::ModeCmd standby_command(std::uint32_t id = 42) {
@@ -2780,6 +2783,11 @@ int main(int argc, char** argv) {
         {"ModeCmd callback reentry exceptions and closed channels", mode_callbacks_and_lifetime},
         {"ModeCmd serialized enable disable and CameraCommand", mode_serialized_lifecycle_and_configuration},
         {"ModeCmd detach and Control destruction overlap", mode_detach_and_control_overlap},
+        {"Required metadata DiscreteStatus/SecurityAudit blocked contract and advertisement", required_metadata_contract},
+        {"Required metadata blocked across observed states and recovery", required_metadata_states},
+        {"Required metadata blocked under concurrent Image and Health", required_metadata_concurrency},
+        {"Required metadata blocked during callback reentry and exceptions", required_metadata_reentry},
+        {"Required metadata blocked through disable detach and destruction", required_metadata_lifetime},
         {"Subsystem surface inventory and registration", subsystem_surface},
         {"Subsystem lifecycle and manager-lifetime counters", subsystem_lifecycle},
         {"Subsystem independent-manager unwind drains Health", subsystem_lifecycle_unwind},

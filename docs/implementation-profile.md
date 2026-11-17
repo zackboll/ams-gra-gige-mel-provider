@@ -1,5 +1,28 @@
 # Experimental image-stream profile, version 0.1
 
+## Required Health metadata classification (GIGE-MEL-041)
+
+No capability, factory, ABI or Health behavior changes.
+
+**Supported (partial):** `MFA_Status`, `MFA_StatusDetailed`, `BIT_Status` and
+`SubsystemStatusResp` (software-provider profiles).
+
+**Unresolved, required:**
+
+* `DiscreteStatus` and `MFA_SecurityAuditRecord` stay `NotSupported` and
+  unadvertised: the pinned `ChannelMetadataCapabilityType` has no enumerator to
+  advertise them, and reserved values are not repurposed.
+* `MFA_SecurityAuditRecord` additionally lacks any genuine provider security
+  event source. Ordinary command rejections and diagnostics are not
+  reclassified as security events.
+
+**Not applicable:** `LFStatus` (no local functions) and the optional
+`NUC_TempData` (no sensor source) remain `NotSupported`.
+
+See the [design](tasks/GIGE-MEL-041-design.md) and the
+[validation record](tasks/GIGE-MEL-041-validation.md). This is not Health or MEL
+conformance.
+
 ## Experimental single-owner session (GIGE-MEL-039)
 
 An uninstalled [loopback-only owner](gvcp-single-owner.md) coordinates control,
@@ -419,7 +442,8 @@ calibration, NUC or LOS state is added. Health retains its observed-state model.
 All other requests are rejected without stopping acquisition. This is logical
 provider state, not physical camera standby/power/health or full ModeCmd/task
 scheduling. The pinned metadata enum separately lacks DiscreteStatus and
-MFA_SecurityAuditRecord entries; these remain unimplemented and unadvertised.
+MFA_SecurityAuditRecord entries; these remain unimplemented and unadvertised
+(classified as blocked by GIGE-MEL-041).
 
 The [bounded provider-software BIT profile](software-bit.md) supports one
 synchronous C2 observed-state test (numeric ID 1), C2 catalogue/status registration,
