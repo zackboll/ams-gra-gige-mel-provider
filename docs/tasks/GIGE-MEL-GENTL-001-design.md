@@ -9,6 +9,54 @@ change**. The final commit/tree and executed matrix are recorded on the PR (see
 **Recommendation: `CONDITIONAL_GO` for Approach B (a native, project-owned
 GenTL C consumer), staged.** See section 9 for conditions.
 
+## PR #39 corrective review (GIGE-MEL-GENTL-001-R1)
+
+R1 incorporates `main` `ae4a2377c05e7dd16becf9a5201a5a075163808b`.
+The four independent-review findings are corrected without adding a backend,
+capability, GenApi implementation, camera/SDK qualification or concurrency API:
+
+* **R1-1, lost startup cancellation:** startup admission resets the previous
+  run's cancellation under the event mutex exactly once. The lifecycle is
+  idle → starting → running → stopping → idle (or retired after close).
+  `request_stop()` latches stopping; announcement and queue iterations, event
+  registration and native acquisition startup cannot reset it. A cancellation
+  observed before the running transition unwinds acquisition on the control
+  thread before returning stopped. A request after that transition is a running
+  cancellation and retains the existing `EventKill` wakeup/explicit control-thread
+  stop contract. No worker or concurrent normal lifecycle operation is added.
+  Producer calls remain synchronous and have no newly invented deadline.
+* **R1-2, allocation after native open:** a scoped native owner covers each of
+  TLOpen/TLOpenInterface/IFOpenDevice/DevOpenDataStream, including DevGetPort.
+  C++ children are inert until object and shared control-block allocation both
+  succeed. Only then are handle ownership and parent counts committed, without
+  another allocation. Failed construction destroys an inert child, then the
+  guard closes the native exactly once; failed cleanup taints the producer and
+  appends its native diagnostic to the original allocation/port failure.
+  The guard's unwinding destructor does not allocate diagnostic text.
+* **R1-3, uncertain teardown ownership:** teardown attempts each stop/flush/
+  revoke/unregister once and keeps the first failure plus subsequent diagnostics.
+  A rejected start followed by a rejected stop is resolved only by an explicit
+  not-grabbing readback; otherwise native activity remains uncertain. Successful
+  revokes retire their resources; unsuccessful revokes quarantine the entire
+  announcement slot (both bytes and native user pointer). Failed event retirement
+  retains the event identity and prevents reuse/kill/re-unregister of a possibly
+  invalid handle. Failed teardown forbids restart. DSClose is attempted once:
+  success conclusively retires the stream and releases its temporary quarantine;
+  failure preserves original diagnostics, taints the producer and leaves uncertain
+  resources in the existing process-lifetime quarantine. Thus an earlier error
+  does not permanently retain a producer when native cleanup conclusively succeeds.
+* **R1-4, moved-from frame:** explicit `noexcept` moves exchange the source span
+  with an empty span while moving storage ownership and metadata, matching
+  `backend::FrameLease`. Self-move is harmless; other outstanding copy leases
+  remain valid across stop/close and actual producer unloading.
+
+Regression coverage uses producer entry/exit barriers (including later buffer
+iterations), a native-wait latch, object/control-block allocation injection and
+independent teardown failure processes. No sleep-based race test is used.
+See the [R1 validation matrix](GIGE-MEL-GENTL-001-validation.md#i-pr-39-corrective-qualification-r1).
+The original feasibility decision and physical/vendor qualification gates remain
+**CONDITIONAL_GO**, unchanged.
+
 ## 1. GenTL API dependency and ABI requirements
 
 The only ABI source is the official EMVA **GenTL 1.6** C header, `GenTL/GenTL.h`
@@ -182,19 +230,21 @@ Producer (dlopen + GCInitLib) <- System (TL) <- Interface (IF) <- Device (DEV + 
 * Mandatory symbols are validated **before** any producer call. A `GCInitLib`
   failure never calls `GCCloseLib`. A second instance of one canonical file is
   refused while one is loaded or retained.
-* If any native close or revoke fails, or `GCCloseLib` fails, the producer is
+* If native close remains unresolved, or `GCCloseLib` fails, the producer is
   **tainted**: its library and any memory it may reference are retained (never
   `dlclose`d) for the rest of the process, and the file cannot be reloaded. A
   bounded leak is preferable to unmapping code a producer thread may still run.
   The probe reports retention explicitly.
 * Buffers are consumer-allocated (`DSAnnounceBuffer`). A buffer whose
-  `DSRevokeBuffer` fails is quarantined and freed only after unload. Frames are
+  `DSRevokeBuffer` fails is quarantined until conclusive stream close (otherwise
+  process-lifetime retention). Frames are
   copied into a separate bounded lease pool (ADR 0002), so leases outlive stop,
   close and real unload (tested). Restart is refused while a lease is held. A full
   lease pool drops the frame and requeues the native buffer rather than
   overwriting held bytes. Announced plus lease memory is bounded before allocation.
-* Cancellation: `request_stop()` calls `EventKill` under the mutex shared with
-  event registration. A blocked `EventGetData` returned `GC_ERR_ABORT` (tested
+* Cancellation: `request_stop()` latches cancellation and calls `EventKill`
+  under the mutex protecting event publication and retirement. A blocked
+  `EventGetData` returned `GC_ERR_ABORT` (tested
   under TSan). A production adapter should also bound each wait (section 4).
 ## 7. GenApi integration strategy
 

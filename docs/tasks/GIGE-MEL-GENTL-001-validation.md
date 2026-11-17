@@ -165,7 +165,7 @@ acquisition, 10 Hz operation, buffer lifecycle, stream stop and reopen are all
 | Buffer lifecycle / stop / reopen | Fixture only (F) |
 
 Raw logs, outside the repository: `~/gige-mel-evidence/gentl-001/`.
-## G. Executed results (final source)
+## G. Original feasibility results (0918f0b; superseded by R1 below)
 
 Local run on the final source tree (script `/tmp/gentl001-final.sh`, run serially;
 each exit status was captured individually). The exact final HEAD rerun and the
@@ -208,3 +208,59 @@ hosted CI exercises the default-OFF build and `gentl_default_isolation`.
   existing receive, stop and close threading contracts.
 * Retained (tainted) producers leak their mapping and quarantined memory for the
   rest of the process, by design.
+
+## I. PR #39 corrective qualification (R1)
+
+R1 incorporates `main` `ae4a2377c05e7dd16becf9a5201a5a075163808b`.
+The fetched PR head was the reviewed `0918f0bec114f29be2ff3e2f13b270bbbb253b97`,
+with no intervening corrections or local changes. The main merge retained both
+the feasibility and required-Health classification documentation. No upstream
+declarations, default-OFF policy, existing SDK behavior, camera/profile surface,
+production backend, GenApi or NavigationReport path changed. The recommendation
+remains **CONDITIONAL_GO** with the original production qualification gates.
+
+### Findings and deterministic regression coverage (class F only)
+
+| Finding | Correction and regression |
+| --- | --- |
+| R1-1: startup overwrote concurrent stop | Cancellation resets only at startup admission under the event mutex. Every buffer announce/queue iteration, event publication and native acquisition startup honors the latch; cancellation before the running transition unwinds on the control thread. `cancellation_at_startup_boundaries` exercises entry and exit of announce/queue (first and third buffers), register and native start: **12 barrier-controlled cases**. Each verifies stopped result, balanced revoke, no quarantine, stopped wait, and a clean explicit restart. `stop_wakes_blocked_wait` now uses a native-wait latch rather than a sleep, proving EventKill wakes native EventGetData. Only request_stop runs on the concurrent test thread. |
+| R1-2: shared-control-block allocation could double-close and underflow counts | Scoped native ownership spans open through full C++ allocation; inert children acquire ownership/counts only after success. **16 separate allocation tests** cover object and real shared-control-block allocator failure for each of system/interface/device/stream, both successful and failed native cleanup. Tests assert exactly one cleanup attempt, original resource-exhaustion plus cleanup/native diagnostics, correct parent counts and subsequent open/close, unload on success and process-lifetime retention on failed cleanup. Fixture-only out-of-band repair checks counts after failed native cleanup without making the consumer retry an ambiguous handle. Injection is absent with BUILD_TESTING=OFF. |
+| R1-3: teardown errors did not consistently retain uncertain resources | One-shot teardown records first and subsequent errors; confirmed revokes release storage, failed revokes quarantine both bytes and announcement user pointer. Failed event retirement keeps its identity without reusing it. One-shot DSClose either conclusively releases temporary quarantine or taints/retains the producer. **23 separate teardown tests** independently inject DSStopAcquisition, DSFlushQueue, DSRevokeBuffer, GCUnregisterEvent and DSClose failures during running acquisition and a native start that becomes active before returning failure. Additional announce-only partial startup cases cover flush/revoke/close. Both conclusive close and unresolved ownership are tested where applicable, including successful ordinary close after a flush failure when nothing was queued. Tests assert original native error/diagnostics, appended close errors, no duplicate release attempts, restart refusal, retained frame bytes, real unload vs retention, and simulated late native writes through both quarantined pointers after consumer destruction. |
+| R1-4: moved-from Frame exposed unowned span | Explicit noexcept moves exchange the source span with empty. Contract tests cover move construction, assignment over a nonempty destination, repeated moves, moved-from-to-empty moves and self-move, metadata and byte retention after actual RTLD_NOLOAD-verified producer unload. Compile-time assertions retain move-only/noexcept behavior. Existing pool-starvation/held-lease contracts remain enabled. |
+
+The fixture uses the same externally provisioned EMVA GenTL 1.6 header, SHA-256
+`5b656a413f4cdc347e80494b87f94b09ac925e391a9022edb7f028d996e35e4e`.
+No physical camera was contacted; no real vendor producer or SDK was used for R1.
+Earlier P/H observations above are historical, not requalified by this correction.
+
+### Executed local matrix
+
+The R1 matrix uses the existing commands in sections B/C, with all new tests
+included in label `gentl`. Configure and build precede each CTest lane, using
+`--parallel 2`. Logs and the runner stay outside Git under
+`/tmp/gentl-r1-*.log` and `/tmp/gentl-r1-qualify.sh`.
+The final commit/tree, exact-commit rerun results and hosted CI identity are
+recorded on PR #39 to avoid a self-referential commit identity in this file.
+
+| Lane | Executed result on the corrected source |
+| --- | --- |
+| Default GCC Debug | Configure/build exit 0; CTest **31/31 passed** (includes main's required-metadata test and default GenTL isolation). |
+| Pinned upstream | Exit 0, **97 pinned files verified**, no network. |
+| Proprietary-content guard | Exit 0, no recognized prohibited material (`--history origin/main`; repeated after staging/commit). |
+| Optional GenTL GCC Debug, full CTest | Configure/build exit 0; **72/72 passed**, including **41 GenTL tests**. |
+| GenTL ASan + UBSan | Configure/build exit 0; label `gentl` **41/41 passed**, leak detection and halt-on-error enabled; no sanitizer findings. |
+| GenTL TSan | Configure/build exit 0; label `gentl` **41/41 passed**, halt-on-error enabled; no race reports. |
+| GenTL Clang 19.1.7 | Configure/build exit 0; label `gentl` **41/41 passed**, warnings-as-errors. |
+| Header-free default build | Separate `/tmp/gentl-r1-no-header` configure/build with OFF and a deliberately nonexistent include path: exit 0; four isolation assertions passed; no GenTL provider dynamic symbols. |
+| Optional non-test build | Separate `/tmp/gentl-r1-no-tests`, BUILD_TESTING=OFF: probe builds; allocation-injection symbol absent from consumer archive. |
+
+All original tests remain enabled. The 41 GenTL tests comprise the original
+consumer contract (now 20 scenarios), the existing real probe fixture test, 16
+allocation cases and 23 teardown cases. Exact-final-commit reruns are required
+before the PR's final disposition; earlier feasibility results in G are not
+substituted for these checks.
+
+Hosted CI does not provision GenTL: its GCC Debug/Release, Clang Debug and
+ASan/TSan jobs validate the default build (and existing optional Aravis checks),
+not the locally executed optional GenTL matrix. Fresh independent technical
+review is required; neither this record nor passing CI is merge approval.

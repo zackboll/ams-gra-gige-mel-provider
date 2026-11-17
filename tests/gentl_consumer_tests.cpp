@@ -7,13 +7,16 @@
 #include <dlfcn.h>
 
 #include <atomic>
+#include <barrier>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <latch>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unistd.h>
 #include <vector>
 
@@ -27,6 +30,9 @@ using namespace std::chrono_literals;
 namespace {
 
 constexpr std::int32_t gc_io = -1010, gc_resource_in_use = -1004, gc_access_denied = -1005;
+static_assert(std::is_nothrow_move_constructible_v<gentl::Frame>);
+static_assert(std::is_nothrow_move_assignable_v<gentl::Frame>);
+static_assert(!std::is_copy_constructible_v<gentl::Frame>);
 
 // Per-test environment, call log and loader observation.
 class Fixture {
@@ -76,6 +82,36 @@ bool mapped(const char* path) {
     dlclose(handle);
     return true;
 }
+
+// The observation dlopen is released before checking actual producer unload.
+struct MockControl {
+    void* library = dlopen(GENTL_MOCK, RTLD_NOW | RTLD_NOLOAD);
+    using Hook = void (*)(const char*, bool, void*);
+    template <class T> T symbol(const char* name) {
+        auto value = reinterpret_cast<T>(dlsym(library, name));
+        CHECK(value);
+        return value;
+    }
+    void hook(Hook callback, void* context) { symbol<void (*)(Hook, void*)>("MockSetBoundaryHook")(callback, context); }
+    void fail(const char* value) { symbol<void (*)(const char*)>("MockSetFailure")(value); }
+    void conclusive() { symbol<void (*)()>("MockConclusiveClose")(); }
+    void touch() { symbol<void (*)()>("MockTouchOutstandingBuffers")(); }
+    ~MockControl() { if (library) dlclose(library); }
+};
+
+struct BoundaryBarrier {
+    const char* function;
+    bool after;
+    int occurrence{1};
+    std::barrier<> entered{2}, resume{2};
+    static void hook(const char* name, bool exit, void* context) {
+        auto& self = *static_cast<BoundaryBarrier*>(context);
+        if (name == std::string_view(self.function) && exit == self.after && --self.occurrence == 0) {
+            self.entered.arrive_and_wait();
+            self.resume.arrive_and_wait();
+        }
+    }
+};
 
 struct Opened {
     std::shared_ptr<gentl::Producer> producer;
@@ -435,7 +471,13 @@ void leases_outlive_producer_unload() {
         CHECK(stream->start());
         auto frame = stream->wait(1000ms);
         CHECK(frame);
+        auto replacement = stream->wait(1000ms);
+        CHECK(replacement);
+        const auto replacement_id = replacement.value().facts().frame_id;
+        frame.value() = std::move(replacement).value(); // releases a nonempty destination
+        CHECK(replacement.value().bytes().empty() && frame.value().facts().frame_id == replacement_id);
         kept.emplace(std::move(frame).value());
+        CHECK(frame.value().bytes().empty());
         CHECK(stream->close());
         close_all(o);
     }
@@ -443,6 +485,56 @@ void leases_outlive_producer_unload() {
     // Consumer-owned copy: still readable after the library is gone.
     CHECK(kept->bytes().size() == 32);
     CHECK(kept->bytes()[0] == std::byte(static_cast<std::uint8_t>(*kept->facts().frame_id)));
+    const auto snapshot = std::vector<std::byte>(kept->bytes().begin(), kept->bytes().end());
+    const auto id = kept->facts().frame_id;
+    gentl::Frame moved(std::move(*kept));
+    CHECK(kept->bytes().empty());
+    *kept = std::move(moved);
+    CHECK(moved.bytes().empty() && kept->facts().frame_id == id);
+    CHECK(std::equal(snapshot.begin(), snapshot.end(), kept->bytes().begin()));
+    gentl::Frame empty_again(std::move(moved));
+    CHECK(empty_again.bytes().empty() && moved.bytes().empty());
+    moved = std::move(*kept);
+    CHECK(kept->bytes().empty());
+    auto* alias = &moved;
+    moved = std::move(*alias); // self-move preserves ownership
+    CHECK(moved.facts().frame_id == id && moved.bytes().size() == snapshot.size());
+    CHECK(std::equal(snapshot.begin(), snapshot.end(), moved.bytes().begin()));
+}
+
+void cancellation_at_startup_boundaries() {
+    for (const char* operation : {"DSAnnounceBuffer", "DSQueueBuffer", "GCRegisterEvent", "DSStartAcquisition"}) {
+        for (bool after : {false, true}) {
+            // Also cancel after/before later announcements and queues, not just
+            // the first iteration; the control thread alone drives lifecycle.
+            for (int occurrence : {1, 3}) {
+                if (occurrence == 3 && std::string_view(operation) != "DSAnnounceBuffer" &&
+                    std::string_view(operation) != "DSQueueBuffer") continue;
+                Fixture fixture;
+                auto o = open_all();
+                auto stream = open_stream(o);
+                MockControl control;
+                BoundaryBarrier boundary{operation, after, occurrence};
+                control.hook(BoundaryBarrier::hook, &boundary);
+                std::thread canceller([&] {
+                    boundary.entered.arrive_and_wait();
+                    stream->request_stop();
+                    boundary.resume.arrive_and_wait();
+                });
+                auto started = stream->start();
+                canceller.join();
+                control.hook(nullptr, nullptr);
+                CHECK(!started && started.error().code == ErrorCode::stopped);
+                CHECK(fixture.count("DSAnnounceBuffer") == fixture.count("DSRevokeBuffer"));
+                CHECK(!o.producer->tainted() && o.producer->quarantined() == 0);
+                CHECK(!stream->wait(0ms));
+                CHECK(stream->stop());
+                CHECK(stream->start()); // new explicit admission, not a lost stop
+                CHECK(stream->close());
+                close_all(o);
+            }
+        }
+    }
 }
 
 void stop_wakes_blocked_wait() {
@@ -452,17 +544,23 @@ void stop_wakes_blocked_wait() {
     CHECK(stream->start());
     auto timed_out = stream->wait(20ms);
     CHECK(!timed_out && timed_out.error().code == ErrorCode::timeout && timed_out.error().native == -1011);
+    MockControl control;
+    std::latch waiting{1};
+    control.hook([](const char* name, bool after, void* context) {
+        if (!after && std::string_view(name) == "EventGetDataWaiting")
+            static_cast<std::latch*>(context)->count_down();
+    }, &waiting);
     std::atomic<bool> returned{false};
     gentl::Failure observed;
-    std::thread receiver([&] {
-        auto frame = stream->wait(std::chrono::hours(1));
-        if (!frame) observed = frame.error();
-        returned = true;
+    std::thread canceller([&] {
+        waiting.wait();
+        stream->request_stop();
     });
-    std::this_thread::sleep_for(50ms);
-    CHECK(!returned);
-    stream->request_stop();
-    receiver.join(); // EventKill must release the blocked EventGetData
+    auto frame = stream->wait(std::chrono::hours(1));
+    if (!frame) observed = frame.error();
+    returned = true;
+    canceller.join(); // EventKill must release native EventGetData
+    control.hook(nullptr, nullptr);
     // GC_ERR_ABORT from the killed EventGetData (or, if the stop won the race
     // before native entry, a consumer-side stop). Never a timeout or a frame.
     CHECK(returned && observed.code == ErrorCode::stopped && (observed.native == -1012 || observed.native == 0));
@@ -538,9 +636,156 @@ void revoke_failure_quarantines_memory() {
     CHECK(!again && again.error().code == ErrorCode::busy);
 }
 
+void allocation_failure(const std::string& path, int allocation, bool cleanup_fails) {
+    const std::string close = path == "system" ? "TLClose" : path == "interface" ? "IFClose" :
+                              path == "device" ? "DevClose" : "DSClose";
+    Fixture fixture(cleanup_fails ? std::vector<std::pair<std::string, std::string>>{{"GENTL_MOCK_FAIL", close}} :
+                                  std::vector<std::pair<std::string, std::string>>{});
+    const auto before = gentl::retained_producers();
+    {
+        auto loaded = gentl::Producer::load(GENTL_MOCK);
+        CHECK(loaded);
+        auto producer = loaded.value();
+        std::shared_ptr<gentl::System> system;
+        std::shared_ptr<gentl::Interface> interface;
+        std::shared_ptr<gentl::Device> device;
+        if (path != "system") { auto r = producer->open_system(); CHECK(r); system = r.value(); }
+        if (path == "device" || path == "stream") {
+            auto r = system->open_interface("mock-if-0"); CHECK(r); interface = r.value();
+            CHECK(interface->update_devices(0ms));
+        }
+        if (path == "stream") {
+            auto r = interface->open_device("mock-dev-A", gentl::Access::read_only); CHECK(r); device = r.value();
+        }
+        gentl::fail_construction_allocation(allocation);
+        const auto failed = [&]() -> gentl::Status {
+            if (path == "system") { auto r = producer->open_system(); CHECK(!r); return r.error(); }
+            if (path == "interface") { auto r = system->open_interface("mock-if-0"); CHECK(!r); return r.error(); }
+            if (path == "device") { auto r = interface->open_device("mock-dev-A", gentl::Access::read_only); CHECK(!r); return r.error(); }
+            auto r = device->open_stream("mock-stream-0", {}); CHECK(!r); return r.error();
+        }();
+        gentl::fail_construction_allocation(-1);
+        CHECK(!failed && failed.error().code == ErrorCode::resource_exhausted);
+        CHECK(failed.error().detail.find("allocation failed") != std::string::npos);
+        CHECK(fixture.count(close) + fixture.count("fail " + close) == 1);
+        CHECK(fixture.count("attempt " + close) == 1);
+        CHECK(producer->tainted() == cleanup_fails);
+        if (cleanup_fails) {
+            CHECK(failed.error().detail.find("cleanup ") != std::string::npos);
+            CHECK(failed.error().detail.find(close) != std::string::npos);
+            CHECK(failed.error().detail.find("mock: injected failure") != std::string::npos);
+        }
+        // A second native child proves counts were not underflowed or left busy.
+        // When native cleanup failed, repair the fixture out-of-band ONLY to
+        // inspect parent counts. Taint must still keep the library mapped.
+        if (cleanup_fails) {
+            MockControl control;
+            control.fail("");
+            // No handle crosses the consumer API; fixture repairs via explicit
+            // test-only operation instead of retrying the ambiguous consumer close.
+            control.symbol<void (*)()>("MockRepairOpenHandles")();
+        }
+        if (path == "system") { auto r = producer->open_system(); CHECK(r); CHECK(r.value()->close()); }
+        else if (path == "interface") { auto r = system->open_interface("mock-if-0"); CHECK(r); CHECK(r.value()->close()); }
+        else if (path == "device") { auto r = interface->open_device("mock-dev-A", gentl::Access::read_only); CHECK(r); CHECK(r.value()->close()); }
+        else { auto r = device->open_stream("mock-stream-0", {}); CHECK(r); CHECK(r.value()->close()); }
+        if (device) CHECK(device->close());
+        if (interface) CHECK(interface->close());
+        if (system) CHECK(system->close());
+        CHECK(producer->close());
+    }
+    CHECK(gentl::retained_producers() == before + (cleanup_fails ? 1 : 0));
+    CHECK(mapped(GENTL_MOCK) == cleanup_fails);
+}
+
+void teardown_failure(const std::string& operation, const std::string& phase, bool conclusive) {
+    const bool partial = phase != "running";
+    const bool announced = phase == "announced";
+    const bool cleanup_succeeds = conclusive || (announced && operation == "DSFlushQueue");
+    Fixture fixture;
+    const auto before = gentl::retained_producers();
+    {
+        auto o = open_all();
+        MockControl control;
+        auto stream = open_stream(o);
+        std::optional<gentl::Frame> held;
+        if (conclusive) control.conclusive();
+        const auto failures = operation + (announced ? ",DSQueueBuffer" : partial ? ",DSStartAcquisitionAfterStart" : "");
+        if (partial) control.fail(failures.c_str());
+        auto started = stream->start();
+        if (partial) {
+            CHECK(!started && started.error().function == (announced ? "DSQueueBuffer" : "DSStartAcquisition"));
+            if (announced) CHECK(!fixture.called("GCRegisterEvent") && !fixture.called("DSStartAcquisition"));
+            if (operation != "DSClose") CHECK(started.error().detail.find(operation) != std::string::npos);
+        } else {
+            CHECK(started);
+            auto frame = stream->wait(1000ms); CHECK(frame);
+            held.emplace(std::move(frame).value());
+            control.fail(failures.c_str());
+        }
+        auto stopped = stream->stop();
+        if (operation == "DSClose") CHECK(stopped);
+        else {
+            CHECK(!stopped && stopped.error().function == operation && stopped.error().native == gc_io);
+            CHECK(stopped.error().detail.find("mock: injected failure") != std::string::npos);
+        }
+        const auto calls = fixture.calls().size();
+        (void)stream->stop();
+        CHECK(fixture.calls().size() == calls); // no double releases
+        const auto quarantined = o.producer->quarantined();
+        if (operation == "DSRevokeBuffer" || (operation == "DSFlushQueue" && !announced)) CHECK(quarantined == 4);
+        if (announced && operation == "DSFlushQueue") CHECK(quarantined == 0);
+        if (operation != "DSClose") CHECK(!stream->start()); // no restart after failed teardown
+        auto closed = stream->close();
+        CHECK(!closed);
+        CHECK(closed.error().function == operation);
+        CHECK(closed.error().native == gc_io);
+        if (!cleanup_succeeds && operation != "DSClose")
+            CHECK(closed.error().detail.find("DSClose") != std::string::npos);
+        const auto close_calls = fixture.calls().size();
+        (void)stream->close();
+        stream->request_stop(); // no EventKill on an ambiguously retired event
+        CHECK(fixture.calls().size() == close_calls);
+        stream.reset();
+        CHECK(fixture.calls().size() == close_calls);
+        if (held) CHECK(held->bytes().size() == 32);
+        control.touch();
+        if (cleanup_succeeds) {
+            CHECK(!o.producer->tainted());
+            CHECK(o.producer->quarantined() == 0);
+            close_all(o);
+        } else {
+            CHECK(o.producer->tainted());
+            if (operation == "GCUnregisterEvent") CHECK(fixture.count("fail GCUnregisterEvent") == 1);
+            CHECK(fixture.count("attempt DSClose") == 1);
+        }
+    }
+    const bool retained = !cleanup_succeeds;
+    CHECK(gentl::retained_producers() == before + (retained ? 1 : 0));
+    CHECK(mapped(GENTL_MOCK) == retained);
+    if (retained) {
+        MockControl control;
+        control.touch(); // memory and announcement user pointers survive objects
+    }
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1) {
+        try {
+            if (std::string_view(argv[1]) == "allocation" && argc == 5)
+                allocation_failure(argv[2], std::stoi(argv[3]), std::string_view(argv[4]) == "failure");
+            else if (std::string_view(argv[1]) == "teardown" && argc == 5)
+                teardown_failure(argv[2], argv[3], std::string_view(argv[4]) == "conclusive");
+            else throw std::runtime_error("unknown R1 test arguments");
+            std::cout << "PASS R1 failure injection\n";
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << "FAIL R1: " << error.what() << '\n';
+            return 1;
+        }
+    }
     const std::vector<std::pair<const char*, void (*)()>> tests{
         {"invalid_paths", invalid_paths},
         {"missing_mandatory_symbol", missing_mandatory_symbol},
@@ -557,6 +802,7 @@ int main() {
         {"register_transport_semantics", register_transport_semantics},
         {"stream_lifecycle_and_leases", stream_lifecycle_and_leases},
         {"leases_outlive_producer_unload", leases_outlive_producer_unload},
+        {"cancellation_at_startup_boundaries", cancellation_at_startup_boundaries},
         {"stop_wakes_blocked_wait", stop_wakes_blocked_wait},
         {"stream_start_failures_clean_up", stream_start_failures_clean_up},
         // Last: each deliberately leaves one fixture file retained (never unloaded).

@@ -89,6 +89,19 @@ struct State {
 // Distinct addresses used as opaque handles.
 char tl_handle, iface_handle, device_handle[2], port_handle[2], stream_handle, event_handle;
 
+// Installed only by offline tests, before starting control-thread operations.
+using BoundaryHook = void (*)(const char*, bool, void*);
+BoundaryHook boundary_hook = nullptr;
+void* boundary_context = nullptr;
+bool conclusive_close = false;
+struct Boundary {
+    const char* name;
+    explicit Boundary(const char* n) : name(n) {
+        if (boundary_hook) boundary_hook(name, false, boundary_context);
+    }
+    ~Boundary() { if (boundary_hook) boundary_hook(name, true, boundary_context); }
+};
+
 GC_ERROR injected(const char* name) {
     const std::string list = "," + state.fail + ",";
     const std::string key = std::string(",") + name;
@@ -188,6 +201,33 @@ __attribute__((destructor)) void unloaded() { log("unloaded"); }
 
 extern "C" {
 
+void MockSetBoundaryHook(BoundaryHook hook, void* context) {
+    boundary_hook = hook;
+    boundary_context = context;
+}
+void MockSetFailure(const char* fail) {
+    std::lock_guard lock(state.mutex);
+    state.fail = fail;
+}
+void MockConclusiveClose() { conclusive_close = true; }
+void MockRepairOpenHandles() {
+    std::lock_guard lock(state.mutex);
+    if (state.stream) state.stream = false;
+    else if (state.devices[0]) state.devices[0] = false;
+    else if (state.iface) state.iface = false;
+    else state.tl = false;
+}
+// Simulate a late native write through both announcement pointers. Sanitizers
+// must see valid storage even after all consumer objects have been destroyed.
+void MockTouchOutstandingBuffers() {
+    std::lock_guard lock(state.mutex);
+    for (const auto& buffer : state.buffers) {
+        static_cast<unsigned char*>(buffer->base)[0] = 0x5a;
+        volatile auto user_byte = *static_cast<const unsigned char*>(buffer->user);
+        (void)user_byte;
+    }
+}
+
 GC_API GCInitLib() {
     std::lock_guard lock(state.mutex);
     if (state.initialized) return error(GC_ERR_RESOURCE_IN_USE, "already initialized");
@@ -251,6 +291,7 @@ GC_API TLOpen(TL_HANDLE* handle) {
 #endif
 
 GC_API TLClose(TL_HANDLE handle) {
+    log("attempt TLClose");
     std::lock_guard lock(state.mutex);
     MOCK_INIT;
     if (handle != &tl_handle || !state.tl) return error(GC_ERR_INVALID_HANDLE, "TLClose handle");
@@ -310,6 +351,7 @@ GC_API TLOpenInterface(TL_HANDLE handle, const char* id, IF_HANDLE* out) {
 }
 
 GC_API IFClose(IF_HANDLE handle) {
+    log("attempt IFClose");
     std::lock_guard lock(state.mutex);
     if (handle != &iface_handle || !state.iface) return error(GC_ERR_INVALID_HANDLE, "IFClose handle");
     MOCK_INJECT("IFClose");
@@ -397,6 +439,7 @@ GC_API DevGetInfo(DEV_HANDLE handle, DEVICE_INFO_CMD command, INFO_DATATYPE* typ
 }
 
 GC_API DevClose(DEV_HANDLE handle) {
+    log("attempt DevClose");
     std::lock_guard lock(state.mutex);
     const int index = device_index(handle);
     if (index < 0) return error(GC_ERR_INVALID_HANDLE, "DevClose handle");
@@ -536,6 +579,7 @@ GC_API DSGetInfo(DS_HANDLE handle, STREAM_INFO_CMD command, INFO_DATATYPE* type,
 }
 
 GC_API DSAnnounceBuffer(DS_HANDLE handle, void* base, size_t size, void* user, BUFFER_HANDLE* out) {
+    Boundary boundary("DSAnnounceBuffer");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSAnnounceBuffer handle");
     MOCK_INJECT("DSAnnounceBuffer");
@@ -555,6 +599,7 @@ GC_API DSAllocAndAnnounceBuffer(DS_HANDLE, size_t, void*, BUFFER_HANDLE*) {
 }
 
 GC_API DSQueueBuffer(DS_HANDLE handle, BUFFER_HANDLE buffer_handle) {
+    Boundary boundary("DSQueueBuffer");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSQueueBuffer handle");
     auto* buffer = buffer_of(buffer_handle);
@@ -569,6 +614,7 @@ GC_API DSQueueBuffer(DS_HANDLE handle, BUFFER_HANDLE buffer_handle) {
 }
 
 GC_API DSRevokeBuffer(DS_HANDLE handle, BUFFER_HANDLE buffer_handle, void** base, void** user) {
+    log("attempt DSRevokeBuffer");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSRevokeBuffer handle");
     auto* buffer = buffer_of(buffer_handle);
@@ -585,6 +631,7 @@ GC_API DSRevokeBuffer(DS_HANDLE handle, BUFFER_HANDLE buffer_handle, void** base
 }
 
 GC_API DSFlushQueue(DS_HANDLE handle, ACQ_QUEUE_TYPE operation) {
+    log("attempt DSFlushQueue");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSFlushQueue handle");
     MOCK_INJECT("DSFlushQueue");
@@ -596,6 +643,7 @@ GC_API DSFlushQueue(DS_HANDLE handle, ACQ_QUEUE_TYPE operation) {
 }
 
 GC_API DSStartAcquisition(DS_HANDLE handle, ACQ_START_FLAGS, uint64_t) {
+    Boundary boundary("DSStartAcquisition");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSStartAcquisition handle");
     MOCK_INJECT("DSStartAcquisition");
@@ -603,10 +651,12 @@ GC_API DSStartAcquisition(DS_HANDLE handle, ACQ_START_FLAGS, uint64_t) {
     state.acquiring = true;
     log("DSStartAcquisition");
     fill_locked();
+    MOCK_INJECT("DSStartAcquisitionAfterStart");
     return GC_ERR_SUCCESS;
 }
 
 GC_API DSStopAcquisition(DS_HANDLE handle, ACQ_STOP_FLAGS) {
+    log("attempt DSStopAcquisition");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSStopAcquisition handle");
     MOCK_INJECT("DSStopAcquisition");
@@ -640,9 +690,17 @@ GC_API DSGetBufferInfo(DS_HANDLE handle, BUFFER_HANDLE buffer_handle, BUFFER_INF
 }
 
 GC_API DSClose(DS_HANDLE handle) {
+    log("attempt DSClose");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(handle)) return error(GC_ERR_INVALID_HANDLE, "DSClose handle");
     MOCK_INJECT("DSClose");
+    if (conclusive_close) {
+        state.input.clear();
+        state.output.clear();
+        state.buffers.clear();
+        state.registered = false;
+        state.acquiring = false;
+    }
     // Strict fixture: the consumer must have revoked and unregistered first.
     if (!state.buffers.empty() || state.registered || state.acquiring)
         return error(GC_ERR_RESOURCE_IN_USE, "DSClose with announced buffers, an event or a running engine");
@@ -652,6 +710,7 @@ GC_API DSClose(DS_HANDLE handle) {
 }
 
 GC_API GCRegisterEvent(EVENTSRC_HANDLE source, EVENT_TYPE type, EVENT_HANDLE* event) {
+    Boundary boundary("GCRegisterEvent");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(source) || type != EVENT_NEW_BUFFER) return error(GC_ERR_NOT_IMPLEMENTED, "event not modeled");
     MOCK_INJECT("GCRegisterEvent");
@@ -664,9 +723,11 @@ GC_API GCRegisterEvent(EVENTSRC_HANDLE source, EVENT_TYPE type, EVENT_HANDLE* ev
 }
 
 GC_API GCUnregisterEvent(EVENTSRC_HANDLE source, EVENT_TYPE type) {
+    log("attempt GCUnregisterEvent");
     std::lock_guard lock(state.mutex);
     if (!stream_ok(source) || type != EVENT_NEW_BUFFER || !state.registered)
         return error(GC_ERR_INVALID_HANDLE, "event not registered");
+    MOCK_INJECT("GCUnregisterEvent");
     state.registered = false;
     state.cv.notify_all();
     log("GCUnregisterEvent");
@@ -674,10 +735,14 @@ GC_API GCUnregisterEvent(EVENTSRC_HANDLE source, EVENT_TYPE type) {
 }
 
 GC_API EventGetData(EVENT_HANDLE event, void* buffer, size_t* size, uint64_t timeout) {
+    Boundary boundary("EventGetData");
     std::unique_lock lock(state.mutex);
     if (event != &event_handle || !state.registered) return error(GC_ERR_INVALID_HANDLE, "event handle");
     if (!buffer || !size || *size < sizeof(EVENT_NEW_BUFFER_DATA)) return error(GC_ERR_BUFFER_TOO_SMALL, "event buffer");
     const auto ready = [] { return state.killed || !state.output.empty() || !state.registered; };
+    // Notify under the fixture mutex: EventKill cannot acquire it until the
+    // native wait atomically releases it. No scheduling delay is assumed.
+    if (boundary_hook) boundary_hook("EventGetDataWaiting", false, boundary_context);
     if (timeout == GENTL_INFINITE) state.cv.wait(lock, ready);
     else if (!state.cv.wait_for(lock, std::chrono::milliseconds(timeout), ready))
         return error(GC_ERR_TIMEOUT, "no buffer within timeout");

@@ -16,7 +16,52 @@
 #include <type_traits>
 
 namespace gige_mel::gentl {
+#ifdef GIGE_MEL_GENTL_TESTING
+thread_local int construction_allocation = -1;
+void fail_construction_allocation(int index) noexcept { construction_allocation = index; }
+#endif
 namespace {
+
+void construction_checkpoint() {
+#ifdef GIGE_MEL_GENTL_TESTING
+    if (construction_allocation >= 0 && construction_allocation-- == 0) throw std::bad_alloc();
+#endif
+}
+template <class T> struct ConstructionAllocator {
+    using value_type = T;
+    ConstructionAllocator() = default;
+    template <class U> ConstructionAllocator(const ConstructionAllocator<U>&) {}
+    T* allocate(std::size_t n) { construction_checkpoint(); return std::allocator<T>{}.allocate(n); }
+    void deallocate(T* p, std::size_t n) noexcept { std::allocator<T>{}.deallocate(p, n); }
+};
+
+// Sole owner until a fully allocated, inert child can adopt the handle. Inert
+// children have null handles and neither close natives nor decrement counts.
+template <class Close> class NativeOpen {
+public:
+    NativeOpen(Producer& producer, void* handle, const char* name, Close close)
+        : producer_(producer), handle_(handle), name_(name), close_(close) {}
+    ~NativeOpen() {
+        // Unwinding must not allocate diagnostic text (notably under real OOM).
+        if (handle_ && close_(handle_) != G::GC_ERR_SUCCESS) producer_.taint();
+    }
+    void release() noexcept { handle_ = nullptr; }
+    Failure abandon(Failure original) {
+        if (auto failure = cleanup()) original.detail += "; cleanup " + failure->message();
+        return original;
+    }
+private:
+    std::optional<Failure> cleanup() {
+        const auto status = close_(std::exchange(handle_, nullptr));
+        if (status == G::GC_ERR_SUCCESS) return {};
+        producer_.taint();
+        return producer_.failure(name_, status);
+    }
+    Producer& producer_;
+    void* handle_;
+    const char* name_;
+    Close close_;
+};
 
 constexpr std::size_t max_info_bytes = 64 * 1024;
 constexpr std::uint32_t max_entries = 4096;
@@ -281,6 +326,9 @@ bool Producer::has_acquisition() const noexcept { return api_ && api_->DSStartAc
 void Producer::quarantine(std::shared_ptr<void> memory) {
     if (memory) quarantine_.push_back(std::move(memory));
 }
+void Producer::release_quarantine(const std::shared_ptr<void>& memory) {
+    std::erase(quarantine_, memory);
+}
 
 std::vector<Property> Producer::info() {
     std::vector<Property> result;
@@ -305,13 +353,17 @@ Result<std::shared_ptr<System>> Producer::open_system() {
     const auto status = api_->TLOpen(&handle);
     if (status != G::GC_ERR_SUCCESS) return failure("TLOpen", status);
     if (!handle) return refuse(ErrorCode::io_error, "TLOpen", "succeeded with a null handle");
+    NativeOpen owner(*this, handle, "TLClose", api_->TLClose);
     try {
-        std::shared_ptr<System> system(new System(shared_from_this(), handle));
+        construction_checkpoint();
+        std::shared_ptr<System> system(new System(shared_from_this(), nullptr),
+                                      std::default_delete<System>{}, ConstructionAllocator<System>{});
+        system->handle_ = handle;
         ++systems_;
+        owner.release();
         return system;
     } catch (...) {
-        api_->TLClose(handle);
-        return refuse(ErrorCode::resource_exhausted, "TLOpen", "allocation failed; handle closed");
+        return owner.abandon(refuse(ErrorCode::resource_exhausted, "TLOpen", "allocation failed"));
     }
 }
 
@@ -405,7 +457,7 @@ System::System(std::shared_ptr<Producer> producer, void* handle)
 // The parent's open-child count is released exactly once: by a successful
 // close() or, failing that, by the destructor's best-effort native close.
 System::~System() {
-    if (closed_) return;
+    if (closed_ || !handle_) return;
     if (producer_->api().TLClose(handle_) != G::GC_ERR_SUCCESS) producer_->taint(); // children own us
     --producer_->systems_;
 }
@@ -489,13 +541,17 @@ Result<std::shared_ptr<Interface>> System::open_interface(std::string_view id) {
     const auto status = producer_->api().TLOpenInterface(handle_, exact.c_str(), &handle);
     if (status != G::GC_ERR_SUCCESS) return producer_->failure("TLOpenInterface", status);
     if (!handle) return refuse(ErrorCode::io_error, "TLOpenInterface", "succeeded with a null handle");
+    NativeOpen owner(*producer_, handle, "IFClose", producer_->api().IFClose);
     try {
-        std::shared_ptr<Interface> result(new Interface(shared_from_this(), handle, exact));
+        construction_checkpoint();
+        std::shared_ptr<Interface> result(new Interface(shared_from_this(), nullptr, exact),
+                                         std::default_delete<Interface>{}, ConstructionAllocator<Interface>{});
+        result->handle_ = handle;
         ++interfaces_;
+        owner.release();
         return result;
     } catch (...) {
-        producer_->api().IFClose(handle);
-        return refuse(ErrorCode::resource_exhausted, "TLOpenInterface", "allocation failed; handle closed");
+        return owner.abandon(refuse(ErrorCode::resource_exhausted, "TLOpenInterface", "allocation failed"));
     }
 }
 // ---- Interface --------------------------------------------------------------
@@ -504,7 +560,7 @@ Interface::Interface(std::shared_ptr<System> system, void* handle, std::string i
     : system_(std::move(system)), handle_(handle), id_(std::move(id)) {}
 
 Interface::~Interface() {
-    if (closed_) return;
+    if (closed_ || !handle_) return;
     if (system_->producer_->api().IFClose(handle_) != G::GC_ERR_SUCCESS) system_->producer_->taint();
     --system_->interfaces_;
 }
@@ -584,24 +640,21 @@ Result<std::shared_ptr<Device>> Interface::open_device(std::string_view id, Acce
     auto status = producer.api().IFOpenDevice(handle_, exact.c_str(), flags, &device);
     if (status != G::GC_ERR_SUCCESS) return producer.failure("IFOpenDevice", status);
     if (!device) return refuse(ErrorCode::io_error, "IFOpenDevice", "succeeded with a null handle");
-    // Partial open: every later failure closes the opened device first.
-    const auto abandon = [&](Failure failure) {
-        const auto closed = producer.api().DevClose(device);
-        if (closed != G::GC_ERR_SUCCESS) system_->producer_->taint();
-        if (closed != G::GC_ERR_SUCCESS)
-            failure.detail += "; cleanup DevClose returned " + std::string(gc_error_name(closed));
-        return failure;
-    };
+    NativeOpen owner(*system_->producer_, device, "DevClose", producer.api().DevClose);
     void* port = nullptr;
     status = producer.api().DevGetPort(device, &port);
-    if (status != G::GC_ERR_SUCCESS) return abandon(producer.failure("DevGetPort", status));
-    if (!port) return abandon(refuse(ErrorCode::io_error, "DevGetPort", "succeeded with a null port"));
+    if (status != G::GC_ERR_SUCCESS) return owner.abandon(producer.failure("DevGetPort", status));
+    if (!port) return owner.abandon(refuse(ErrorCode::io_error, "DevGetPort", "succeeded with a null port"));
     try {
-        std::shared_ptr<Device> result(new Device(shared_from_this(), device, port, exact));
+        construction_checkpoint();
+        std::shared_ptr<Device> result(new Device(shared_from_this(), nullptr, port, exact),
+                                      std::default_delete<Device>{}, ConstructionAllocator<Device>{});
+        result->handle_ = device;
         ++devices_;
+        owner.release();
         return result;
     } catch (...) {
-        return abandon(refuse(ErrorCode::resource_exhausted, "IFOpenDevice", "allocation failed"));
+        return owner.abandon(refuse(ErrorCode::resource_exhausted, "IFOpenDevice", "allocation failed"));
     }
 }
 // ---- Device -----------------------------------------------------------------
@@ -611,7 +664,7 @@ Device::Device(std::shared_ptr<Interface> interface, void* device, void* port, s
       id_(std::move(id)) {}
 
 Device::~Device() {
-    if (closed_) return;
+    if (closed_ || !handle_) return;
     if (producer_->api().DevClose(handle_) != G::GC_ERR_SUCCESS) producer_->taint();
     --interface_->devices_;
 }
@@ -853,13 +906,17 @@ Result<std::shared_ptr<Stream>> Device::open_stream(std::string_view id, StreamO
     const auto status = producer_->api().DevOpenDataStream(handle_, exact.c_str(), &handle);
     if (status != G::GC_ERR_SUCCESS) return producer_->failure("DevOpenDataStream", status);
     if (!handle) return refuse(ErrorCode::io_error, "DevOpenDataStream", "succeeded with a null handle");
+    NativeOpen owner(*producer_, handle, "DSClose", producer_->api().DSClose);
     try {
-        std::shared_ptr<Stream> stream(new Stream(shared_from_this(), handle, options));
+        construction_checkpoint();
+        std::shared_ptr<Stream> stream(new Stream(shared_from_this(), nullptr, options),
+                                      std::default_delete<Stream>{}, ConstructionAllocator<Stream>{});
+        stream->handle_ = handle;
         ++streams_;
+        owner.release();
         return stream;
     } catch (...) {
-        producer_->api().DSClose(handle);
-        return refuse(ErrorCode::resource_exhausted, "DevOpenDataStream", "allocation failed; stream closed");
+        return owner.abandon(refuse(ErrorCode::resource_exhausted, "DevOpenDataStream", "allocation failed"));
     }
 }
 
@@ -884,9 +941,9 @@ Stream::Stream(std::shared_ptr<Device> device, void* handle, Device::StreamOptio
     : device_(std::move(device)), producer_(device_->producer_), handle_(handle), options_(options) {}
 
 Stream::~Stream() {
+    if (!handle_) return;
+    (void)close();
     if (!closed_) {
-        (void)teardown();
-        if (producer_->api().DSClose(handle_) != G::GC_ERR_SUCCESS) producer_->taint();
         std::lock_guard lock(device_->mutex_);
         --device_->streams_;
     }
@@ -917,9 +974,12 @@ StreamCounters Stream::counters() const {
 }
 
 void Stream::request_stop() noexcept {
-    stop_requested_.store(true);
     std::lock_guard lock(event_mutex_);
-    if (event_) producer_->api().EventKill(event_); // wakes a blocked EventGetData
+    stop_requested_.store(true);
+    if (lifecycle_ == Lifecycle::starting || lifecycle_ == Lifecycle::running)
+        lifecycle_ = Lifecycle::stopping;
+    if (event_ && !event_retirement_attempted_)
+        producer_->api().EventKill(event_); // wakes a blocked EventGetData
 }
 namespace {
 // Fixed-size typed query with declared-datatype and size verification.
@@ -944,6 +1004,22 @@ Status Stream::start() {
         if (lease.use_count() > 1)
             return refuse(ErrorCode::resource_exhausted, "DSStartAcquisition",
                           "a frame lease from an earlier run is still held; release it before restarting");
+    if (teardown_failure_)
+        return refuse(ErrorCode::invalid_state, "DSStartAcquisition", "earlier teardown failed; close this stream");
+    {
+        std::lock_guard lock(event_mutex_);
+        stop_requested_.store(false);
+        lifecycle_ = Lifecycle::starting;
+        event_retirement_attempted_ = false;
+    }
+    teardown_done_ = false;
+    const auto abort = [&](Failure failure) -> Status {
+        if (auto cleaned = teardown(); !cleaned) failure.detail += "; cleanup: " + cleaned.error().message();
+        return failure;
+    };
+    const auto cancellation = [&] {
+        return abort(refuse(ErrorCode::stopped, "DSStartAcquisition", "stop requested during startup"));
+    };
     const auto& api = producer_->api();
     const auto info = [&](G::STREAM_INFO_CMD command) {
         return [&, command](auto* type, void* buffer, std::size_t* size) {
@@ -952,21 +1028,22 @@ Status Stream::start() {
     };
     auto defines = typed<::bool8_t>(*producer_, "DSGetInfo(DEFINES_PAYLOADSIZE)", G::INFO_DATATYPE_BOOL8,
                                      info(G::STREAM_INFO_DEFINES_PAYLOADSIZE));
-    if (!defines) return defines.error();
+    if (!defines) return abort(defines.error());
     if (!defines.value())
-        return refuse(ErrorCode::unsupported, "DSGetInfo", "payload size is defined only by the remote device's "
-                      "GenApi PayloadSize feature, which this foundation does not evaluate");
+        return abort(refuse(ErrorCode::unsupported, "DSGetInfo", "payload size is defined only by the remote device's "
+                      "GenApi PayloadSize feature, which this foundation does not evaluate"));
     auto payload = typed<std::size_t>(*producer_, "DSGetInfo(PAYLOAD_SIZE)", G::INFO_DATATYPE_SIZET,
                                       info(G::STREAM_INFO_PAYLOAD_SIZE));
-    if (!payload) return payload.error();
+    if (!payload) return abort(payload.error());
     const auto bytes = payload.value();
     if (bytes == 0 || bytes > options_.max_payload_bytes)
-        return refuse(ErrorCode::resource_exhausted, "DSGetInfo", "payload size " + number(bytes) +
-                      " is outside 1.." + number(options_.max_payload_bytes));
+        return abort(refuse(ErrorCode::resource_exhausted, "DSGetInfo", "payload size " + number(bytes) +
+                      " is outside 1.." + number(options_.max_payload_bytes)));
     // Announced plus lease memory, bounded before any allocation.
     if (options_.buffers > options_.max_total_bytes / bytes / 2)
-        return refuse(ErrorCode::resource_exhausted, "DSAnnounceBuffer", number(options_.buffers) +
-                      " buffers of " + number(bytes) + " bytes (x2 for leases) exceed " + number(options_.max_total_bytes));
+        return abort(refuse(ErrorCode::resource_exhausted, "DSAnnounceBuffer", number(options_.buffers) +
+                      " buffers of " + number(bytes) + " bytes (x2 for leases) exceed " + number(options_.max_total_bytes)));
+    if (stop_requested_.load()) return cancellation();
     try {
         leases_.clear();
         for (std::size_t i = 0; i < options_.buffers; ++i) {
@@ -978,37 +1055,42 @@ Status Stream::start() {
     } catch (const std::bad_alloc&) {
         slots_.clear();
         leases_.clear();
-        return refuse(ErrorCode::resource_exhausted, "DSAnnounceBuffer", "host buffer allocation failed");
+        return abort(refuse(ErrorCode::resource_exhausted, "DSAnnounceBuffer", "host buffer allocation failed"));
     }
-    const auto abort = [&](Failure failure) {
-        if (auto cleaned = teardown(); !cleaned) failure.detail += "; cleanup: " + cleaned.error().message();
-        return failure;
-    };
     for (auto& slot : slots_) {
+        if (stop_requested_.load()) return cancellation();
         const auto status = api.DSAnnounceBuffer(handle_, slot->memory->data(), slot->memory->size(), slot.get(),
                                                  &slot->buffer);
         if (status != G::GC_ERR_SUCCESS) return abort(producer_->failure("DSAnnounceBuffer", status));
         slot->announced = true;
     }
     for (auto& slot : slots_) {
+        if (stop_requested_.load()) return cancellation();
         const auto status = api.DSQueueBuffer(handle_, slot->buffer);
         if (status != G::GC_ERR_SUCCESS) return abort(producer_->failure("DSQueueBuffer", status));
     }
-    G::GC_ERROR registered = G::GC_ERR_SUCCESS;
+    if (stop_requested_.load()) return cancellation();
+    void* event = nullptr;
+    const auto registered = api.GCRegisterEvent(handle_, G::EVENT_NEW_BUFFER, &event);
     {
         std::lock_guard lock(event_mutex_);
-        void* event = nullptr;
-        registered = api.GCRegisterEvent(handle_, G::EVENT_NEW_BUFFER, &event);
         if (registered == G::GC_ERR_SUCCESS) event_ = event;
     }
     if (registered != G::GC_ERR_SUCCESS) return abort(producer_->failure("GCRegisterEvent(NEW_BUFFER)", registered));
-    stop_requested_.store(false);
+    if (stop_requested_.load()) return cancellation();
     // Even a failed start is followed by DSStopAcquisition in teardown().
     engine_attempted_ = true;
     const auto status = api.DSStartAcquisition(handle_, G::ACQ_START_FLAGS_DEFAULT, GENTL_INFINITE);
     if (status != G::GC_ERR_SUCCESS) return abort(producer_->failure("DSStartAcquisition", status));
     running_ = true;
-    return {};
+    {
+        std::lock_guard lock(event_mutex_);
+        if (!stop_requested_.load()) {
+            lifecycle_ = Lifecycle::running;
+            return {};
+        }
+    }
+    return cancellation();
 }
 Result<Frame> Stream::wait(std::chrono::milliseconds timeout) {
     if (!running_) return refuse(ErrorCode::stopped, "EventGetData", "stream is not started");
@@ -1087,18 +1169,40 @@ FrameFacts Stream::read_facts(const Slot& slot) {
     field(facts.timestamp_ns, G::BUFFER_INFO_TIMESTAMP_NS, G::INFO_DATATYPE_UINT64, "BUFFER_INFO_TIMESTAMP_NS");
     return facts;
 }
-// Ordered, idempotent release of everything start() acquired. Each step runs
-// even if an earlier one failed; the first failure is reported.
+// Each native release is attempted once. Failures retain their ownership state
+// until DSClose conclusively releases the stream, or quarantine lasts forever.
 Status Stream::teardown() {
+    if (teardown_done_) {
+        if (teardown_failure_) return *teardown_failure_;
+        return {};
+    }
+    teardown_done_ = true;
+    {
+        std::lock_guard lock(event_mutex_);
+        lifecycle_ = Lifecycle::stopping;
+    }
     const auto& api = producer_->api();
-    std::optional<Failure> first;
     const auto record = [&](std::string_view function, G::GC_ERROR status) {
-        if (status != G::GC_ERR_SUCCESS && !first) first = producer_->failure(function, status);
+        if (status == G::GC_ERR_SUCCESS) return;
+        auto failure = producer_->failure(function, status);
+        if (!teardown_failure_) teardown_failure_ = std::move(failure);
+        else teardown_failure_->detail += "; cleanup: " + failure.message();
     };
     if (engine_attempted_) {
         const auto status = api.DSStopAcquisition(handle_, G::ACQ_STOP_FLAGS_KILL);
-        if (running_) record("DSStopAcquisition", status); // a never-started engine may reject stop
-        engine_attempted_ = false;
+        bool stopped = status == G::GC_ERR_SUCCESS;
+        // A rejected start may have left no acquisition to stop. Only an
+        // explicit not-grabbing readback resolves that otherwise uncertain case.
+        if (!stopped && !running_) {
+            const auto original = producer_->failure("DSStopAcquisition", status);
+            auto grabbing = typed<::bool8_t>(*producer_, "DSGetInfo(IS_GRABBING)", G::INFO_DATATYPE_BOOL8,
+                [&](auto* type, void* data, auto* size) {
+                    return api.DSGetInfo(handle_, G::STREAM_INFO_IS_GRABBING, type, data, size);
+                });
+            stopped = grabbing && !grabbing.value();
+            if (!stopped) teardown_failure_ = original;
+        } else record("DSStopAcquisition", status);
+        if (stopped) engine_attempted_ = false;
     }
     running_ = false;
     if (!slots_.empty()) record("DSFlushQueue", api.DSFlushQueue(handle_, G::ACQ_QUEUE_ALL_DISCARD));
@@ -1109,33 +1213,53 @@ Status Stream::teardown() {
         const auto status = api.DSRevokeBuffer(handle_, slot->buffer, &memory, &user);
         if (status == G::GC_ERR_SUCCESS) { slot->announced = false; continue; }
         record("DSRevokeBuffer", status);
-        producer_->quarantine(slot->memory); // the producer may still reference it
-        producer_->taint();
+        // Retain Slot as well: its address is the announcement's user pointer.
+        producer_->quarantine(slot);
     }
-    slots_.clear();
     {
         std::lock_guard lock(event_mutex_);
-        if (event_) {
-            record("GCUnregisterEvent", api.GCUnregisterEvent(handle_, G::EVENT_NEW_BUFFER));
-            event_ = nullptr;
+        if (event_ && !event_retirement_attempted_) {
+            event_retirement_attempted_ = true;
+            const auto status = api.GCUnregisterEvent(handle_, G::EVENT_NEW_BUFFER);
+            record("GCUnregisterEvent", status);
+            if (status == G::GC_ERR_SUCCESS) event_ = nullptr;
         }
+        lifecycle_ = teardown_failure_ ? Lifecycle::stopping : Lifecycle::idle;
     }
-    if (first) return *first;
+    if (!teardown_failure_) slots_.clear();
+    if (teardown_failure_) return *teardown_failure_;
     return {};
 }
 
 Status Stream::stop() {
     if (closed_) return {};
-    stop_requested_.store(true);
+    request_stop();
     return teardown();
 }
 
 Status Stream::close() {
+    if (close_failure_) return *close_failure_;
     if (closed_) return {};
     auto stopped = stop();
     const auto status = producer_->api().DSClose(handle_);
-    if (status != G::GC_ERR_SUCCESS) return producer_->failure("DSClose", status);
+    if (status != G::GC_ERR_SUCCESS) {
+        auto failure = producer_->failure("DSClose", status);
+        if (!stopped) {
+            close_failure_ = stopped.error();
+            close_failure_->detail += "; cleanup: " + failure.message();
+        } else close_failure_ = std::move(failure);
+        producer_->taint(); // no retry of an ambiguously closed native handle
+        return *close_failure_;
+    }
     closed_ = true;
+    engine_attempted_ = false;
+    for (const auto& slot : slots_) producer_->release_quarantine(slot);
+    slots_.clear();
+    {
+        std::lock_guard lock(event_mutex_);
+        event_ = nullptr;
+        lifecycle_ = Lifecycle::retired;
+    }
     {
         std::lock_guard lock(device_->mutex_);
         --device_->streams_;

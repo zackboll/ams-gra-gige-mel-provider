@@ -27,6 +27,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <utility>
 #include <vector>
 
 namespace gige_mel::gentl {
@@ -68,8 +69,13 @@ using Status = Result<void>;
 
 std::string_view gc_error_name(std::int32_t code) noexcept;
 ErrorCode translate(std::int32_t code) noexcept;
-// Producers whose GCCloseLib failed and were deliberately kept mapped.
+// Producers with unresolved native ownership, deliberately kept mapped.
 std::size_t retained_producers() noexcept;
+
+#ifdef GIGE_MEL_GENTL_TESTING
+// Scoped construction-allocation injection, available only in test builds.
+void fail_construction_allocation(int index) noexcept;
+#endif
 
 // One independently queried producer fact; a failed query stays a failure.
 struct Property {
@@ -114,12 +120,14 @@ public:
     Result<std::shared_ptr<System>> open_system();  // TLOpen
     // GCCloseLib; refused (no native call) while a system is open. The
     // library is unmapped when the last owner releases it, and only when
-    // GCCloseLib succeeded and no native close/revoke failed before it.
+    // GCCloseLib succeeded and no native ownership remains unresolved.
     Status close();
-    // Memory whose announcement could not be revoked: freed only after dlclose.
+    // Uncertain announcements remain pinned until conclusive stream close;
+    // otherwise they are retained with the mapping for the process lifetime.
     void quarantine(std::shared_ptr<void> memory);
-    // Any failed native close/revoke means the producer may still own live
-    // handles or threads: the library is then never unmapped (see ~Producer).
+    void release_quarantine(const std::shared_ptr<void>& memory);
+    // An unresolved native close means the producer may still own live handles
+    // or threads: the library is then never unmapped (see ~Producer).
     void taint() noexcept { tainted_ = true; }
     [[nodiscard]] bool tainted() const noexcept { return tainted_; }
     [[nodiscard]] std::size_t quarantined() const noexcept { return quarantine_.size(); }
@@ -274,8 +282,17 @@ class Frame {
 public:
     Frame(FrameFacts facts, std::span<const std::byte> bytes, std::shared_ptr<const void> owner) noexcept
         : facts_(std::move(facts)), bytes_(bytes), owner_(std::move(owner)) {}
-    Frame(Frame&&) noexcept = default;
-    Frame& operator=(Frame&&) noexcept = default;
+    Frame(Frame&& other) noexcept
+        : facts_(std::move(other.facts_)), bytes_(std::exchange(other.bytes_, {})),
+          owner_(std::move(other.owner_)) {}
+    Frame& operator=(Frame&& other) noexcept {
+        if (this != &other) {
+            owner_ = std::move(other.owner_);
+            facts_ = std::move(other.facts_);
+            bytes_ = std::exchange(other.bytes_, {});
+        }
+        return *this;
+    }
     [[nodiscard]] const FrameFacts& facts() const noexcept { return facts_; }
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
 private:
@@ -301,7 +318,9 @@ public:
     std::vector<Property> info(); // DSGetInfo
     // Requires STREAM_INFO_DEFINES_PAYLOADSIZE (no GenApi PayloadSize here).
     // Announces consumer memory, queues, registers NEW_BUFFER, starts. Refused
-    // while an earlier lease is held. Failure revokes everything announced.
+    // while an earlier lease is held. Cancellation is latched from admission
+    // through startup; the control thread unwinds it before returning stopped.
+    // A later start is a new admission and resets cancellation, never mid-start.
     Status start();
     Result<Frame> wait(std::chrono::milliseconds timeout);
     void request_stop() noexcept;
@@ -324,8 +343,14 @@ private:
     std::vector<std::shared_ptr<std::vector<std::byte>>> leases_;
     std::mutex event_mutex_;
     void* event_{nullptr};
+    // Cancellation is reset only when admitting a new start, under event_mutex_.
+    // A request admitted while starting is never reset by that start.
+    enum class Lifecycle { idle, starting, running, stopping, retired };
+    Lifecycle lifecycle_{Lifecycle::idle}; // protected by event_mutex_
     std::atomic<bool> stop_requested_{false};
     bool running_{false}, closed_{false}, engine_attempted_{false};
+    bool teardown_done_{false}, event_retirement_attempted_{false};
+    std::optional<Failure> teardown_failure_, close_failure_;
     mutable std::mutex counters_mutex_;
     StreamCounters counters_;
 };
