@@ -1,6 +1,9 @@
 #include <gige_mel/provider.hpp>
 #include "provider_internal.hpp"
 #include "config_parser.hpp"
+#if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
+#include "provider_test_seams.hpp"
+#endif
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
@@ -56,6 +59,20 @@ constexpr std::uint32_t next_counter(std::uint32_t value) noexcept {
     return static_cast<std::uint32_t>(value + 1U);
 }
 static_assert(next_counter(0) == 1 && next_counter(std::numeric_limits<std::uint32_t>::max()) == 0);
+
+// GIGE-MEL-042-R1 synchronization points for the uninstalled test build only.
+// The installed provider compiles them to nothing.
+#if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
+thread_local test_seams::UnsupportedStatusHook unsupported_status_hook = nullptr;
+thread_local void* unsupported_status_hook_context = nullptr;
+#define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) \
+    do { \
+        if (unsupported_status_hook) \
+            unsupported_status_hook(test_seams::UnsupportedStatusPoint::point, unsupported_status_hook_context); \
+    } while (false)
+#else
+#define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) do {} while (false)
+#endif
 
 template <class T> mel::RequestFor<T> ready(T value) {
     std::promise<mel::ErrorOr<std::shared_ptr<T>>> promise;
@@ -715,6 +732,15 @@ protected:
             if (is_detached() || (admission && !admission->load())) return;
             ++active_metadata_callbacks_;
         }
+        // From here the reservation is owned by this scope: every exit, including
+        // any exception, releases it and wakes a draining detach.
+        struct Release {
+            ChannelCore& channel;
+            ~Release() {
+                { std::lock_guard lock(channel.callback_mutex_); --channel.active_metadata_callbacks_; }
+                channel.callback_cv_.notify_all();
+            }
+        } reservation{*this};
         CallbackGuard guard(runtime_.get());
         try { callback(*this, &message); }
         catch (...) {
@@ -722,14 +748,7 @@ protected:
             try { runtime_->report(admission ? "Health metadata callback threw; periodic reporting continues" :
                 "metadata callback threw; successful operation remains committed"); } catch (...) {}
         }
-        { std::lock_guard lock(callback_mutex_); --active_metadata_callbacks_; }
-        callback_cv_.notify_all();
     }
-    template <class T> mel::RequestFor<T> unsupported(const char* name) {
-        return failed<T>(is_detached() ? mel::ErrorCode::InvalidState : mel::ErrorCode::Unsupported,
-                         std::string(name) + ": not available in the experimental image-stream profile");
-    }
-
     // Callback-free shared transaction. Caller holds operations, has admitted
     // this submission and pins Control/channel through result and dispatch.
     ConfigurationOutcome configure_locked(const backend::CameraConfiguration& requested, bool profile_valid = true) {
@@ -986,8 +1005,6 @@ private:
 
 // Every upstream pure virtual is implemented. Unsupported surfaces return the
 // real MEL errors, never fabricated success or an unfulfilled promise.
-#define GIGE_UNSUPPORTED_SEND(Request, Response) \
-    mel::RequestFor<Response> send(Request) override { return unsupported<Response>(#Request); }
 #define GIGE_UNSUPPORTED_CALLBACK(Message) \
     ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const Message* const)>) override { \
         return ir::Return::NotSupported; \
@@ -1254,11 +1271,30 @@ public:
         on_command_status(outcome.status(command.getCommandID()));
         return result;
     }
-    GIGE_UNSUPPORTED_SEND(ir::CalibrationConfigurationCmd, mel::CalibrationConfiguration)
-    GIGE_UNSUPPORTED_SEND(ir::CalibrationStatusCmd, mel::CalibrationStatus)
-    GIGE_UNSUPPORTED_SEND(ir::CameraProtectCmd, ir::CameraProtectCmdResp)
-    GIGE_UNSUPPORTED_SEND(ir::EraseCommand, ir::EraseCommandType)
-    GIGE_UNSUPPORTED_SEND(ir::SystemTrackDataResponse, ir::CommandStatus)
+    // GIGE-MEL-042: unsupported, unadvertised families. Each returns its typed
+    // Unsupported error and, once admitted, one correlated terminal rejection.
+    mel::RequestFor<mel::CalibrationConfiguration> send(ir::CalibrationConfigurationCmd command) override {
+        return reject_unsupported<mel::CalibrationConfiguration>(command,
+            "CalibrationConfigurationCmd is unsupported: calibration configuration is not available in the experimental image-stream profile");
+    }
+    mel::RequestFor<mel::CalibrationStatus> send(ir::CalibrationStatusCmd command) override {
+        return reject_unsupported<mel::CalibrationStatus>(command,
+            "CalibrationStatusCmd is unsupported: calibration status is not available in the experimental image-stream profile");
+    }
+    mel::RequestFor<ir::CameraProtectCmdResp> send(ir::CameraProtectCmd command) override {
+        return reject_unsupported<ir::CameraProtectCmdResp>(command,
+            "CameraProtectCmd is unsupported: camera protection is not available in the experimental image-stream profile");
+    }
+    mel::RequestFor<ir::EraseCommandType> send(ir::EraseCommand command) override {
+        return reject_unsupported<ir::EraseCommandType>(command,
+            "EraseCommand is unsupported: erase and zeroize are not available in the experimental image-stream profile");
+    }
+    // The upstream response type is CommandStatus; the future still carries the
+    // Unsupported error, never a successful (rejection-valued) payload.
+    mel::RequestFor<ir::CommandStatus> send(ir::SystemTrackDataResponse command) override {
+        return reject_unsupported<ir::CommandStatus>(command,
+            "SystemTrackDataResponse is unsupported: system track data input is not available in the experimental image-stream profile");
+    }
     mel::RequestFor<ir::MFA_Mode> send(ir::ModeCmd command) override {
         // Same admission precedence as configuration/BIT: no recursive status
         // dispatch or operation-lock wait from any provider callback thread.
@@ -1335,6 +1371,43 @@ public:
         });
     }
 private:
+    // Established C2 admission precedence (as ConfigSet/BIT/ModeCmd): reject any
+    // provider-callback context before locking or status dispatch, pin Control
+    // and this channel, then linearize with detach under operations. Admission
+    // touches no backend, configuration, acquisition, BIT, navigation or Health
+    // state.
+    //
+    // GIGE-MEL-042-R1: the registered CommandStatus callback is snapshotted and
+    // reserved (admit_callback) while this request is still admitted under
+    // operations. Detach sets detached_ and drains reservations under the same
+    // lock, so either detach precedes admission (InvalidState, no callback) or
+    // detach waits until this admitted status has been dispatched. The ready
+    // future and status are formed before admission; nothing that can throw
+    // runs between the reservation and invoke, which contains callback
+    // exceptions and always releases the reservation. No provider lock is held
+    // while the consumer callback runs.
+    template <class Response, class Request>
+    mel::RequestFor<Response> reject_unsupported(const Request& request, const char* description) {
+        if (in_provider_callback())
+            return failed<Response>(mel::ErrorCode::InvalidState, "submit C2 commands outside provider callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<Response>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        const auto outcome = ConfigurationOutcome::failure({backend::ErrorCode::unsupported, description});
+        auto result = failed<Response>(map_error(outcome.error->code), outcome.description);
+        const auto status = outcome.status(request.getCommandID());
+        GIGE_MEL_UNSUPPORTED_STATUS_SEAM(before_admission);
+        Callback<ir::CommandStatus> callback;
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached()) return failed<Response>(mel::ErrorCode::InvalidState, "channel is detached");
+            { std::lock_guard lock(callback_mutex_); callback = status_callback_; }
+            admit_callback(callback); // Last throwing step; reserves only a registered callback.
+        }
+        GIGE_MEL_UNSUPPORTED_STATUS_SEAM(after_reservation);
+        invoke(callback, status, nullptr, true);
+        return result;
+    }
     template <class T, class Prepare>
     ir::Return register_initial(Callback<T>& slot, Callback<T> callback, Prepare prepare) {
         if (in_provider_callback() || is_detached()) return ir::Return::Fail;
@@ -1544,7 +1617,6 @@ private:
     std::shared_ptr<Publisher> publisher_; // writes under callback_mutex AND operations
     std::thread worker_; // operations; defensive destructor on its own worker
 };
-#undef GIGE_UNSUPPORTED_SEND
 #undef GIGE_UNSUPPORTED_CALLBACK
 
 class ControlImpl final : public ir::Control {
@@ -1658,6 +1730,15 @@ public:
 };
 
 } // namespace
+
+#if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
+namespace test_seams {
+void set_unsupported_status_hook(UnsupportedStatusHook hook, void* context) noexcept {
+    unsupported_status_hook = hook;
+    unsupported_status_hook_context = context;
+}
+} // namespace test_seams
+#endif
 
 std::shared_ptr<API_Manager> make_api_manager(ProviderSettings settings, std::shared_ptr<backend::ICameraBackend> backend) {
     if (!backend || settings.instance.empty() || settings.device_id.empty() || settings.maximum_registered_buffers == 0 ||

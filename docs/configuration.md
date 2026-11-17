@@ -108,16 +108,66 @@ restart or live reallocation is added.
 ## Status scope and callback contract
 
 C2 discovery and per-channel capabilities advertise CommandStatus independently
-of registration. **C2 ConfigSet, C2 CameraCommand and the
-[software BIT command](software-bit.md)** emit it. Image-origin
-CameraCommand emits its existing Image response, not status on an arbitrary C2.
-ConfigSet never emits Image CameraCommandResp. Communications/keep-alive retain
-their reply mechanisms; other unsupported commands remain unsupported.
+of registration. The following emit it:
+
+* **C2 ConfigSet and C2 CameraCommand;**
+* the [software BIT command](software-bit.md) and the
+  [ModeCmd subset](mode-command.md);
+* since GIGE-MEL-042, the **five unsupported C2 commands**: a rejection only,
+  described below.
+
+Image-origin CameraCommand emits its existing Image response, not status on an
+arbitrary C2. ConfigSet never emits Image CameraCommandResp. Communications and
+keep-alive keep their reply mechanisms.
 
 For ordinary attached use with a registered callback there is one terminal
-Accepted/Rejected event per supported request. No Received event, queue or
+Accepted/Rejected event per admitted request. No Received event, queue or
 worker is added. In this synchronous profile acceptance is decided after apply
 and readback; this does not redefine Accepted universally as execution completed.
+
+### Supported execution versus rejected unsupported requests
+
+Supported commands (ConfigSet, CameraCommand, BIT_Command, ModeCmd) **execute**
+or validate and then report Accepted or Rejected.
+
+The five unsupported commands are rejected without executing anything:
+`CalibrationConfigurationCmd`, `CalibrationStatusCmd`, `CameraProtectCmd`,
+`EraseCommand` and `SystemTrackDataResponse`. They never execute, never touch
+the backend and never report Accepted. An admitted request returns a ready
+`ErrorCode::Unsupported` future of its exact upstream type. With a usable
+registered callback it also delivers one terminal status:
+
+| Field | Value |
+| --- | --- |
+| `commandID` | The request's exact `getCommandID()`, including `0` and `UINT32_MAX`; no deduplication |
+| `state` | `CommandState::Rejected` |
+| `reasonID` | `CannotComply::CapabilityUnavailable` (the existing `unsupported` mapping) |
+| `reasonDescription` | Identical to the future's error description, naming the operation |
+
+`SystemTrackDataResponse` keeps `RequestFor<CommandStatus>`, and its future
+still carries the Unsupported error, never a successful status payload.
+
+Admission follows the same precedence as the supported commands. A call from
+any provider callback, a closing Control or a detached channel returns
+`InvalidState` before admission and produces no status. Rejection does not
+mutate configuration, acquisition, BIT, navigation, Health or diagnostics.
+
+These five commands reserve their registered callback **while still admitted
+under the operation mutex**, and release the lock before invoking it. This is
+the GIGE-MEL-042-R1 correction. A concurrent detach is therefore ordered
+strictly before or after admission:
+
+* **Detach first:** the request returns `InvalidState` and no status.
+* **Admission first:** detach waits until the request's single rejection
+  status has been delivered.
+
+An admitted unsupported request with a registered callback is never left
+without its status.
+
+Upstream does not require status for these optional families. This is a
+**provider-defined consistency enhancement**. It does not advertise or
+implement calibration, camera protection, erase or tracking. See the
+[GIGE-MEL-042 design](tasks/GIGE-MEL-042-design.md).
 
 C2 CameraCommand delivers Image response metadata first (when there is a
 completed response object), then C2 status. Each dispatch follows its channel's
@@ -129,14 +179,18 @@ Strong Control/channel references survive result preparation and dispatch.
 The first valid registration succeeds, empty returns BadPointer, duplicate returns
 Fail, and registration from any provider callback or on a detached channel fails.
 Mutation from **any provider callback, including another provider instance**, is
-rejected before parsing or operation locking. Nested rejected configuration sends
-emit no status, preventing recursive rejection callbacks. Ordinary commands work
+rejected before parsing or operation locking. The same applies to the five
+unsupported commands. Nested rejected sends emit no status, preventing recursive
+rejection callbacks. Ordinary commands work
 again after callbacks return or throw.
 
-Detach closes callback admission and drains already admitted callbacks. A status
+Detach closes callback admission and drains already admitted callbacks. For the
+supported commands (ConfigSet, CameraCommand, BIT_Command, ModeCmd), a status
 not yet admitted may be suppressed by concurrent detach. No callback admission is
-reserved before acquiring the operation mutex. **The request future is authoritative
-across detach races; unconditional status delivery is not promised.**
+reserved before acquiring the operation mutex. **For those commands the request
+future is authoritative across detach races; unconditional status delivery is not
+promised.** The five unsupported commands give the stronger guarantee described
+above.
 
 ## Private parser and offline verification
 

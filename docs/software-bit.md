@@ -11,8 +11,8 @@ C2 implements `send(BIT_Command)`, `mel::BIT_Configuration` registration and
 `BITConfiguration` and `BITStatus` in addition to existing communications and
 CommandStatus capabilities. Health adds `BITStatus` to communications, MFAStatus
 and MFAStatusDetailed. Image/C2/Health identities and factory signatures are
-unchanged. Other unsupported overloads, including ModeCmd and navigation, retain
-their existing behavior.
+unchanged. Other overloads retain their own documented behavior; the five unsupported
+C2 commands publish only a rejection status ([GIGE-MEL-042](tasks/GIGE-MEL-042-design.md)).
 
 There is exactly one test, **Provider observed-state check**:
 

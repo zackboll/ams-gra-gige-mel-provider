@@ -1,5 +1,14 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-042 adds no MEL capability. The five unsupported C2 commands
+(`CalibrationConfigurationCmd`, `CalibrationStatusCmd`, `CameraProtectCmd`,
+`EraseCommand` and `SystemTrackDataResponse`) still return a ready typed
+`Unsupported` future. Once admitted, they now also publish one correlated
+`Rejected`/`CapabilityUnavailable` `CommandStatus`. This is a
+provider-defined consistency enhancement; upstream does not require it. Their
+capabilities remain unimplemented and unadvertised, and the GIGE-MEL-041 Health
+metadata blockers are unchanged. See the [design](tasks/GIGE-MEL-042-design.md).
+
 GIGE-MEL-GENTL-001 evaluates a generic GenTL consumer backend
 ([design](tasks/GIGE-MEL-GENTL-001-design.md)). It adds no MEL surface or
 backend. The recommended next step is GIGE-MEL-GENTL-002 (an internal backend
@@ -236,12 +245,12 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | Request → response | Upstream annotation | Bootstrap | Priority and implementation task |
 | --- | --- | --- | --- |
 | `BIT_Command` → `Return` | Required | Partial: bounded provider-software test ID 1 | [Software BIT profile](software-bit.md); hardware/asynchronous BIT remains future work |
-| `CalibrationConfigurationCmd` → `mel::CalibrationConfiguration` | Optional | Unsupported | P4: return genuine calibration configuration; this is a query, not a generic execute-NUC operation |
-| `CalibrationStatusCmd` → `mel::CalibrationStatus` | Optional | Unsupported | P4: report actual calibration state and progress semantics |
+| `CalibrationConfigurationCmd` → `mel::CalibrationConfiguration` | Optional | Unsupported; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4: return genuine calibration configuration; this is a query, not a generic execute-NUC operation |
+| `CalibrationStatusCmd` → `mel::CalibrationStatus` | Optional | Unsupported; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4: report actual calibration state and progress semantics |
 | `CameraCommand` → `CameraCommandResp` | Required if camera control | Supported for staring Mono8 profile | P0: serialize with Image commands; full snapshot, validation, readback, command correlation, and disabled-stream policy |
-| `CameraProtectCmd` → `CameraProtectCmdResp` | Required if camera protection | Unsupported | P4 if sensor supports it: define safe actuation/state and actual response; never inherit default OK for unsupported hardware |
-| `EraseCommand` → `EraseCommandType` | Optional | Unsupported | P4 only with a defined target and lifecycle semantics |
-| `SystemTrackDataResponse` → `CommandStatus` | Optional | Unsupported | P5 or earlier pointing integration; distinct from the same-named TrackChannel operation |
+| `CameraProtectCmd` → `CameraProtectCmdResp` | Required if camera protection | Unsupported and unadvertised; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4 if sensor supports it: define safe actuation/state and actual response; never inherit default OK for unsupported hardware |
+| `EraseCommand` → `EraseCommandType` | Optional | Unsupported; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4 only with a defined target and lifecycle semantics |
+| `SystemTrackDataResponse` → `CommandStatus` | Optional | Unsupported (the future holds the error, not a status payload); correlated Rejected/CapabilityUnavailable callback status (GIGE-MEL-042) | P5 or earlier pointing integration; distinct from the same-named TrackChannel operation |
 | `ModeCmd` → `MFA_Mode` | Required | Partial: Standby/Unused/default-scan idle acknowledgement or active/faulted Image cleanup | [Bounded contract](mode-command.md); synchronous cancel/join/stop preserves registered and held buffers, configuration and diagnostic history; logical state only, no physical standby/power or scheduling. P1: operational state machine and real task admission/execution/status/cancellation remain required |
 | `ConfigSetCommand` → `Return` | Required | Supported for provider-defined camera schema v1 | [Exact configuration/status profile](configuration.md); other configuration domains remain future work |
 
@@ -250,7 +259,7 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | Callback payload | Upstream annotation | Bootstrap | Priority |
 | --- | --- | --- | --- |
 | `mel::BIT_Configuration` | Required | One observed-state test catalogue | [Software BIT profile](software-bit.md) |
-| `CommandStatus` | Required | Supported for C2 ConfigSet, CameraCommand and the documented BIT_Command/ModeCmd subsets | [Configuration](configuration.md), [software BIT](software-bit.md) and [ModeCmd](mode-command.md) terminal outcomes; other unsupported command overloads produce no status; not complete C2 status coverage |
+| `CommandStatus` | Required | Supported for C2 ConfigSet, CameraCommand and the documented BIT_Command/ModeCmd subsets; terminal Rejected/CapabilityUnavailable for the five unsupported C2 commands (GIGE-MEL-042) | [Configuration](configuration.md#supported-execution-versus-rejected-unsupported-requests), [software BIT](software-bit.md) and [ModeCmd](mode-command.md) terminal outcomes. Every admitted C2 command now produces exactly one terminal status. A rejection status is not a capability claim; the unsupported operations remain unimplemented |
 | `mel::CalibrationConfiguration` | Optional | NotSupported | P4 |
 | `CameraProtectCmdResp` | Required if camera protection | NotSupported | P4 when protection is implemented |
 | `mel::CalibrationStatus` | Optional | NotSupported | P4 |
@@ -326,7 +335,7 @@ The [ChannelCapability][capability] comment says every EOIR MFA has task schedul
 
 | Operation or callback | Upstream annotation | Work required |
 | --- | --- | --- |
-| `send(SystemTrackDataResponse)` → `CommandStatus` | Optional | Feed external system tracks into the actual algorithm |
+| `send(SystemTrackDataResponse)` → `CommandStatus` | Optional | Feed external system tracks into the actual algorithm. (The C2 overload of the same name is rejected as Unsupported; see C2 commands.) |
 | `send(TrackDataUpdate)` → `CommandStatus` | Required if track updates | Define update acceptance, correlation, and stale input handling |
 | `CandidateObjectMessage` callback | Required if candidate detection | Real detector output |
 | `IRSTTrackReport` callback | Required if tracking | Actual track reports with IDs, timing, and coordinates |
