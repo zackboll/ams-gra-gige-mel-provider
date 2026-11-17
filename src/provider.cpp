@@ -1,6 +1,9 @@
 #include <gige_mel/provider.hpp>
 #include "provider_internal.hpp"
 #include "config_parser.hpp"
+#if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
+#include "provider_test_seams.hpp"
+#endif
 
 #include <irmel/library/c2/C2Channel.h>
 #include <irmel/library/image/ImageChannel.h>
@@ -56,6 +59,20 @@ constexpr std::uint32_t next_counter(std::uint32_t value) noexcept {
     return static_cast<std::uint32_t>(value + 1U);
 }
 static_assert(next_counter(0) == 1 && next_counter(std::numeric_limits<std::uint32_t>::max()) == 0);
+
+// GIGE-MEL-042-R1 synchronization points for the uninstalled test build only.
+// The installed provider compiles them to nothing.
+#if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
+thread_local test_seams::UnsupportedStatusHook unsupported_status_hook = nullptr;
+thread_local void* unsupported_status_hook_context = nullptr;
+#define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) \
+    do { \
+        if (unsupported_status_hook) \
+            unsupported_status_hook(test_seams::UnsupportedStatusPoint::point, unsupported_status_hook_context); \
+    } while (false)
+#else
+#define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) do {} while (false)
+#endif
 
 template <class T> mel::RequestFor<T> ready(T value) {
     std::promise<mel::ErrorOr<std::shared_ptr<T>>> promise;
@@ -715,6 +732,15 @@ protected:
             if (is_detached() || (admission && !admission->load())) return;
             ++active_metadata_callbacks_;
         }
+        // From here the reservation is owned by this scope: every exit, including
+        // any exception, releases it and wakes a draining detach.
+        struct Release {
+            ChannelCore& channel;
+            ~Release() {
+                { std::lock_guard lock(channel.callback_mutex_); --channel.active_metadata_callbacks_; }
+                channel.callback_cv_.notify_all();
+            }
+        } reservation{*this};
         CallbackGuard guard(runtime_.get());
         try { callback(*this, &message); }
         catch (...) {
@@ -722,8 +748,6 @@ protected:
             try { runtime_->report(admission ? "Health metadata callback threw; periodic reporting continues" :
                 "metadata callback threw; successful operation remains committed"); } catch (...) {}
         }
-        { std::lock_guard lock(callback_mutex_); --active_metadata_callbacks_; }
-        callback_cv_.notify_all();
     }
     // Callback-free shared transaction. Caller holds operations, has admitted
     // this submission and pins Control/channel through result and dispatch.
@@ -1351,7 +1375,17 @@ private:
     // provider-callback context before locking or status dispatch, pin Control
     // and this channel, then linearize with detach under operations. Admission
     // touches no backend, configuration, acquisition, BIT, navigation or Health
-    // state. The ready future is formed before the status callback runs.
+    // state.
+    //
+    // GIGE-MEL-042-R1: the registered CommandStatus callback is snapshotted and
+    // reserved (admit_callback) while this request is still admitted under
+    // operations. Detach sets detached_ and drains reservations under the same
+    // lock, so either detach precedes admission (InvalidState, no callback) or
+    // detach waits until this admitted status has been dispatched. The ready
+    // future and status are formed before admission; nothing that can throw
+    // runs between the reservation and invoke, which contains callback
+    // exceptions and always releases the reservation. No provider lock is held
+    // while the consumer callback runs.
     template <class Response, class Request>
     mel::RequestFor<Response> reject_unsupported(const Request& request, const char* description) {
         if (in_provider_callback())
@@ -1359,13 +1393,19 @@ private:
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return failed<Response>(mel::ErrorCode::InvalidState, "control is closing");
         const auto self = shared_from_this();
+        const auto outcome = ConfigurationOutcome::failure({backend::ErrorCode::unsupported, description});
+        auto result = failed<Response>(map_error(outcome.error->code), outcome.description);
+        const auto status = outcome.status(request.getCommandID());
+        GIGE_MEL_UNSUPPORTED_STATUS_SEAM(before_admission);
+        Callback<ir::CommandStatus> callback;
         {
             std::lock_guard operation(runtime_->operations);
             if (is_detached()) return failed<Response>(mel::ErrorCode::InvalidState, "channel is detached");
+            { std::lock_guard lock(callback_mutex_); callback = status_callback_; }
+            admit_callback(callback); // Last throwing step; reserves only a registered callback.
         }
-        const auto outcome = ConfigurationOutcome::failure({backend::ErrorCode::unsupported, description});
-        auto result = failed<Response>(map_error(outcome.error->code), outcome.description);
-        on_command_status(outcome.status(request.getCommandID()));
+        GIGE_MEL_UNSUPPORTED_STATUS_SEAM(after_reservation);
+        invoke(callback, status, nullptr, true);
         return result;
     }
     template <class T, class Prepare>
@@ -1690,6 +1730,15 @@ public:
 };
 
 } // namespace
+
+#if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
+namespace test_seams {
+void set_unsupported_status_hook(UnsupportedStatusHook hook, void* context) noexcept {
+    unsupported_status_hook = hook;
+    unsupported_status_hook_context = context;
+}
+} // namespace test_seams
+#endif
 
 std::shared_ptr<API_Manager> make_api_manager(ProviderSettings settings, std::shared_ptr<backend::ICameraBackend> backend) {
     if (!backend || settings.instance.empty() || settings.device_id.empty() || settings.maximum_registered_buffers == 0 ||

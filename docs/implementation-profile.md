@@ -23,6 +23,13 @@ detached channel gives `InvalidState` and no status. Rejection performs no
 backend I/O and changes no provider state except existing callback-failure
 accounting.
 
+The registered callback is reserved while the request is still admitted under
+the operation mutex and invoked after every lock is released (the GIGE-MEL-042-R1
+correction). A concurrent detach therefore either precedes admission, giving
+`InvalidState` and no status, or waits for that one rejection to be delivered.
+The deterministic `provider_status_admission` CTest proves both orderings. It
+uses an uninstalled, test-only seam build; the installed library is unchanged.
+
 This is a **provider-defined consistency enhancement**, not newly established
 MEL conformance. Calibration, camera protection, erase and system-track input
 remain unimplemented and unadvertised. Their metadata registrations stay

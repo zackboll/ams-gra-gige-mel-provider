@@ -101,13 +101,14 @@ This is the established C2 order, identical to `ConfigSetCommand`,
 | 1 | Calling thread is inside **any** provider callback (same or another manager), or inside a backend navigation submission | `InvalidState`, "submit C2 commands outside provider callbacks" | None |
 | 2 | Control can no longer be pinned (closing or destroyed) | `InvalidState`, "control is closing" | None |
 | 3 | Under `Runtime::operations`: channel detached | `InvalidState`, "channel is detached" | None |
-| 4 | Otherwise **admitted** | `Unsupported` with the exact description below | One terminal rejection, if a callback is registered and callback admission is still open |
+| 4 | Otherwise **admitted**, still under `Runtime::operations` | `Unsupported` with the exact description below | Exactly one terminal rejection whenever a callback is registered at admission (§3.6) |
 
 Step 1 runs before any lock and before the Control pin. A callback therefore
 never waits on the operation mutex and never publishes a status recursively.
-Step 3 takes `operations` only to linearize admission with detach and Control
-destruction, exactly like the supported commands. It does no work while holding
-the lock.
+Step 3 takes `operations` to linearize admission with detach and Control
+destruction, exactly like the supported commands. Under that lock it only
+checks detachment, snapshots the registered callback and reserves it (§3.6).
+It performs no other work there and never runs consumer code there.
 
 **Admission changes compared with the baseline:**
 
@@ -137,7 +138,12 @@ For an admitted request:
    | `reasonID` | `CannotComply::CapabilityUnavailable` |
    | `reasonDescription` | Identical to the future's error description |
 
-3. `on_command_status()` delivers the status through the existing `invoke()`.
+3. Under `operations`, the registered callback is snapshotted and reserved.
+   After the lock is released, the existing `invoke()` delivers the reserved
+   status (§3.6).
+
+Steps 1 and 2 happen before admission, so the future already exists when the
+consumer callback runs.
 
 The status is never `Accepted`, `Received`, `Cancelled`, a progress event or
 a command result.
@@ -177,10 +183,11 @@ These are unchanged and reused:
   diagnostic. It cannot alter the future. This is the only state change an
   unsupported request can cause, and it is the existing documented
   callback-error accounting.
-* **Detach** closes admission under `callback_mutex_` and drains already
-  admitted callbacks. A status not yet admitted may be suppressed by a
-  concurrent detach. The future remains authoritative, and unconditional
-  status delivery is not promised.
+* **Detach** marks the channel detached and drains every reserved callback
+  while it holds `operations`. A request is therefore either rejected before
+  admission (`InvalidState`, no status) or admitted with its callback already
+  reserved. In the second case detach waits until that status has been
+  delivered. An admitted request is never silently suppressed (§3.6).
 * **Lifetime:** a strong Control pin and a channel `shared_from_this` pin cover
   result formation and dispatch, including a callback that drops the last
   external references.
@@ -216,6 +223,64 @@ The `CalibrationConfiguration`, `CalibrationStatus` and `CameraProtectCmdResp`
 registrations stay `NotSupported`. A rejection status is evidence that the
 capability is unavailable, not a capability claim.
 
+### 3.6 Callback admission versus detach (GIGE-MEL-042-R1 correction)
+
+**Defect in `ab66da1`/`85edf35`.** `reject_unsupported()` checked detachment
+under `operations`, released the lock, and only then let `invoke()` reserve the
+CommandStatus callback. A concurrent detach could take `operations`, set
+`detached_` and find no reservation to drain in that gap, and then complete.
+The already-admitted command's late `invoke()` would then see the channel
+detached and skip the callback. The command had been admitted (its future was
+`Unsupported`, not `InvalidState`), yet it published no status.
+
+**Corrected ordering** (the same `admit_callback` / `invoke(..., admitted=true)`
+machinery already used for the `BadPixelList` initial publication):
+
+1. Before admission, form the ready `Unsupported` future and the
+   `CommandStatus`. All allocation and string copies happen here, outside every
+   lock.
+2. Take `Runtime::operations`. If the channel is detached, return
+   `InvalidState` with no reservation and no callback.
+3. Still under `operations`, snapshot `status_callback_` under
+   `callback_mutex_`, then reserve it with `admit_callback()`. That increments
+   `active_metadata_callbacks_` under `callback_mutex_`, and only if a
+   callback is registered.
+4. Release every lock. `invoke(callback, status, nullptr, true)` runs the
+   reserved callback under a `CallbackGuard`, with no provider lock held.
+
+**Detach.** `detach_locked()` runs under `operations`: it sets `detached_`
+and waits under `callback_mutex_` until `active_metadata_callbacks_ == 0`.
+Because steps 2 and 3 share one `operations` critical section, every request is
+on exactly one side of detach:
+
+| Order under `operations` | Future | CommandStatus | Detach |
+| --- | --- | --- | --- |
+| Detach first | Ready `InvalidState`, "channel is detached" | None | Completes without waiting |
+| Admission first, callback registered | Ready `Unsupported` | Exactly one correlated rejection | Waits for that callback to return |
+| Admission first, no callback | Ready `Unsupported` | None | Completes without waiting |
+
+The drain waits on a condition variable after `callback_cv_.wait` releases
+`callback_mutex_`. The reserved sender needs `callback_mutex_` only to decrement
+the count, so the drain cannot deadlock. Defensive destruction from a callback
+of the same runtime keeps its existing drain exemption.
+
+**Exception safety.** Nothing between the reservation and `invoke()` can throw.
+The future, status and description were all built before step 2, and the
+callback copy is taken before `admit_callback`. Inside `invoke()`, a
+scope-guard releases the reservation and notifies `callback_cv_` on **every**
+exit, including an exception that escapes the containment path. Consumer
+exceptions are still contained and counted exactly as before.
+
+**Unchanged:**
+
+* all signatures, response types and description strings;
+* callback-context and closing-Control rejection;
+* cross-provider reentry rejection and exception containment;
+* capability advertisement and backend behavior;
+* the absence of any global cross-thread ordering promise.
+
+No worker, queue, public interface or backend operation is added.
+
 ## 4. Implementation
 
 There is one private helper,
@@ -225,13 +290,31 @@ overrides call it in place of the generic macro, and the now-unused
 
 The helper:
 
-* reuses `failed<T>`, `ConfigurationOutcome`, `map_error`,
-  `on_command_status` and `invoke`;
+* reuses `failed<T>`, `ConfigurationOutcome`, `map_error`, `admit_callback`
+  and `invoke` (§3.6);
 * adds no dispatcher, worker, queue, timer or state machine;
 * adds no new lock and no new ordering promise.
 
-`include/gige_mel/backend.hpp`, factories, upstream files and SDK adapters are
-unchanged.
+GIGE-MEL-042-R1 made `ChannelCore::invoke()` release its reservation through a
+scope guard instead of a trailing statement. Every existing caller gets the
+same behavior on normal and contained-exception paths.
+
+**Test-only seam.** `src/provider_test_seams.hpp` declares two thread-local
+synchronization points inside `reject_unsupported()`:
+
+* `before_admission`: after the callback-context and Control checks;
+* `after_reservation`: once the callback is reserved and every lock is
+  released.
+
+They exist only when `GIGE_MEL_PROVIDER_TEST_SEAMS` is defined. That happens in
+just one place: the uninstalled `EXCLUDE_FROM_ALL` library
+`gige_mel_provider_test_seams`, which compiles the same provider sources for
+`provider_status_admission_tests`. The installed `libgige_mel_provider.so`
+compiles both points to empty statements and exports no seam symbol. The
+header is not under `include/` and is not installed.
+
+`include/gige_mel/backend.hpp`, `include/gige_mel/provider.hpp`, factories,
+upstream files and SDK adapters are unchanged.
 
 ## 5. Evidence plan
 
@@ -252,6 +335,19 @@ unchanged.
   through the `dlopen` loader (new `native_loader_c2_unsupported` CTest) and
   the installed consumer. A baseline control mode runs the same loader against
   an unchanged starting-main library.
+* **Deterministic admission race** (`tests/provider_status_admission_tests.cpp`,
+  CTest `provider_status_admission`). For each of the five commands:
+  - *admission wins*: the request is held after reservation while detach
+    begins. Detach must stay pending; after release exactly one correlated
+    rejection arrives on the sender's thread, then detach completes. A request
+    arriving during the drain gets `InvalidState` and no status;
+  - *detach wins*: the request is held before admission. Detach completes, and
+    the request gets ready `InvalidState` and no status.
+
+  Two further cases cover a reserved callback that throws, which still
+  releases the pending detach, and an admitted request with no callback, which
+  reserves nothing. All waits are condition-variable barriers bounded by
+  watchdogs, not sleeps.
 * **Mutation controls** on the production change.
 * **The full nine-lane matrix**, recorded in the
   [validation record](GIGE-MEL-042-validation.md).

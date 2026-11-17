@@ -152,6 +152,18 @@ any provider callback, a closing Control or a detached channel returns
 `InvalidState` before admission and produces no status. Rejection does not
 mutate configuration, acquisition, BIT, navigation, Health or diagnostics.
 
+These five commands reserve their registered callback **while still admitted
+under the operation mutex**, and release the lock before invoking it. This is
+the GIGE-MEL-042-R1 correction. A concurrent detach is therefore ordered
+strictly before or after admission:
+
+* **Detach first:** the request returns `InvalidState` and no status.
+* **Admission first:** detach waits until the request's single rejection
+  status has been delivered.
+
+An admitted unsupported request with a registered callback is never left
+without its status.
+
 Upstream does not require status for these optional families. This is a
 **provider-defined consistency enhancement**. It does not advertise or
 implement calibration, camera protection, erase or tracking. See the
@@ -172,10 +184,13 @@ unsupported commands. Nested rejected sends emit no status, preventing recursive
 rejection callbacks. Ordinary commands work
 again after callbacks return or throw.
 
-Detach closes callback admission and drains already admitted callbacks. A status
+Detach closes callback admission and drains already admitted callbacks. For the
+supported commands (ConfigSet, CameraCommand, BIT_Command, ModeCmd), a status
 not yet admitted may be suppressed by concurrent detach. No callback admission is
-reserved before acquiring the operation mutex. **The request future is authoritative
-across detach races; unconditional status delivery is not promised.**
+reserved before acquiring the operation mutex. **For those commands the request
+future is authoritative across detach races; unconditional status delivery is not
+promised.** The five unsupported commands give the stronger guarantee described
+above.
 
 ## Private parser and offline verification
 
