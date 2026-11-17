@@ -10,6 +10,7 @@
 #include <irmel/library/irmel-types/ImageListener.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -2752,6 +2753,8 @@ void navigation_noninterference() {
     CHECK(f.image->disable() == ir::Return::Success);
 }
 
+#include "provider_c2_unsupported_tests.inc"
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2763,6 +2766,12 @@ int main(int argc, char** argv) {
         {"BadPixelList callback reentry exception and independent workers", bad_pixels_reentry_and_throw},
         {"BadPixelList detach drain registration race and lifetime pins", bad_pixels_detach_and_lifetime},
         {"BadPixelList no backend Health BIT ModeCmd or generation interference", bad_pixels_noninterference},
+        {"C2 unsupported correlation futures and registration", c2_unsupported_correlation_and_futures},
+        {"C2 unsupported no backend configuration acquisition BIT navigation or Health effect", c2_unsupported_no_side_effects},
+        {"C2 unsupported callback reentry exceptions and lifetime pins", c2_unsupported_callback_reentry_and_exceptions},
+        {"C2 unsupported concurrent Image Health and submitters", c2_unsupported_concurrency},
+        {"C2 unsupported disable detach drain and Control destruction", c2_unsupported_lifecycle},
+        {"C2 unsupported supported-command regression", c2_unsupported_supported_regression},
         {"Navigation acceptance callbacks and attachment sessions", navigation_acceptance_and_sessions},
         {"Navigation backend exact forwarding and receipt-only fallback", navigation_backend_forwarding},
         {"Navigation backend errors exceptions retry and preparation", navigation_backend_failures},

@@ -146,6 +146,24 @@ if(BUILD_TESTING)
   target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach -Wl,--export-dynamic-symbol=clock_gettime)
   add_test(NAME provider_contract COMMAND provider_tests)
 
+  # GIGE-MEL-042-R1: deterministic CommandStatus admission versus detach. The
+  # same provider sources are compiled again with test-only synchronization
+  # points into an uninstalled library; the installed gige_mel_provider never
+  # defines GIGE_MEL_PROVIDER_TEST_SEAMS.
+  add_library(gige_mel_provider_test_seams SHARED EXCLUDE_FROM_ALL src/provider.cpp src/factories.cpp src/config_parser.cpp)
+  target_include_directories(gige_mel_provider_test_seams SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
+  target_include_directories(gige_mel_provider_test_seams PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(gige_mel_provider_test_seams PUBLIC gige_mel_headers
+    PRIVATE gige_mel_backend Threads::Threads gige_mel_build_options)
+  target_compile_definitions(gige_mel_provider_test_seams PUBLIC GIGE_MEL_PROVIDER_TEST_SEAMS
+    PRIVATE GIGE_MEL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} GIGE_MEL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    GIGE_MEL_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+  add_dependencies(gige_mel_provider_test_seams verify_upstream)
+  add_executable(provider_status_admission_tests tests/provider_status_admission_tests.cpp)
+  target_link_libraries(provider_status_admission_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME provider_status_admission COMMAND provider_status_admission_tests)
+
   # Backend portability: the same MEL-facing scenarios against the synthetic
   # backend and an independent test-only fixture backend. The fixture source is
   # compiled only into this test executable and is never installed.
@@ -166,6 +184,8 @@ if(BUILD_TESTING)
   add_test(NAME native_loader COMMAND loader_tests $<TARGET_FILE:gige_mel_provider>)
   # GIGE-MEL-041: blocked required Health metadata through published MEL only.
   add_test(NAME native_loader_required_metadata COMMAND loader_tests $<TARGET_FILE:gige_mel_provider> --required-metadata-only)
+  # GIGE-MEL-042: five unsupported C2 commands and their rejection status through published MEL only.
+  add_test(NAME native_loader_c2_unsupported COMMAND loader_tests $<TARGET_FILE:gige_mel_provider> --c2-unsupported-only)
   add_test(NAME upstream_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/vendor_upstream.py --verify)
   add_test(NAME json_integrity COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_json.py)
   # Fixture-based regressions for the package-isolation verifier (no SDK needed).
@@ -195,7 +215,7 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)
   set_tests_properties(backend_contract camera_profile_contract device_feature_contract provider_contract provider_backend_portability configuration_public_api
-    native_loader native_loader_required_metadata PROPERTIES TIMEOUT 30)
+    native_loader native_loader_required_metadata native_loader_c2_unsupported provider_status_admission PROPERTIES TIMEOUT 30)
 endif()
 
 # Optional Aravis camera-control foundation (GIGE-MEL-008). OFF by default:
