@@ -1,5 +1,21 @@
 # Experimental image-stream profile, version 0.1
 
+## Internal GenTL backend foundation (GIGE-MEL-GENTL-002)
+
+`GIGE_MEL_BUILD_GENTL_BACKEND` is a default-OFF option that requires the GENTL-001 header/consumer and
+pinned Aravis 0.8.36. It builds an internal `gentl` `ICameraBackend`: explicit
+producer path, exact composite IDs, read-only open by default, Aravis `ArvGc`
+GenApi over `GCReadPort`/`GCWritePort`, and the unchanged camera profiles.
+
+`apply()` and `create_stream()` return `unsupported`. The backend is not
+installed, not in the selection catalog, not reachable from the MEL factories,
+and adds no MEL capability or timestamp.
+
+Only the controlled fixture with a **simulated** register model is qualified. No
+real producer or camera has been operated through it. See the
+[design](tasks/GIGE-MEL-GENTL-002-design.md) and
+[validation](tasks/GIGE-MEL-GENTL-002-validation.md) records.
+
 ## GenTL consumer feasibility (GIGE-MEL-GENTL-001)
 
 An uninstalled, default-OFF (`GIGE_MEL_BUILD_GENTL_PROBE`) GenTL consumer

@@ -84,6 +84,13 @@ struct State {
     std::uint64_t next_frame{0}, delivered{0};
     std::string fail, endian{"big"};
     bool defines_payload{true}, stall{false};
+    // GIGE-MEL-GENTL-002 runtime controls (reset at GCInitLib).
+    std::size_t xml_address{0}, xml_size{0};
+    bool urls_overridden{false};
+    std::vector<std::string> urls;
+    std::vector<unsigned char> sha1;
+    std::uint64_t read_fail_address{0};
+    GC_ERROR read_fail_code{GC_ERR_SUCCESS};
 } state;
 
 // Distinct addresses used as opaque handles.
@@ -160,6 +167,12 @@ void reset() {
     write_be(0x100, static_cast<std::uint32_t>(width));
     write_be(0x104, static_cast<std::uint32_t>(height));
     std::memcpy(state.port.data() + xml_address, xml, sizeof xml - 1);
+    state.xml_address = xml_address;
+    state.xml_size = sizeof xml - 1;
+    state.urls_overridden = false;
+    state.urls.clear();
+    state.sha1.clear();
+    state.read_fail_code = GC_ERR_SUCCESS;
     state.buffers.clear();
     state.input.clear();
     state.output.clear();
@@ -219,6 +232,47 @@ void MockRepairOpenHandles() {
 }
 // Simulate a late native write through both announcement pointers. Sanitizers
 // must see valid storage even after all consumer objects have been destroyed.
+// GIGE-MEL-GENTL-002 controls, called after GCInitLib (reset clears them).
+// MockSetPort replaces the remote-port bytes; an XML document at `address`
+// (`size` bytes) is then advertised by the default "Local:" URL.
+int MockSetPort(const unsigned char* bytes, std::size_t size, std::size_t xml_at, std::size_t xml_size) {
+    std::lock_guard lock(state.mutex);
+    if (size > (std::size_t{1} << 24) || xml_at > size || xml_size > size - xml_at) return -1;
+    state.port.assign(bytes, bytes + size);
+    state.xml_address = xml_at;
+    state.xml_size = xml_size;
+    return 0;
+}
+// Explicit URL list (replaces the default single Local URL); null clears it.
+void MockSetUrls(const char* const* urls, std::size_t count) {
+    std::lock_guard lock(state.mutex);
+    state.urls.clear();
+    state.urls_overridden = urls != nullptr;
+    for (std::size_t i = 0; urls && i < count; ++i) state.urls.emplace_back(urls[i]);
+}
+void MockSetSha1(const unsigned char* digest, std::size_t size) {
+    std::lock_guard lock(state.mutex);
+    state.sha1.assign(digest, digest + size);
+}
+// GCReadPort of a range containing `address` fails with `code` (0 disables).
+void MockFailReadAt(std::uint64_t address, int code) {
+    std::lock_guard lock(state.mutex);
+    state.read_fail_address = address;
+    state.read_fail_code = static_cast<GC_ERROR>(code);
+}
+int MockPeekPort(std::size_t address, unsigned char* out, std::size_t size) {
+    std::lock_guard lock(state.mutex);
+    if (address > state.port.size() || size > state.port.size() - address) return -1;
+    std::memcpy(out, state.port.data() + address, size);
+    return 0;
+}
+int MockPokePort(std::size_t address, const unsigned char* bytes, std::size_t size) {
+    std::lock_guard lock(state.mutex);
+    if (address > state.port.size() || size > state.port.size() - address) return -1;
+    std::memcpy(state.port.data() + address, bytes, size);
+    return 0;
+}
+
 void MockTouchOutstandingBuffers() {
     std::lock_guard lock(state.mutex);
     for (const auto& buffer : state.buffers) {
@@ -455,7 +509,13 @@ GC_API GCReadPort(PORT_HANDLE port, uint64_t address, void* buffer, size_t* size
     if (port_index(port) < 0) return error(GC_ERR_INVALID_HANDLE, "GCReadPort handle");
     if (!buffer || !size) return error(GC_ERR_INVALID_PARAMETER, "GCReadPort arguments");
     MOCK_INJECT("GCReadPort");
-    if (address > port_bytes || *size > port_bytes - address) return error(GC_ERR_INVALID_ADDRESS, "outside mock port");
+    const auto bytes = state.port.size();
+    if (address > bytes || *size > bytes - address) return error(GC_ERR_INVALID_ADDRESS, "outside mock port");
+    if (state.read_fail_code != GC_ERR_SUCCESS && state.read_fail_address >= address &&
+        state.read_fail_address - address < *size) {
+        log("fail GCReadPort " + std::to_string(address));
+        return error(state.read_fail_code, "injected register read failure");
+    }
     std::memcpy(buffer, state.port.data() + address, *size);
     log("GCReadPort " + std::to_string(address) + " " + std::to_string(*size));
     return GC_ERR_SUCCESS;
@@ -467,7 +527,8 @@ GC_API GCWritePort(PORT_HANDLE port, uint64_t address, const void* buffer, size_
     MOCK_INIT;
     if (port_index(port) < 0) return error(GC_ERR_INVALID_HANDLE, "GCWritePort handle");
     if (!buffer || !size) return error(GC_ERR_INVALID_PARAMETER, "GCWritePort arguments");
-    if (address > port_bytes || *size > port_bytes - address) return error(GC_ERR_INVALID_ADDRESS, "outside mock port");
+    if (address > state.port.size() || *size > state.port.size() - address)
+        return error(GC_ERR_INVALID_ADDRESS, "outside mock port");
     // Applied BEFORE an injected failure: models an uncertain write outcome.
     std::memcpy(state.port.data() + address, buffer, *size);
     log("GCWritePort " + std::to_string(address) + " " + std::to_string(*size));
@@ -508,7 +569,7 @@ GC_API GCGetPortURL(PORT_HANDLE, char*, size_t*) { return error(GC_ERR_NOT_IMPLE
 GC_API GCGetNumPortURLs(PORT_HANDLE port, uint32_t* count) {
     std::lock_guard lock(state.mutex);
     if (port_index(port) < 0) return error(GC_ERR_INVALID_HANDLE, "GCGetNumPortURLs handle");
-    *count = 1;
+    *count = state.urls_overridden ? static_cast<uint32_t>(state.urls.size()) : 1;
     return GC_ERR_SUCCESS;
 }
 
@@ -516,17 +577,31 @@ GC_API GCGetPortURLInfo(PORT_HANDLE port, uint32_t index, URL_INFO_CMD command, 
                         size_t* size) {
     std::lock_guard lock(state.mutex);
     if (port_index(port) < 0) return error(GC_ERR_INVALID_HANDLE, "GCGetPortURLInfo handle");
-    if (index != 0) return error(GC_ERR_INVALID_INDEX, "URL index");
-    char url[128];
-    std::snprintf(url, sizeof url, "Local:mock.xml;%zx;%zx", xml_address, sizeof xml - 1);
+    const std::size_t count = state.urls_overridden ? state.urls.size() : 1;
+    if (index >= count) return error(GC_ERR_INVALID_INDEX, "URL index");
+    char url[512];
+    if (state.urls_overridden) std::snprintf(url, sizeof url, "%s", state.urls[index].c_str());
+    else std::snprintf(url, sizeof url, "Local:mock.xml;%zx;%zx", state.xml_address, state.xml_size);
     switch (command) {
     case URL_INFO_URL: return put_string(url, type, buffer, size);
-    case URL_INFO_SCHEME: return put_value<int32_t>(INFO_DATATYPE_INT32, URL_SCHEME_LOCAL, type, buffer, size);
+    case URL_INFO_SCHEME: {
+        // Overridden URLs report their declared scheme from the prefix.
+        int32_t scheme = URL_SCHEME_LOCAL;
+        if (std::strncmp(url, "file:", 5) == 0 || std::strncmp(url, "File:", 5) == 0) scheme = URL_SCHEME_FILE;
+        if (std::strncmp(url, "http:", 5) == 0) scheme = URL_SCHEME_HTTP;
+        return put_value<int32_t>(INFO_DATATYPE_INT32, scheme, type, buffer, size);
+    }
     case URL_INFO_FILE_REGISTER_ADDRESS:
-        return put_value<uint64_t>(INFO_DATATYPE_UINT64, xml_address, type, buffer, size);
-    case URL_INFO_FILE_SIZE: return put_value<uint64_t>(INFO_DATATYPE_UINT64, sizeof xml - 1, type, buffer, size);
+        if (state.urls_overridden) return error(GC_ERR_NOT_IMPLEMENTED, "address not modeled for override");
+        return put_value<uint64_t>(INFO_DATATYPE_UINT64, state.xml_address, type, buffer, size);
+    case URL_INFO_FILE_SIZE:
+        if (state.urls_overridden) return error(GC_ERR_NOT_IMPLEMENTED, "size not modeled for override");
+        return put_value<uint64_t>(INFO_DATATYPE_UINT64, state.xml_size, type, buffer, size);
     case URL_INFO_SCHEMA_VER_MAJOR: return put_value<int32_t>(INFO_DATATYPE_INT32, 1, type, buffer, size);
     case URL_INFO_SCHEMA_VER_MINOR: return put_value<int32_t>(INFO_DATATYPE_INT32, 1, type, buffer, size);
+    case URL_INFO_FILE_SHA1_HASH:
+        if (state.sha1.empty()) return error(GC_ERR_NOT_IMPLEMENTED, "SHA1 not modeled");
+        return put(INFO_DATATYPE_BUFFER, state.sha1.data(), state.sha1.size(), type, buffer, size);
     default: return error(GC_ERR_NOT_IMPLEMENTED, "URL info not modeled");
     }
 }

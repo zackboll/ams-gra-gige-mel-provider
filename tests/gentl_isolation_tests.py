@@ -40,6 +40,34 @@ class GenTLIsolation(unittest.TestCase):
             text = (ROOT / path).read_text()
             self.assertNotRegex(text, r"(?i)gentl", path)
 
+    # GIGE-MEL-GENTL-002: the backend is internal, default OFF, never installed,
+    # never in the default catalog and never reachable from public factories.
+    def test_backend_option_is_default_off_and_isolated(self):
+        text = (ROOT / "CMakeLists.txt").read_text()
+        self.assertRegex(text, r'option\(GIGE_MEL_BUILD_GENTL_BACKEND "[^"]*" OFF\)')
+        self.assertEqual(len(re.findall(r"GigeMelGenTLBackend\.cmake", text)), 1)
+        self.assertRegex(text, r"if\(GIGE_MEL_BUILD_GENTL_BACKEND\)\s*\n\s*include\(cmake/GigeMelGenTLBackend\.cmake\)")
+        lines = [line.split("#", 1)[0] for line in (ROOT / "cmake/GigeMelGenTLBackend.cmake").read_text().splitlines()]
+        code = "\n".join(lines)
+        for forbidden in ("install(", "gige_mel_provider", "gige_mel_selection_builtins", "FetchContent",
+                          "file(DOWNLOAD", "ExternalProject", "aravis-0.9", "aravis-0.10"):
+            self.assertNotIn(forbidden, code)
+        self.assertIn("aravis-0.8=${GIGE_MEL_GENTL_ARAVIS_VERSION}", code)
+
+    def test_backend_types_stay_internal(self):
+        header = (ROOT / "src/backends/gentl/gentl_backend.hpp").read_text()
+        genapi = (ROOT / "src/backends/gentl/gentl_genapi.hpp").read_text()
+        for text in (header, genapi):
+            text = "\n".join(line.split("//", 1)[0] for line in text.splitlines())  # code only
+            self.assertNotRegex(text, r"#include\s*[<\"](arv|glib|GenTL|libxml)")
+            self.assertNotRegex(text, r"\b(ArvDevice|ArvGc|GError|GObject|TL_HANDLE|PORT_HANDLE)\b")
+        for path in (ROOT / "include").rglob("*.hpp"):
+            self.assertNotIn("gentl_backend", path.read_text(), str(path))
+        # No GenTL use of Aravis's experimental consumer or a native GigE connection.
+        source = (ROOT / "src/backends/gentl/gentl_genapi.cpp").read_text()
+        for forbidden in ("arv_open_device", "arv_gv_device", "arv_interface", "ArvGenTL", "arv_gentl"):
+            self.assertNotIn(forbidden, source)
+
     def test_header_is_never_committed(self):
         for path in tracked():
             name = pathlib.PurePosixPath(path).name.lower()
