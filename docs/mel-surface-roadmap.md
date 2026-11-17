@@ -1,5 +1,11 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-GENTL-001 evaluates a generic GenTL consumer backend
+([design](tasks/GIGE-MEL-GENTL-001-design.md)). It adds no MEL surface or
+backend. The recommended next step is GIGE-MEL-GENTL-002 (an internal backend
+foundation, not selectable by default), conditional on a qualified producer and
+a GenApi decision.
+
 GIGE-MEL-041 adds no MEL capability. It classifies the required Health
 `DiscreteStatus` and `MFA_SecurityAuditRecord` registrations as blocked by the
 pinned capability enumeration (and, for security audit, by a missing provider

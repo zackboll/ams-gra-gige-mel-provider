@@ -1,5 +1,15 @@
 # Experimental image-stream profile, version 0.1
 
+## GenTL consumer feasibility (GIGE-MEL-GENTL-001)
+
+An uninstalled, default-OFF (`GIGE_MEL_BUILD_GENTL_PROBE`) GenTL consumer
+foundation and diagnostic probe exist for evaluation only. They require the
+externally provisioned, checksum-verified EMVA GenTL 1.6 header, are never linked
+into the provider, selection or factories, and add no backend, MEL capability or
+timestamp. Only fixture behavior and read-only Cognex discovery are qualified; see
+the [design](tasks/GIGE-MEL-GENTL-001-design.md) and
+[validation](tasks/GIGE-MEL-GENTL-001-validation.md) records.
+
 ## Required Health metadata classification (GIGE-MEL-041)
 
 No capability, factory, ABI or Health behavior changes.
