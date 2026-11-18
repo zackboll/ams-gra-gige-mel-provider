@@ -59,6 +59,37 @@ class ProbeTests(unittest.TestCase):
             self.assertNotIn("BEGIN TLGetNumInterfaces", failed.stdout)
             self.assertIn("unloaded", read(log.name))  # conclusive failure-path cleanup
 
+    def test_wire_readonly_fixture_and_one_attempt_close(self):
+        # Fixture only: demonstrates native request and ownership diagnostics, not
+        # independently observed wire safety. No network traffic is generated.
+        with tempfile.NamedTemporaryFile() as log:
+            result = run(MOCK, "wire-readonly", "mock-if-0", "100", env={"GENTL_MOCK_LOG": log.name})
+            # Existing fixture intentionally enumerates two devices: refuse an
+            # ambiguous target before ANY open, never select the first silently.
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("expected exactly one simulated device", result.stdout)
+            self.assertNotIn("IFOpenDevice", read(log.name))
+        for args in (("mock-if-0", "0"), ("mock-if-0", "10001"), ("mock-if-0", "100", "--access", "control")):
+            result = run(MOCK, "wire-readonly", *args)
+            self.assertEqual(result.returncode, 2)
+        with tempfile.NamedTemporaryFile() as log:
+            result = run(MOCK, "wire-readonly", "mock-if-0", "100", env={
+                "GENTL_MOCK_LOG": log.name, "GENTL_MOCK_SINGLE_DEVICE": "1"})
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn("IFOpenDevice mock-dev-A access=2", read(log.name))
+            self.assertIn("native_closed", result.stdout)
+            self.assertIn("quiet_complete", result.stdout)
+            self.assertIn("unloaded", read(log.name))
+        for operation in ("DevClose", "IFClose", "TLClose", "GCCloseLib"):
+            with tempfile.NamedTemporaryFile() as log:
+                result = run(MOCK, "wire-readonly", "mock-if-0", "100", env={
+                    "GENTL_MOCK_LOG": log.name, "GENTL_MOCK_SINGLE_DEVICE": "1",
+                    "GENTL_MOCK_FAIL": operation + "=-1011"})
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertEqual(read(log.name).splitlines().count("fail " + operation), 1)
+                self.assertNotIn("unloaded", read(log.name))
+                self.assertNotIn("native_closed", result.stdout)
+
     def test_offline_close_failure_never_retried(self):
         for operation, command, preceding in (("TLClose", "interfaces", ""),
                                               ("GCCloseLib", "load", ""),

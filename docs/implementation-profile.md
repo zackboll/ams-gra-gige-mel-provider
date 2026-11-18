@@ -1,5 +1,16 @@
 # Experimental image-stream profile, version 0.1
 
+## Isolated GenTL wire qualification tooling (GIGE-MEL-GENTL-003A)
+
+The explicitly launched, uninstalled supervisor wire mode adds a pinned Aravis
+simulated camera and independent Linux packet observer inside fresh user/network/
+PID namespaces. It adds no MEL/backend capability. SDK-free synthetic passes are
+separate from real-producer qualification; writes, unknown/repeated commands,
+post-close traffic, crashes, timeouts and incomplete evidence cannot pass.
+Neither Euresys nor Balluff read-only wire behavior is qualified. Balluff's
+GENTL-003 crash remains unresolved. See [design](tasks/GIGE-MEL-GENTL-003A-design.md)
+and [validation](tasks/GIGE-MEL-GENTL-003A-validation.md).
+
 ## GenTL producer qualification tooling (GIGE-MEL-GENTL-003)
 
 The uninstalled offline supervisor adds no backend or MEL capability. It runs

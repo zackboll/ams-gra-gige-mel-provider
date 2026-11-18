@@ -214,6 +214,9 @@ if(BUILD_TESTING)
   add_test(NAME gentl_qualification_supervisor
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/gentl_qualification_tests.py)
   set_tests_properties(gentl_qualification_supervisor PROPERTIES TIMEOUT 30)
+  add_test(NAME gentl_wire_safety
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/gentl_wire_tests.py)
+  set_tests_properties(gentl_wire_safety PROPERTIES TIMEOUT 30)
   add_test(NAME aravis_evidence_offline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aravis_evidence_tests.py)
   set_tests_properties(aravis_evidence_offline PROPERTIES TIMEOUT 60)

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Offline-only, uninstalled GenTL probe supervisor (Python 3.9+, Linux).
 
-No device discovery/open command is offered. A fresh user/network namespace
-contains even producer-initiated discovery. No host interface is changed.
+Default mode offers no discovery/open. Explicit --wire mode qualifies an isolated
+simulator only. A fresh user/network namespace contains producer discovery.
+No host interface is changed.
 This is crash containment for diagnostics, not a hostile-code sandbox.
 """
 import argparse
@@ -120,20 +121,51 @@ def collect(args):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] in ("--wire-worker", "--wire-camera", "--wire-synthetic"):
+        import gentl_wire_runner as wire
+        config = json.loads(Path(sys.argv[2]).read_text())
+        if sys.argv[1] == "--wire-worker":
+            return wire.worker(config, Path(__file__).resolve())
+        wire.require_isolation(wire.network_snapshot(), config["host_namespace"], configured=True)
+        if os.readlink("/proc/self/ns/user") == config["host_user_namespace"]:
+            raise ValueError("fresh user namespace required")
+        return wire.camera(config) if sys.argv[1] == "--wire-camera" else wire.synthetic(config)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--probe", type=absolute_file, required=True)
-    parser.add_argument("--producer", type=absolute_file, required=True)
+    parser.add_argument("--probe", type=absolute_file)
+    parser.add_argument("--producer", type=Path)
+    parser.add_argument("--wire", action="store_true", help="explicit isolated simulated-camera qualification")
+    parser.add_argument("--aravis-library", type=absolute_file, help="absolute pinned libaravis-0.8.so for simulator")
+    parser.add_argument("--interface", help="exact producer interface ID inside the isolated network")
+    parser.add_argument("--quiet", type=bounded_seconds, default=0.5)
+    parser.add_argument("--self-test", choices=("read", "control-write", "register-write", "memory-write",
+                        "unknown", "duplicate", "crash", "timeout", "post-close"),
+                        help="SDK-free injected traffic; never qualifies a producer")
     parser.add_argument("--output", type=Path, required=True,
                         help="new absolute directory outside the repository; logs may be sensitive")
     parser.add_argument("--timeout", type=bounded_seconds, default=20.0)
     parser.add_argument("--repeat", type=int, choices=range(1, 6), default=3)
     args = parser.parse_args()
+    if args.wire:
+        if not args.aravis_library or args.quiet > 10 or args.timeout < args.quiet + 1:
+            parser.error("--wire requires --aravis-library, quiet <=10 and timeout >= quiet+1")
+        if args.self_test and (args.producer or args.probe):
+            parser.error("self-tests cannot execute a producer/probe")
+        if not args.self_test and args.producer and (not args.probe or not args.interface):
+            parser.error("real producer requires explicit --probe and --interface")
+    elif not args.probe or not args.producer or args.self_test or args.aravis_library or args.interface:
+        parser.error("offline mode requires --probe and --producer; wire options require --wire")
+    if args.producer and not args.producer.is_absolute():
+        parser.error("--producer must be absolute")
     if not args.output.is_absolute():
         parser.error("--output must be absolute")
     repository = Path(__file__).resolve().parent.parent
     if repository == args.output.resolve() or repository in args.output.resolve().parents:
         parser.error("evidence must remain outside the repository")
     try:
+        if args.wire:
+            import gentl_wire_runner as wire
+            return wire.collect(args, run_stage, digest, Path(__file__).resolve())
+        args.producer = absolute_file(str(args.producer))
         return collect(args)
     except (OSError, ValueError) as error:
         print(f"qualification failed: {error}", file=sys.stderr)

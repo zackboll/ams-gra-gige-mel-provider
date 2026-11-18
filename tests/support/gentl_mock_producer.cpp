@@ -429,7 +429,7 @@ GC_API IFUpdateDeviceList(IF_HANDLE handle, bool8_t* changed, uint64_t) {
 GC_API IFGetNumDevices(IF_HANDLE handle, uint32_t* count) {
     std::lock_guard lock(state.mutex);
     if (handle != &iface_handle || !state.iface) return error(GC_ERR_INVALID_HANDLE, "IFGetNumDevices handle");
-    *count = state.discovered ? 2 : 0;
+    *count = state.discovered ? (std::getenv("GENTL_MOCK_SINGLE_DEVICE") ? 1 : 2) : 0;
     return GC_ERR_SUCCESS;
 }
 
