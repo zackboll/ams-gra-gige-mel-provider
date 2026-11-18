@@ -24,6 +24,25 @@ ownership, XML limits and admission policies are unchanged. See
 [design](tasks/GIGE-MEL-GENTL-003-design.md) and
 [validation](tasks/GIGE-MEL-GENTL-003-validation.md).
 
+## Source-backed Image LOS foundation (GIGE-MEL-043)
+
+The common provider conditionally implements `LineOfSightEuler` and
+`LineOfSightReport` through an optional, backend-independent owned-value source.
+Support is independently declared before Control discovery; attached capability
+queries agree. Only the explicitly selected SDK-free recording fixture supplies
+qualified values. Default synthetic and production adapters remain unsupported
+and unadvertised. Quaternion and LOS3D are unchanged.
+
+The [LOS profile](image-los-metadata.md) specifies the project-local frame and
+source-relative epoch, exact double/nanosecond mapping, zero optional validity
+claims, bounded latest-event policy, Image enable/disable lifecycle and callback
+ownership. Unknown time/frame declarations and nonzero unnamed validity bits
+fail closed. No pointing is derived from navigation, images or installation
+assumptions; FrameHeader navigation/inertial state is unchanged. This is fixture
+qualification of working callbacks, not physical LOS, UTC, image synchronization
+or complete MEL conformance. See [design](tasks/GIGE-MEL-043-design.md) and
+[validation](tasks/GIGE-MEL-043-validation.md).
+
 ## Internal GenTL backend foundation (GIGE-MEL-GENTL-002)
 
 `GIGE_MEL_BUILD_GENTL_BACKEND` is a default-OFF option that requires the GENTL-001 header/consumer and
@@ -528,7 +547,8 @@ bytes until explicit Buffer release; it can then be re-enabled. Operations
 serialize with lifecycle/configuration; no state/callback mutex spans a join or
 backend stop. Configuration/generation, navigation receipt and BadPixelList
 registration are unchanged. No commanded state variable, worker, queue, timer,
-calibration, NUC or LOS state is added. Health retains its observed-state model.
+calibration or NUC state is added by ModeCmd. Standby also retires an enabled
+qualified LOS subscription through Image's auxiliary shutdown. Health retains its observed-state model.
 All other requests are rejected without stopping acquisition. This is logical
 provider state, not physical camera standby/power/health or full ModeCmd/task
 scheduling. The pinned metadata enum separately lacks DiscreteStatus and
@@ -553,7 +573,8 @@ Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
 documented BIT_Command and ModeCmd subsets, and metadata other than communications,
-Image camera/navigation receipt responses and qualified known-empty BadPixelList
+Image camera/navigation receipt responses, qualified source-backed LOS Euler/Report
+and qualified known-empty BadPixelList
 and C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT_Configuration/BIT_Status or Health
 MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
 return unsupported. The five unsupported C2 commands additionally publish a

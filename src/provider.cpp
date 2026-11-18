@@ -180,6 +180,8 @@ struct Runtime {
     mutable std::mutex state_mutex;
     backend::CameraConfiguration configuration;
     backend::CameraCapabilities camera_capabilities;
+    backend::LosSupport los_support; // immutable after init, before discovery
+    std::uint64_t los_subscription{0}; // operations; never reused across attachments
     bool initialized{false};
     bool configuration_valid{false};
     bool image_active{false};
@@ -272,6 +274,8 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     if (type == ir::ChannelType::IRSTImage) {
         metadata.insert(ir::ChannelMetadataCapabilityType::CameraCommandResp);
         metadata.insert(ir::ChannelMetadataCapabilityType::NavigationReportResp);
+        if (runtime.los_support.euler) metadata.insert(ir::ChannelMetadataCapabilityType::LineOfSightEuler);
+        if (runtime.los_support.report) metadata.insert(ir::ChannelMetadataCapabilityType::LineOfSightReport);
         if (runtime.camera_capabilities.known_empty_defect_map)
             metadata.insert(ir::ChannelMetadataCapabilityType::BadPixelList);
     }
@@ -656,9 +660,11 @@ public:
             }
             stream_state_ = state;
             enabled_ = true;
+            if (!start_auxiliary_locked()) throw std::runtime_error("LOS source subscription failed");
             worker_ = std::thread([state, weak = weak_from_this()] { run(state, weak); });
             return ir::Return::Success;
         } catch (const std::exception& error) {
+            stop_auxiliary_locked();
             state->stopping = true;
             if (state->stream) state->stream->stop();
             {
@@ -850,6 +856,7 @@ protected:
 
     virtual void on_camera_reply(const ir::CameraCommandResp&) {}
     virtual void on_command_status(const ir::CommandStatus&) {}
+    virtual bool start_auxiliary_locked() { return true; }
     // Called by disable AND internal detach, including Control destruction.
     virtual void stop_auxiliary_locked() {}
     std::shared_ptr<Runtime> runtime_;
@@ -1107,10 +1114,18 @@ backend::NavigationReport backend_navigation(const mel::NavigationReport& report
 }
 
 class ImageChannelImpl final : public ChannelCore, public ir::ImageChannel {
+    struct LosPublisher {
+        std::shared_ptr<Runtime> runtime;
+        std::unique_ptr<backend::ILineOfSightStream> stream;
+        std::atomic<bool> running{true};
+        std::uint64_t subscription, generation;
+        std::optional<std::chrono::nanoseconds> last_euler, last_report;
+    };
 public:
     using ChannelCore::ChannelCore;
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
+    ~ImageChannelImpl() override { stop_auxiliary_locked(); }
     mel::RequestFor<ir::CameraCommandResp> send(ir::CameraCommand command) override { return camera_command(command); }
     mel::RequestFor<ir::NavigationReportResp> send(mel::NavigationReport report) override {
         if (in_provider_callback())
@@ -1178,10 +1193,14 @@ public:
         invoke(bad_pixel_callback_, snapshot, nullptr, true);
         return ir::Return::Success;
     }
+    ir::Return registerMetadataCallback(Callback<ir::LineOfSightReport> callback) override {
+        return register_los(report_callback_, std::move(callback), runtime_->los_support.report);
+    }
+    ir::Return registerMetadataCallback(Callback<ir::LineOfSightEuler> callback) override {
+        return register_los(euler_callback_, std::move(callback), runtime_->los_support.euler);
+    }
     GIGE_UNSUPPORTED_CALLBACK(ir::OpticalDistortionMap)
-    GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightReport)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightQuaternion)
-    GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightEuler)
     ir::Return registerMetadataCallback(Callback<ir::NavigationReportResp> callback) override {
         if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
@@ -1201,6 +1220,115 @@ public:
     }
 
 private:
+    template<class T> ir::Return register_los(Callback<T>& slot, Callback<T> callback, bool supported) {
+        if (in_provider_callback()) return ir::Return::Fail;
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return ir::Return::Fail;
+        std::lock_guard operation(runtime_->operations);
+        if (is_detached()) return ir::Return::Fail;
+        if (!supported) return ir::Return::NotSupported;
+        return register_callback(slot, std::move(callback));
+    }
+    bool start_auxiliary_locked() override {
+        if (!runtime_->los_support.euler && !runtime_->los_support.report) return true;
+        if (runtime_->los_subscription == std::numeric_limits<std::uint64_t>::max()) return false;
+        auto* source = dynamic_cast<backend::ILineOfSightSource*>(runtime_->device.get());
+        if (!source) return false;
+        const auto subscription = ++runtime_->los_subscription;
+        auto opened = source->open_line_of_sight(subscription);
+        if (!opened) { runtime_->report(opened.error().message); return false; }
+        auto state = std::make_shared<LosPublisher>();
+        state->runtime = runtime_;
+        state->stream = std::move(opened).value();
+        if (!state->stream || state->stream->clock_generation() == 0) return false;
+        state->subscription = subscription;
+        state->generation = state->stream->clock_generation();
+        los_publisher_ = state;
+        los_worker_ = std::thread([state, weak = weak_from_this()] { run_los(state, weak); });
+        return true;
+    }
+    void stop_auxiliary_locked() override {
+        if (los_publisher_) {
+            los_publisher_->running = false;
+            los_publisher_->stream->request_stop();
+        }
+        if (los_worker_.joinable()) {
+            if (los_worker_.get_id() == std::this_thread::get_id()) los_worker_.detach();
+            else los_worker_.join();
+        }
+        los_publisher_.reset();
+    }
+    static bool finite(const backend::LosEulerAngles& v) noexcept {
+        return std::isfinite(v.roll) && std::isfinite(v.pitch) && std::isfinite(v.yaw);
+    }
+    static bool finite(const backend::LosAzEl& v) noexcept {
+        return std::isfinite(v.azimuth) && std::isfinite(v.elevation);
+    }
+    void publish_los(LosPublisher& state, const backend::LosObservation& v) {
+        const auto& support = runtime_->los_support;
+        if (!v.time || v.time->count() <= 0 || v.time_domain != support.time_domain ||
+            v.epoch != support.epoch || v.frame != support.frame || v.source_id != support.source_id ||
+            v.subscription_id != state.subscription || v.clock_generation != state.generation) return;
+        if (support.euler && v.euler && finite(v.euler->attitude) && finite(v.euler->rates) &&
+            (!state.last_euler || *v.time > *state.last_euler)) {
+            ir::LineOfSightEuler message;
+            message.setSystemTime(*v.time);
+            mel::Euler attitude, rates;
+            attitude.setRoll(v.euler->attitude.roll);
+            attitude.setPitch(v.euler->attitude.pitch);
+            attitude.setYaw(v.euler->attitude.yaw);
+            rates.setRoll(v.euler->rates.roll);
+            rates.setPitch(v.euler->rates.pitch);
+            rates.setYaw(v.euler->rates.yaw);
+            message.setAttitude(attitude);
+            message.setAttitudeRates(rates);
+            Callback<ir::LineOfSightEuler> callback;
+            { std::lock_guard lock(callback_mutex_); callback = euler_callback_; }
+            state.last_euler = v.time;
+            invoke(callback, message, &state.running);
+        }
+        if (support.report && v.report && v.report->angles && v.report->rates && v.report->image_rotation &&
+            finite(*v.report->angles) && finite(*v.report->rates) && std::isfinite(*v.report->image_rotation) &&
+            v.report->validity_flags == 0 && !v.report->at_speed && !v.report->in_tolerance &&
+            !v.report->platform_attitude && (!state.last_report || *v.time > *state.last_report)) {
+            ir::LineOfSightReport message;
+            message.setSystemTime(*v.time);
+            message.setPointingAngle({v.report->angles->azimuth, v.report->angles->elevation});
+            message.setPointingAngleRates({v.report->rates->azimuth, v.report->rates->elevation});
+            message.setImageRotation(*v.report->image_rotation);
+            Callback<ir::LineOfSightReport> callback;
+            { std::lock_guard lock(callback_mutex_); callback = report_callback_; }
+            state.last_report = v.time;
+            invoke(callback, message, &state.running);
+        }
+    }
+    static void run_los(const std::shared_ptr<LosPublisher>& state,
+                        const std::weak_ptr<ChannelCore>& weak) noexcept {
+        try {
+            while (state->running) {
+                auto result = state->stream->receive(50ms);
+                if (!state->running) break;
+                if (!result) {
+                    if (result.error().code == backend::ErrorCode::timeout) continue;
+                    state->runtime->report("LOS source fault: " + result.error().message);
+                    break;
+                }
+                // Never pin owners across the source wait. Their last release
+                // can destroy Control here; stop handles its own worker safely.
+                const auto control_pin = state->runtime->control.load().lock();
+                const auto channel = std::dynamic_pointer_cast<ImageChannelImpl>(weak.lock());
+                if (!control_pin || !channel || channel->is_detached()) break;
+                channel->publish_los(*state, result.value());
+            }
+        } catch (...) {
+            try { state->runtime->report("LOS publication/source threw; subscription retired"); } catch (...) {}
+        }
+        state->running = false;
+    }
+    Callback<ir::LineOfSightEuler> euler_callback_;
+    Callback<ir::LineOfSightReport> report_callback_;
+    std::shared_ptr<LosPublisher> los_publisher_; // operations only
+    std::thread los_worker_;
     void on_camera_reply(const ir::CameraCommandResp& reply) override {
         Callback<ir::CameraCommandResp> callback;
         { std::lock_guard lock(callback_mutex_); callback = camera_callback_; }
@@ -1342,6 +1470,7 @@ public:
                         // Reuse disable's Image implementation, not disable()
                         // itself: operations is already held. No buffer release,
                         // unbinding, detach or diagnostic-history reset.
+                        image_pin->stop_auxiliary_locked();
                         image_pin->stop_locked();
                         outcome.success = true;
                     }
@@ -1638,6 +1767,16 @@ public:
                 auto device = std::move(opened).value();
                 auto actual = device->configuration();
                 const auto caps = device->capabilities();
+                backend::LosSupport los;
+                if (auto* source = dynamic_cast<backend::ILineOfSightSource*>(device.get()))
+                    los = source->line_of_sight_support();
+                if (los.frame != backend::LosFrame::sensor_frd_intrinsic_zyx ||
+                    los.time_domain != backend::LosTimeDomain::source_relative ||
+                    los.epoch != backend::LosEpoch::declared_source_origin ||
+                    los.source_id.empty() || los.provenance.empty() || los.epoch_meaning.empty()) {
+                    los.euler = false;
+                    los.report = false;
+                }
                 if (!actual || !valid_layout(actual.value(), caps)) {
                     (void)device->close();
                     runtime_->report("backend initial configuration does not satisfy the selected monochrome profile");
@@ -1648,6 +1787,7 @@ public:
                     runtime_->device = std::move(device);
                     runtime_->configuration = actual.value();
                     runtime_->camera_capabilities = caps;
+                    runtime_->los_support = std::move(los);
                     runtime_->configuration_valid = true;
                     runtime_->initialized = true;
                 }

@@ -8,6 +8,7 @@
 #include "../public_bad_pixel_demo.hpp"
 #include "../public_required_metadata_demo.hpp"
 #include "../public_c2_unsupported_demo.hpp"
+#include "../public_los_demo.hpp"
 
 #include <iostream>
 
@@ -20,7 +21,7 @@ int main() {
         return 1;
     }
     namespace ir = ams::iface::irmel;
-    try { demonstrate_health(control); demonstrate_bit(control); demonstrate_subsystem(control); demonstrate_required_metadata_blocked(control); demonstrate_c2_unsupported(control); demonstrate_mode(control, ir::getBuffer("synthetic", manager)); demonstrate_navigation(control); demonstrate_bad_pixels(control); }
+    try { demonstrate_health(control); demonstrate_bit(control); demonstrate_subsystem(control); demonstrate_required_metadata_blocked(control); demonstrate_c2_unsupported(control); demonstrate_mode(control, ir::getBuffer("synthetic", manager)); demonstrate_navigation(control); demonstrate_bad_pixels(control); demonstrate_no_los(control); }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 6; }
     ir::Config config;
     for (const auto& capability : control->getCapabilities()) {

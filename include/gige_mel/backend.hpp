@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gige_mel/navigation.hpp>
+#include <gige_mel/line_of_sight.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -240,6 +241,31 @@ class INavigationSink {
 public:
     virtual ~INavigationSink() = default;
     virtual Status submit_navigation(NavigationReport report) = 0;
+};
+
+// Optional reverse-direction metadata interface. All methods are bounded;
+// none may call provider/consumer code or wait for provider operations. Support
+// is immutable for the device lifetime. Sources supply owned observations.
+class ILineOfSightStream {
+public:
+    virtual ~ILineOfSightStream() = default;
+    virtual std::uint64_t clock_generation() const noexcept = 0;
+    // Single receiver. Event-driven wait, bounded by timeout, promptly woken by
+    // request_stop. At most ONE pending latest observation; overwrite/coalesce
+    // older pending values. No replay of values predating open_line_of_sight.
+    virtual Result<LosObservation> receive(std::chrono::milliseconds timeout) = 0;
+    // Concurrent, idempotent, nonblocking. Join receiver before destruction.
+    virtual void request_stop() noexcept = 0;
+};
+
+class ILineOfSightSource {
+public:
+    virtual ~ILineOfSightSource() = default;
+    virtual LosSupport line_of_sight_support() const = 0;
+    // Called under runtime operations; no recursive provider calls. Each open
+    // owns a fresh subscription and establishes a fixed nonzero clock generation.
+    virtual Result<std::unique_ptr<ILineOfSightStream>> open_line_of_sight(
+        std::uint64_t subscription_id) = 0;
 };
 
 class ICameraDevice {

@@ -306,9 +306,9 @@ The initial delivered layout is one-band Mono8 with contiguous rows. A delivery 
 | --- | --- | --- | --- |
 | `BadPixelList` | Required | **Limited synthetic support**: one synchronous known-empty snapshot on successful registration, even disabled | Explicit default-false backend evidence; synthetic generator has no defects. Zero bytes/count, empty upstream vector; no repeat on ROI/exposure/rate changes. Aravis, physical cameras and independent fixture have no qualified defect-map source and remain unadvertised/NotSupported. No calibration or full-conformance claim. |
 | `OpticalDistortionMap` | Optional | NotSupported | P4: calibrated optics/profile |
-| `LineOfSightReport` | Required | NotSupported | P1: mounting/pointing/navigation model |
+| `LineOfSightReport` | Required | Source-backed conditional implementation | [Recording-qualified LOS path](image-los-metadata.md); zero optional validity claims only; no default/production source |
 | `LineOfSightQuaternion` | Required if quaternion LOS | NotSupported | P4 if that coordinate representation is supported |
-| `LineOfSightEuler` | Required | NotSupported | P1: mounting/pointing/navigation model |
+| `LineOfSightEuler` | Required | Source-backed conditional implementation | [Recording-qualified LOS path](image-los-metadata.md); explicit source frame/time; no navigation conversion or physical qualification |
 | `CameraCommandResp` | Required if camera control | Supported | P0: emit correlated responses through the shared camera-command path |
 | `NavigationReportResp` | Required | Supported for partial receipt and optional backend acceptance | Image-only synchronous acknowledgement, no historical replay; no LOS or frame navigation population |
 | `LOS3D_KinematicsType` | Optional | NotSupported | P4: navigation/pointing integration |
