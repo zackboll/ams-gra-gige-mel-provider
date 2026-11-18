@@ -45,6 +45,35 @@ class ProbeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout)
             self.assertIn("FAILED", result.stdout)
 
+    def test_offline_qualification_guards(self):
+        with tempfile.NamedTemporaryFile() as log:
+            for command in ("discover", "inspect", "acquire"):
+                result = run(MOCK, "--offline-qualification", command, "mock-if-0", "mock-dev-A",
+                             env={"GENTL_MOCK_LOG": log.name})
+                self.assertEqual(result.returncode, 2)
+            self.assertEqual(read(log.name), "")
+            failed = run(MOCK, "--offline-qualification", "interfaces", env={
+                "GENTL_MOCK_LOG": log.name, "GENTL_MOCK_FAIL": "TLUpdateInterfaceList=-1011"})
+            self.assertEqual(failed.returncode, 1, failed.stdout)
+            self.assertIn("GC_ERR_TIMEOUT", failed.stdout)
+            self.assertNotIn("BEGIN TLGetNumInterfaces", failed.stdout)
+            self.assertIn("unloaded", read(log.name))  # conclusive failure-path cleanup
+
+    def test_offline_close_failure_never_retried(self):
+        for operation, command, preceding in (("TLClose", "interfaces", ""),
+                                              ("GCCloseLib", "load", ""),
+                                              ("TLClose", "interfaces", "TLUpdateInterfaceList=-1011,"),
+                                              ("GCCloseLib", "interfaces", "TLUpdateInterfaceList=-1011,"),
+                                              ("TLClose", "interfaces", "TLGetNumInterfaces=-1011,"),
+                                              ("GCCloseLib", "interfaces", "TLGetNumInterfaces=-1011,")):
+            with tempfile.NamedTemporaryFile() as log:
+                failed = run(MOCK, "--offline-qualification", command, env={
+                    "GENTL_MOCK_LOG": log.name, "GENTL_MOCK_FAIL": preceding + operation + "=-1011"})
+                self.assertEqual(failed.returncode, 1, failed.stdout)
+                self.assertIn(operation + " returned GC_ERR_TIMEOUT", failed.stdout)
+                self.assertEqual(read(log.name).splitlines().count("fail " + operation), 1)
+                self.assertNotIn("unloaded", read(log.name))
+
     def test_missing_symbol_reports_and_never_initializes(self):
         result = run(MISSING, "load")
         self.assertEqual(result.returncode, 1)

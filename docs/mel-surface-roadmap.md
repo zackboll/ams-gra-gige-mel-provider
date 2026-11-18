@@ -1,5 +1,13 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-GENTL-003 adds only bounded offline qualification tooling
+([evidence](tasks/GIGE-MEL-GENTL-003-validation.md)), **no MEL surface**.
+Balluff 3.7.2 initializes but crashes in isolated interface update; Euresys
+26.10 requires authenticated SDK access. Independent read-only safety and
+producer-specific physical authorization remain prerequisites. No Cognex
+GenTL inspection or camera compatibility was established. Resolve those
+qualification blockers before separately authorized GENTL-004 streaming.
+
 GIGE-MEL-GENTL-002 adds an internal, default-OFF GenTL backend foundation
 ([design](tasks/GIGE-MEL-GENTL-002-design.md)). It is read-only: enumerate,
 exact open/close, Aravis 0.8.36 GenApi and unchanged profile admission/readback.
