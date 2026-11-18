@@ -61,6 +61,48 @@ The same matrix was also run on the pre-commit working tree, with identical
 results. Hosted CI runs only the default build and does not substitute for the
 optional GenTL/Aravis lanes above.
 
+## B.1 GIGE-MEL-GENTL-002-R1 final-source qualification
+
+The R1 correction was qualified from a clean detached `git worktree` of source commit
+`7258195f0eb4264f841b00db5fa637e227697ef1` (tree `b2de1b239f8a7b564116ebcee891e3001fb94ee4`).
+That commit incorporates `main` `ac31074` (PR #41, GIGE-MEL-042). The only merge conflicts
+were documentation-only, in `implementation-profile.md` and `mel-surface-roadmap.md`, and both
+sections were kept. The environment is the same as in §A. The PR head after this commit changes
+only this record.
+
+| Lane | Configuration | Result |
+| --- | --- | --- |
+| Default | `cmake --preset dev`, `cmake --build --preset dev --parallel 2`, `ctest --preset dev` | 33/33 passed (`GIGE_MEL_BUILD_GENTL_BACKEND=OFF`) |
+| GenTL | GCC 14, GenTL lanes | 93/93 passed |
+| ASan/UBSan | GenTL lanes, `address,undefined` | 93/93 passed, no sanitizer report |
+| TSan | GenTL lanes, `thread`, no new or changed suppressions | 93/93 passed, no ThreadSanitizer warning |
+| Clang 19 | GenTL lanes, `clang++-19` | 93/93 passed |
+| Repeated R1 stability | `ctest -R gentl_backend --repeat until-fail:20` (GCC and ASan) | 19 tests × 20 passed in each lane |
+
+The 93 tests in each GenTL lane include:
+
+* `gentl_backend_contract`, with the 3 new R1 contract tests;
+* 16 isolated `gentl_backend_failure_*` processes, of which 10 are new and 3 are extended;
+* the existing GENTL-001 `gentl_consumer_contract`, its 39 R1 cases and `gentl_probe_fixture`;
+* `gentl_backend_example_fixture` and `gentl_backend_example_profile_refusal`;
+* the unchanged camera-profile suites: `camera_profile_contract`, `device_feature_contract`,
+  `cognex_profile_contract` and `dynamic_profile_module_contract`.
+
+Additional checks on the same source:
+
+* `BUILD_TESTING=OFF` with the backend ON builds, and `nm` finds 0 `*_for_testing` symbols in
+  `libgige_mel_gentl_backend.a`. `fail_allocation_for_testing` is therefore absent from
+  non-test builds.
+* `gentl_default_isolation` and `package_isolation_verifier` passed in both the default and the
+  backend-ON builds. In the backend-ON build, `libgige_mel_provider.so` has 0 GenTL/Aravis
+  dynamic symbols, 0 Aravis/GLib/libxml2 `NEEDED` entries, and no `.cti` or `GCInitLib` strings.
+* `python3 scripts/vendor_upstream.py --verify`: 97 pinned files verified.
+* `scripts/check_proprietary.py --history origin/main`: 381 Git entries, no prohibited material.
+
+The pre-commit working tree also passed the ASan, TSan and Clang 19 GenTL lanes, with 60/60
+`gentl`-labelled tests each. Hosted CI runs only the default build. It does not qualify the
+optional GenTL backend, which is established only by the local lanes above.
+
 ## C. GenTL backend tests (`gentl_backend_contract` + isolated processes)
 
 The R1 correction extends this suite to 22 contract tests and 16 isolated failure processes
@@ -155,6 +197,12 @@ Aravis is not modified.
 * No physical CIC-5000R has been contacted through GenTL.
 * The fixture's XML, register layout and values are simulated. They are not
   the camera's 1,108,591-byte XML.
+* The R1 ownership corrections are verified only against fixture-injected failures. It is not
+  established how a real producer behaves after a failed `DevClose`, `IFClose` or `TLClose`.
+  Any recovery from an unresolved native chain is also unestablished: by design the producer
+  stays blocked for the rest of the process.
+* Allocation failures are injected deterministically at named points. Real out-of-memory
+  conditions inside the producer, Aravis or GLib were not exercised.
 * These remain GENTL-003 qualification items (design §10):
   * real producer behaviour for port byte order, read-only access, URL form,
     ZIP and SHA-1;
