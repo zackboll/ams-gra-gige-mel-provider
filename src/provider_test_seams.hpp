@@ -28,4 +28,9 @@ using UnsupportedStatusHook = void (*)(UnsupportedStatusPoint, void* context) no
 // the hook. Pass nullptr to clear.
 void set_unsupported_status_hook(UnsupportedStatusHook hook, void* context) noexcept;
 
+enum class StackPoint { before_admission, after_reservation };
+using StackHook = void (*)(StackPoint, void*) noexcept;
+// Set before enable, clear after disable/detach. Invoked only on stack worker.
+void set_stack_hook(StackHook hook, void* context) noexcept;
+
 } // namespace gige_mel::test_seams
