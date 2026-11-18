@@ -1,6 +1,7 @@
 # GIGE-MEL-044 validation
 
-Disposition: **IN_PROGRESS — not READY_FOR_INDEPENDENT_REVIEW**.
+Disposition: **READY_FOR_INDEPENDENT_REVIEW** — all mandatory local final-source
+checks passed. Hosted CI remains a separate, not-yet-completed observation.
 
 ## Source identity and scope
 
@@ -76,13 +77,32 @@ collision is not described as an initial pass or silently skipped.
 
 ## Qualification matrix
 
-Combined sanitizer results and the serialized Aravis rerun are still being
-collected. No readiness disposition is inferred from preliminary passes. Hosted
-CI is separately configured to run the installed MEL-only stack consumer, and is
-not claimed as executed until actually observed.
+All builds use C++20, Debug, warnings-as-errors, bounded native contracts and no
+physical-camera selection. SDK lanes use externally provisioned Aravis 0.8.36
+and Pleora eBUS with the existing pinned GenApi headers. SDK tests use simulated
+fixtures/loopback only. No installed runtime SDK dependency is introduced.
+
+| Final-source lane | Executed result |
+| --- | --- |
+| SDK-free GCC 14.2 Debug | 37/37 pass |
+| SDK-free GCC ASan/UBSan | 37/37 pass |
+| SDK-free GCC TSan | 37/37 pass |
+| SDK-free Clang 19.1.7 Debug | 37/37 pass |
+| Aravis-only | 45/45 pass, serialized full rerun after documented port collision |
+| Pleora-only | 43/43 pass |
+| Combined Debug | 51/51 pass |
+| Combined ASan/UBSan | 51/51 pass |
+| Combined TSan | 51/51 pass |
+| Optional GenTL consumer/backend fixtures | 97/97 pass, including 60 GenTL-labeled tests |
+
+All nine mandatory local lanes passed on the final executable sources. Hosted
+CI is separately configured to run the installed MEL-only stack consumer; at the
+recorded observation its jobs were still in progress, so no hosted completion is
+claimed.
 
 Final recording sources passed the SDK-free GCC Debug, ASan/UBSan, TSan and
-Clang Debug suites (37/37 each), Pleora-only (43/43), and the optional GenTL
+Clang Debug suites (37/37 each), serialized Aravis-only (45/45), Pleora-only
+(43/43), combined Debug, ASan/UBSan and TSan (51/51 each), and the optional GenTL
 fixture suite (97/97). Both stack tests additionally passed **100 repetitions
 each** under GCC, ASan/UBSan and TSan (600 successful test executions). These
 results include the strengthened differing-byte and Health-state assertions.
@@ -113,3 +133,10 @@ making the default synthetic factory stack-capable.
 No physical-camera test is permitted or claimed. The recording fixture qualifies
 source-backed publication only, not TSI, physical sensor, time or full MEL
 conformance. See the [profile](../stacked-image-provider.md) for limitations.
+## Delivery
+
+Non-draft [PR #46](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/46)
+targets current `main` from the requested focused branch. It is open, unmerged,
+not self-approved, with auto-merge disabled. Final commit/tree are reported by
+the delivery response; only evidence documentation changed after the qualified
+implementation commit.
