@@ -61,7 +61,10 @@ The same matrix was also run on the pre-commit working tree, with identical
 results. Hosted CI runs only the default build and does not substitute for the
 optional GenTL/Aravis lanes above.
 
-## C. GenTL backend tests (`gentl_backend_contract` + 6 isolated processes)
+## C. GenTL backend tests (`gentl_backend_contract` + isolated processes)
+
+The R1 correction extends this suite to 22 contract tests and 16 isolated failure processes
+(§C.1).
 
 | Test | What it proves |
 | --- | --- |
@@ -96,6 +99,46 @@ These existing tests pass unchanged with the extended fixture:
 * GENTL-001: `gentl_consumer_contract`, its 39 R1 allocation/teardown cases and `gentl_probe_fixture`.
 * Camera profiles: `camera_profile_contract`, `device_feature_contract`,
   `cognex_profile_contract` and `dynamic_profile_module_contract`.
+
+## C.1 GIGE-MEL-GENTL-002-R1 regression tests
+
+These tests accompany the three corrections in [design §7.1](GIGE-MEL-GENTL-002-design.md). Each
+`failure_*` case runs in its own process. Every check counts the fixture's `attempt <close>`
+log lines, so "exactly one native close attempt per failed handle" is measured directly rather
+than inferred.
+
+| Test | What it proves |
+| --- | --- |
+| `enumeration_cleanup_control` (contract) | Three repeated enumerations give exact, sorted IDs, with one `IFClose` before one `TLClose` each time. A discovery error whose cleanup succeeds is reported unchanged, with no quarantine, and the producer stays usable. The final release gives `GCCloseLib` and unmap |
+| `ownership_reservation` (contract) | A second open while open is `busy` with zero native calls. Explicit close, and destruction while open, both release the identity, so it reopens 3 times. Device B is never blocked by the registry. A conclusive native refusal quarantines nothing |
+| `allocation_failure_recovery` (contract) | `native_chain`, `retirement_node` and `registry_entry` (open) and `native_chain`, `retirement_node` (enumerate) each give `resource_exhausted`, zero native calls and nothing reserved. `inspection` and `device_object` each clean up exactly once and conclusively. Each seam fires once. Control: a normal open/readback/close/destroy makes exactly one `DevClose` |
+| `failure_enum_ifclose_failure` | Successful enumeration, then `IFClose` fails: 1 attempt, `TLClose` never attempted (the child is unresolved) |
+| `failure_enum_tlclose_failure` | `IFClose` succeeds, then `TLClose` fails: 1 attempt each |
+| `failure_enum_discovery_ifclose_failure` | `IFUpdateDeviceList` error, then `IFClose` failure. The message starts with the first failure and appends `; cleanup: GenTL IFClose …`. `TLClose` is not attempted |
+| `failure_enum_discovery_tlclose_failure` | `IFUpdateDeviceList` error, then `TLClose` failure: first failure kept, cleanup appended, 1 attempt each |
+| `failure_enum_system_discovery_tlclose_failure` | `TLUpdateInterfaceList` error, then `TLClose` failure: the system-only path, with 1 `TLClose` attempt |
+| `failure_devclose_failure`, `failure_ifclose_failure`, `failure_tlclose_failure` | Extended. After the public device is destroyed, the identity (and device B) is `busy` with zero native calls, so there is no second `IFOpenDevice`. No parent is closed under an unresolved child. Destroying the backend causes no retry and no unmap. A **new backend** instance is refused by GENTL-001 producer retention, with no native call |
+| `failure_destructor_close_failure_after_backend` | The backend is destroyed first. The device destructor makes the single `DevClose` attempt and records the tombstone in the registry the backend created (ASan checks the lifetime) |
+| `failure_partial_open_cleanup_failure` | Profile admission times out, then the partial-open `DevClose` fails. `timeout` is kept with the cleanup appended. The identity is blocked |
+| `failure_consumer_open_cleanup_failure` | `DevGetPort` fails, then the consumer's own `DevClose` cleanup fails (the producer is tainted). `IFClose`/`TLClose` are never attempted. Later operations are refused |
+| `failure_allocation_cleanup_failure` | A `device_object` allocation failure, then `DevClose` fails. `resource_exhausted` is kept, the cleanup failure and the unresolved ownership are both in the message, and the identity is blocked |
+
+Every failure case ends with the shared `expect_blocked` check:
+
+* `open()` and `enumerate()` are `busy`, with zero native calls;
+* destroying the backend causes no destructor retry, and the library stays mapped;
+* `quarantined_native_sessions() == 1`;
+* a fresh backend cannot reacquire the producer.
+
+**Mutation check (working tree, GCC lane).** Each mutation below was applied alone, rebuilt and
+run against the backend tests. Every one was detected, and the source was restored byte-identical:
+
+| Mutation | Detected by |
+| --- | --- |
+| Tombstone and producer block not recorded (the old weak-pointer behaviour) | 10 failure cases |
+| A failed close drops the members instead of retiring them (destructor retry) | 12 failure cases |
+| A parent closed under a child the consumer failed to close | `failure_consumer_open_cleanup_failure` |
+| The cleanup diagnostic dropped from the first error | 6 failure cases |
 
 ## D. Defect found and mitigated during implementation
 

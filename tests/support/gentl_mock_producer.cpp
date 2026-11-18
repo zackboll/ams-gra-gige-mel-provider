@@ -363,6 +363,7 @@ GC_API TLGetInfo(TL_HANDLE handle, TL_INFO_CMD command, INFO_DATATYPE* type, voi
 GC_API TLUpdateInterfaceList(TL_HANDLE handle, bool8_t* changed, uint64_t) {
     std::lock_guard lock(state.mutex);
     if (handle != &tl_handle || !state.tl) return error(GC_ERR_INVALID_HANDLE, "TLUpdateInterfaceList handle");
+    MOCK_INJECT("TLUpdateInterfaceList"); // GIGE-MEL-GENTL-002-R1: system-level discovery error
     if (changed) *changed = false;
     return GC_ERR_SUCCESS;
 }

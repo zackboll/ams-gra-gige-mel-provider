@@ -231,13 +231,15 @@ with Aravis and Pleora.
   1. Load the producer from the exact absolute path, on first explicit use.
   2. `TLUpdateInterfaceList`, then list the interfaces.
   3. For each interface: `IFUpdateDeviceList` and the device list.
-  4. Close the interfaces and the system.
+  4. Close the interfaces and the system through the same `NativeChain` owner
+     as `open()` (§7.1).
 
   This produces stable, sorted, exact IDs. Display text is informational only
   and never used for matching.
 * **`open(id)`:**
   1. Parse the ID.
-  2. Busy if the same ID is already open through this backend.
+  2. Busy, with no native call, if the ID is open or unresolved, or if the producer
+     is blocked (§7.1).
   3. `TLOpen`, then `TLOpenInterface` for the exact interface.
   4. `IFUpdateDeviceList`, then `IFOpenDevice` with the exact device ID and the **configured**
      access: `DEVICE_ACCESS_READONLY` by default, `CONTROL` only when
@@ -275,8 +277,85 @@ the whole chain, including the producer it owns, moves into a deliberately
 leaked process-lifetime list (`quarantined_native_sessions()`). No destructor
 can retry a close, and the library is never unmapped under unresolved native
 state. A failing `GCCloseLib` keeps the existing GENTL-001 producer retention
-(`retained_producers()`). Tests cover failures of `DevClose`, `IFClose` and
-`GCCloseLib`, each in its own process.
+(`retained_producers()`). Section 7.1 records the R1 corrections to this contract.
+
+### 7.1 GIGE-MEL-GENTL-002-R1 corrections
+
+Independent review found three defects in the lifecycle above.
+
+| Finding | Root cause | Correction |
+| --- | --- | --- |
+| **R1-1** Failed enumeration cleanup retried a native close | `enumerate()` and `open_system_locked()` closed the interface and system directly, outside `NativeChain`. After a failed `IFClose`/`TLClose` the `shared_ptr` was dropped. The GENTL-001 consumer destructor (`~Interface`/`~System`) then called `IFClose`/`TLClose` again, because the object was still not `closed_`. | Enumeration now uses the same `NativeChain` owner as `open()`. `close_interface()` closes each interface once, and the final `close()` closes the system. Any failure retires the chain. A parent is never closed while a child is unresolved, and no consumer destructor ever sees an unclosed handle. |
+| **R1-2** A quarantined device could be reopened | Busy tracking was a `std::map<std::string, std::weak_ptr<GenTLDevice>>`. Quarantining the chain did not survive the public device: when it was destroyed the weak pointer expired, and a later `open()` called `IFOpenDevice` again. | A backend-owned `Ownership` registry, shared by `std::shared_ptr` with every chain, including retired ones. Each identity is *open*, *unresolved* (a permanent tombstone), or has no entry (never opened, or conclusively closed). An expired device object is never treated as a release. |
+| **R1-3** Allocation failure could conceal a cleanup failure | `make_shared<GenTLDevice>(std::move(chain), …)` transferred the chain before `open_[id] = opened` allocated. When that insertion threw, the device destructor closed the chain and its result was discarded. The catch then called `failed()` on the moved-from chain and reported only `resource_exhausted`. Separately, if `new (std::nothrow)` returned null in the `quarantine()` fallback, the handles stayed in the caller's chain and its destructor retried the closes. | Every bookkeeping allocation now happens before the transfer, and nothing can fail after it (`GenTLDevice::adopt()` is `noexcept` and allocation-free). Retirement uses a node preallocated before the first native call, so quarantine can no longer fail to allocate. |
+
+**Revised ownership and retirement contract.** A `NativeChain` is the single cleanup owner of one
+native chain (`Producer`, `System`, `Interface`, `Device`, `GenApiSession`):
+
+1. `NativeChain::prepare()` runs before any native call. It allocates the chain and its
+   retirement node, checks the registry and inserts the device reservation (*open*). An
+   unresolved or already-open identity, or a blocked producer, is refused here with `busy` and
+   no native call. A blocked identity therefore never reaches a second `IFOpenDevice`.
+2. Every native object is stored in the chain the moment it exists. The chain also holds an
+   explicit producer reference.
+3. `close()` releases GenApi (no I/O), then attempts `DevClose`, `IFClose` and `TLClose`, each at
+   most once and only if its child closed. A conclusive teardown releases the members, the
+   producer reference and the reservation. Any of these **retires** the chain instead:
+   * a failed close;
+   * a refused GenApi release;
+   * an exception while recording a close outcome (an uncertain result).
+4. Retirement is `noexcept` and allocation-free:
+   * The registry marks the identity *unresolved* and the producer blocked.
+   * The members move into the preallocated node, which is linked into a deliberately leaked
+     intrusive list. The node also pins the registry.
+
+   No consumer destructor runs, so no close is retried and the producer is never unmapped. If
+   the diagnostic text cannot be allocated, a message built in `prepare()` is returned instead.
+5. The consumer taints the producer when its own cleanup of a just-opened handle fails. For
+   example, `DevGetPort` fails, then `DevClose` fails inside `Interface::open_device`. The chain
+   is then retired without closing that handle's parents.
+6. The `NativeChain` destructor is only a safety net for an owner that never reached an explicit
+   teardown. It makes the first and only attempt, never a retry. The public
+   `GenTLDevice::close()`, also run by its destructor, is idempotent and returns its first
+   result again.
+
+**Persistent blocked-device semantics.**
+
+* *Open*: a second `open()` is `busy` ("already open"), with no native call.
+* *Conclusively closed* (explicitly or by the destructor): the entry is erased and the identity
+  can be reopened. A conclusive failed open, such as the fixture's single TL refusing a second
+  `TLOpen`, quarantines nothing.
+* *Unresolved*: the tombstone is never removed. Reopening is `busy` ("unresolved native
+  ownership") and makes no native call.
+
+An unresolved chain always leaves an interface or system open on its producer. No verified
+recovery mechanism exists, so the producer is blocked: every later `open()` (any identity) and
+`enumerate()` through it is `busy`. A tainted consumer producer is refused the same way. The
+registry outlives the public device object and the backend.
+
+A new backend instance cannot bypass the block. GENTL-001 `Producer::load` refuses to load a
+retained producer again ("already loaded (or retained)"), so the producer is never initialized
+again. No process-global state was added beyond the existing retention lists.
+
+**Allocation-failure recovery.**
+
+* `prepare()` failures (`native_chain`, `retirement_node`, `registry_entry`) happen before any
+  native call. They return `resource_exhausted` with nothing reserved.
+* `inspection` and `device_object` (the `allocate_shared` control block) fail after the native
+  open and before the transfer. The local chain, the original owner, is closed exactly once by
+  `cleanup()`.
+* `cleanup()` keeps the first error and appends `; cleanup: <diagnostic>`. If that string cannot
+  be allocated, it returns the cleanup error (which states the unresolved ownership) instead of
+  the bare allocation failure.
+* `std::bad_alloc` never escapes `enumerate()` or `open()`.
+* No handle counter can be decremented twice. Only a successful `close()` on an unclosed
+  consumer object decrements, and each object is attempted at most once.
+
+**Test seam.** `fail_allocation_for_testing(AllocationPoint)` is compiled only with
+`GIGE_MEL_GENTL_TESTING` (fixture builds). It throws `std::bad_alloc` once at the named point.
+The fixture producer gains one injectable entry point, `TLUpdateInterfaceList`, for
+system-level discovery errors. No production behaviour outside these lifecycle paths changed.
+That includes ABI, profiles, GenICam and register handling.
 
 ## 8. Build isolation
 
@@ -342,6 +421,10 @@ GENTL-001 design anticipated (E3 deferred to GENTL-005).
   * ZIP, `File:` and `http:` XML.
   * Selection catalog entry and module compatibility bit.
   * Chunk and event ports (Aravis reports them unsupported).
+* **Ownership recovery (deliberately absent):** an unresolved native chain
+  blocks its producer for the rest of the process (§7.1). No recovery or reuse
+  mechanism exists or is claimed. Releasing a blocked producer needs a separately
+  verified, producer-specific procedure.
 * **Producer compatibility risks (unqualified):**
   * The real port's byte order and whether register bytes reach the port
     unmodified (the schema-1.0 legacy question).

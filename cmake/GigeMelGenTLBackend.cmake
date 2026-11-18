@@ -46,8 +46,14 @@ if(BUILD_TESTING)
   set_tests_properties(gentl_backend_contract PROPERTIES TIMEOUT 120 LABELS gentl)
   # Each failure-injection case runs in its own process: a producer that is
   # tainted by unresolved native ownership is retained for the process lifetime.
+  # The R1 cases cover enumeration cleanup, the persistent ownership
+  # registry and allocation failure.
   foreach(case xml_read_failure genapi_creation_failure profile_admission_failure
-          devclose_failure ifclose_failure gcclose_failure)
+          devclose_failure ifclose_failure tlclose_failure gcclose_failure
+          enum_ifclose_failure enum_tlclose_failure enum_discovery_ifclose_failure
+          enum_discovery_tlclose_failure enum_system_discovery_tlclose_failure
+          destructor_close_failure_after_backend partial_open_cleanup_failure
+          consumer_open_cleanup_failure allocation_cleanup_failure)
     add_test(NAME gentl_backend_failure_${case} COMMAND gentl_backend_tests ${case})
     set_tests_properties(gentl_backend_failure_${case} PROPERTIES TIMEOUT 60 LABELS gentl)
   endforeach()

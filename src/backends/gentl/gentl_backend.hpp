@@ -60,6 +60,9 @@ std::optional<Inspection> inspect(const ICameraDevice&);
 
 // Native sessions whose close could not be resolved; they (and their
 // producer) are retained, never re-closed or unmapped, for the process lifetime.
+// A retired session's device identity stays blocked (busy, no native call)
+// even after its public device object and the backend are destroyed, and the
+// producer then refuses every further operation (GIGE-MEL-GENTL-002-R1).
 std::size_t quarantined_native_sessions() noexcept;
 
 // Test-only (offline fixtures): runs `callback` against the device's live
@@ -68,6 +71,20 @@ std::size_t quarantined_native_sessions() noexcept;
 // apply() stays unsupported. Not compiled into non-testing builds.
 #ifdef GIGE_MEL_GENTL_TESTING
 Status with_features_for_testing(ICameraDevice&, const std::function<Status(device_features::IDeviceFeatures&)>&);
+
+// Test-only deterministic allocation-failure injection. The next allocation
+// at `point` throws std::bad_alloc once, then the seam disarms itself.
+// Returns the previously armed point. None of these points is reached after
+// native ownership has transferred into the public device object.
+enum class AllocationPoint {
+    none,
+    native_chain,    // the chain owner itself (before any native call)
+    retirement_node, // the preallocated quarantine node (before any native call)
+    registry_entry,  // the open-device reservation (before any native call)
+    inspection,      // device diagnostics, after profile admission (before transfer)
+    device_object,   // the GenTLDevice/shared control block (before transfer)
+};
+AllocationPoint fail_allocation_for_testing(AllocationPoint point) noexcept;
 #endif
 
 } // namespace gige_mel::backend::gentl_backend

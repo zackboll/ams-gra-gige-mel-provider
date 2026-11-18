@@ -707,6 +707,123 @@ void profile_portability() {
     CHECK((loaded.compatible_backends & ~(p::module::aravis | p::module::pleora)) == 0);
 }
 
+// ---- GIGE-MEL-GENTL-002-R1 controls (conclusive cleanup: no quarantine) -----
+
+// Repeated enumeration with a conclusive teardown each time. A discovery error
+// whose cleanup succeeds is reported as-is, without quarantine, and the
+// producer stays usable.
+void enumeration_cleanup_control() {
+    Fixture fixture;
+    auto backend = g::make_backend(g::Options{GENTL_MOCK, g::DeviceAccess::read_only, 100ms},
+                                   p::make_mono_free_running_profile());
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        fixture.clear();
+        auto devices = take(backend->enumerate());
+        CHECK(devices.size() == 2 && devices[0].device_id == device_a);
+        CHECK(devices[1].device_id == g::compose_device_id("mock-if-0", "mock-dev-B"));
+        CHECK(fixture.count("attempt IFClose") == 1 && fixture.count("IFClose") == 1);
+        CHECK(fixture.count("attempt TLClose") == 1 && fixture.count("TLClose") == 1);
+        CHECK(fixture.index("IFClose") < fixture.index("TLClose"));
+    }
+    {
+        Mock mock;
+        mock.fail("IFUpdateDeviceList");
+    }
+    fixture.clear();
+    auto failed = backend->enumerate();
+    expect(failed, ErrorCode::io_error, "IFUpdateDeviceList");
+    CHECK(!contains(failed.error().message, "cleanup") && !contains(failed.error().message, "retained"));
+    CHECK(fixture.count("IFClose") == 1 && fixture.count("TLClose") == 1);
+    {
+        Mock mock;
+        mock.fail("");
+    }
+    CHECK(take(backend->enumerate()).size() == 2);
+    CHECK(g::quarantined_native_sessions() == 0);
+    fixture.clear();
+    backend.reset();
+    CHECK(fixture.count("GCCloseLib") == 1 && !mapped(GENTL_MOCK)); // conclusive: unloaded
+}
+
+// The registry reservation: busy while open, released by a conclusive close
+// (explicit or by the destructor). It never blocks an unrelated identity.
+void ownership_reservation() {
+    Fixture fixture;
+    const auto device_b = g::compose_device_id("mock-if-0", "mock-dev-B");
+    auto s = prepare(cognex_profile());
+    {
+        Mock mock;
+        mock.model(fx::Model{});
+    }
+    auto first = take(s.backend->open(device_a));
+    fixture.clear();
+    expect(s.backend->open(device_a), ErrorCode::busy, "already open");
+    CHECK(fixture.calls().empty()); // refused before any native call
+    // Device B is not blocked by the registry. The fixture's single TL refuses
+    // it natively, and that refusal is conclusive, so nothing is quarantined.
+    expect(s.backend->open(device_b), ErrorCode::busy, "TLOpen");
+    CHECK(fixture.count("IFOpenDevice") == 0 && g::quarantined_native_sessions() == 0);
+    CHECK(first->close());
+    first.reset();
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        fixture.clear();
+        auto again = take(s.backend->open(device_a));
+        CHECK(fixture.count("IFOpenDevice mock-dev-A") == 1);
+        if (cycle == 0) CHECK(again->close());
+    } // otherwise destroyed open: the destructor's conclusive close releases it
+    auto other = take(s.backend->open(device_b));
+    CHECK(other->close());
+    CHECK(g::quarantined_native_sessions() == 0);
+}
+
+// R1-3: deterministic allocation failure at every point before the transfer.
+void allocation_failure_recovery() {
+    using A = g::AllocationPoint;
+    Fixture fixture;
+    auto s = prepare(cognex_profile());
+    {
+        Mock mock;
+        mock.model(fx::Model{});
+    }
+    // Before any native call: nothing to clean up and nothing reserved.
+    for (auto point : {A::native_chain, A::retirement_node, A::registry_entry}) {
+        fixture.clear();
+        CHECK(g::fail_allocation_for_testing(point) == A::none);
+        expect(s.backend->open(device_a), ErrorCode::resource_exhausted, "allocation failed");
+        CHECK(fixture.calls().empty());
+        CHECK(g::fail_allocation_for_testing(A::none) == A::none); // fired exactly once
+    }
+    for (auto point : {A::native_chain, A::retirement_node}) {
+        fixture.clear();
+        g::fail_allocation_for_testing(point);
+        expect(s.backend->enumerate(), ErrorCode::resource_exhausted, "allocation failed");
+        CHECK(fixture.calls().empty());
+    }
+    // After the native open, before the transfer: the original owner cleans
+    // up exactly once and conclusively, so there is no quarantine.
+    for (auto point : {A::inspection, A::device_object}) {
+        fixture.clear();
+        g::fail_allocation_for_testing(point);
+        auto opened = s.backend->open(device_a);
+        expect(opened, ErrorCode::resource_exhausted, "allocation failed");
+        CHECK(!contains(opened.error().message, "cleanup"));
+        CHECK(fixture.count("IFOpenDevice") == 1 && fixture.count("attempt DevClose") == 1);
+        CHECK(fixture.count("DevClose mock-dev-A") == 1);
+        CHECK(fixture.count("attempt IFClose") == 1 && fixture.count("attempt TLClose") == 1);
+        CHECK(g::genapi_object_counts().devices == 0 && g::genapi_object_counts().genicams == 0);
+        CHECK(g::fail_allocation_for_testing(A::none) == A::none);
+    }
+    CHECK(g::quarantined_native_sessions() == 0);
+    // No reservation leaked. Normal allocation and destruction (control).
+    fixture.clear();
+    auto device = take(s.backend->open(device_a));
+    CHECK(take(device->configuration()).width == 2592);
+    CHECK(device->close());
+    device.reset();
+    CHECK(fixture.count("attempt DevClose") == 1); // exactly one close, none from the destructor
+    CHECK(take(s.backend->enumerate()).size() == 2);
+}
+
 // ---- Failure injection (one process per case; see CMake) -------------------
 
 b::Result<std::shared_ptr<b::ICameraDevice>> open_failing(const std::function<void(Mock&)>& inject, Fixture& fixture) {
@@ -767,11 +884,27 @@ void case_close_failure(const char* function) {
     CHECK(fixture.count(std::string("attempt ") + function) == 1); // attempted exactly once
     CHECK(g::genapi_object_counts().genicams == 0);               // GenApi released without native I/O
     expect(device->close(), ErrorCode::io_error, function);       // same result, no second native call
-    device.reset();
+    // R1: a parent is never closed while its child is unresolved.
+    const std::string fn(function);
+    if (fn == "DevClose") CHECK(fixture.count("attempt IFClose") == 0 && fixture.count("attempt TLClose") == 0);
+    if (fn == "IFClose") CHECK(fixture.count("attempt TLClose") == 0);
+    device.reset(); // public object gone: the identity must stay blocked (R1-2)
+    { Mock mock; mock.fail(""); } // natively, a reopen would now succeed
+    const auto before = fixture.calls().size();
+    expect(s.backend->open(device_a), ErrorCode::busy, "unresolved native ownership");
+    expect(s.backend->open(g::compose_device_id("mock-if-0", "mock-dev-B")), ErrorCode::busy, "unresolved");
+    expect(s.backend->enumerate(), ErrorCode::busy, "unresolved native ownership");
+    CHECK(fixture.calls().size() == before && fixture.count("IFOpenDevice") == 0); // no native call at all
     s.backend.reset();
     CHECK(fixture.count(std::string("attempt ") + function) == 1); // no destructor retry
     CHECK(g::quarantined_native_sessions() == 1);
     CHECK(mapped(GENTL_MOCK)); // never unmapped under unresolved native ownership
+    // Another backend instance cannot bypass the block: the retained producer
+    // is still registered, so it is never loaded or initialized again.
+    auto again = g::make_backend(g::Options{GENTL_MOCK}, cognex_profile());
+    expect(again->open(device_a), ErrorCode::busy, "already loaded (or retained)");
+    expect(again->enumerate(), ErrorCode::busy, "already loaded (or retained)");
+    CHECK(fixture.calls().size() == before);
 }
 
 void case_gcclose_failure() {
@@ -790,6 +923,144 @@ void case_gcclose_failure() {
     CHECK(gige_mel::gentl::retained_producers() == 1 && mapped(GENTL_MOCK));
 }
 
+// ---- GIGE-MEL-GENTL-002-R1 isolated failure cases (one process each) --------
+
+// Every R1 refusal must be made with no native call. The retained producer
+// must stay mapped after the backend is destroyed, and a new backend cannot
+// reacquire it.
+void expect_blocked(Fixture& fixture, std::shared_ptr<b::ICameraBackend>& backend, std::string_view why) {
+    const auto before = fixture.calls().size();
+    expect(backend->open(device_a), ErrorCode::busy, why);
+    expect(backend->enumerate(), ErrorCode::busy, "unresolved");
+    CHECK(fixture.calls().size() == before);
+    backend.reset();
+    CHECK(fixture.calls().size() == before && mapped(GENTL_MOCK)); // no destructor retry, no unload
+    CHECK(g::quarantined_native_sessions() == 1);
+    auto again = g::make_backend(g::Options{GENTL_MOCK}, p::make_mono_free_running_profile());
+    expect(again->enumerate(), ErrorCode::busy, "already loaded (or retained)");
+    CHECK(fixture.calls().size() == before);
+}
+
+// R1-1: enumeration cleanup. `failures` is injected from GCInitLib onward.
+void case_enumeration_cleanup(const char* failures, const std::string& first, const std::string& cleanup,
+                              std::size_t ifclose_attempts, std::size_t tlclose_attempts) {
+    Fixture fixture({{"GENTL_MOCK_FAIL", failures}});
+    std::shared_ptr<b::ICameraBackend> backend =
+        g::make_backend(g::Options{GENTL_MOCK, g::DeviceAccess::read_only, 100ms}, p::make_mono_free_running_profile());
+    auto listed = backend->enumerate();
+    expect(listed, ErrorCode::io_error, first);
+    const auto& message = listed.error().message;
+    CHECK(message.rfind("GenTL " + first + " returned", 0) == 0); // the FIRST failure is preserved
+    if (!cleanup.empty()) CHECK(contains(message, "; cleanup: GenTL " + cleanup + " returned")); // appended
+    CHECK(contains(message, "retained for the process lifetime"));
+    CHECK(fixture.count("attempt IFClose") == ifclose_attempts); // each handle attempted at most once
+    CHECK(fixture.count("attempt TLClose") == tlclose_attempts); // never while a child is unresolved
+    CHECK(fixture.count("IFOpenDevice") == 0 && fixture.count("GCCloseLib") == 0);
+    expect_blocked(fixture, backend, "unresolved native ownership");
+    CHECK(fixture.count("attempt IFClose") == ifclose_attempts && fixture.count("attempt TLClose") == tlclose_attempts);
+}
+
+// R1-2: a public device destroyed AFTER its backend still records its failed
+// close in the registry that backend created (sanitizers check the lifetime).
+void case_destructor_close_failure_after_backend() {
+    Fixture fixture;
+    auto s = prepare(cognex_profile());
+    {
+        Mock mock;
+        mock.model(fx::Model{});
+    }
+    auto device = take(s.backend->open(device_a));
+    {
+        Mock mock;
+        mock.fail("DevClose=-1010");
+    }
+    s.backend.reset();
+    fixture.clear();
+    device.reset(); // destructor: the first and only DevClose attempt, then retirement
+    CHECK(fixture.count("attempt DevClose") == 1 && fixture.count("attempt IFClose") == 0);
+    CHECK(fixture.count("attempt TLClose") == 0 && fixture.count("GCCloseLib") == 0);
+    CHECK(g::quarantined_native_sessions() == 1 && mapped(GENTL_MOCK));
+    auto again = g::make_backend(g::Options{GENTL_MOCK}, cognex_profile());
+    expect(again->open(device_a), ErrorCode::busy, "already loaded (or retained)");
+    CHECK(fixture.count("IFOpenDevice") == 0 && fixture.count("attempt DevClose") == 1);
+}
+
+// R1-2: profile admission fails, then its partial-open DevClose fails.
+void case_partial_open_cleanup_failure() {
+    Fixture fixture;
+    auto s = prepare(cognex_profile());
+    {
+        Mock mock;
+        mock.model(fx::Model{});
+        mock.fail_read(fx::vendor, -1011);
+        mock.fail("DevClose=-1010");
+    }
+    fixture.clear();
+    auto opened = s.backend->open(device_a);
+    expect(opened, ErrorCode::timeout, "DeviceVendorName"); // first failure and its code are kept
+    CHECK(contains(opened.error().message, "; cleanup: GenTL DevClose returned GC_ERR_IO"));
+    CHECK(fixture.count("attempt DevClose") == 1 && fixture.count("attempt IFClose") == 0);
+    CHECK(fixture.count("attempt TLClose") == 0 && g::genapi_object_counts().genicams == 0);
+    {
+        Mock mock;
+        mock.fail_read(0, 0);
+        mock.fail("");
+    }
+    expect_blocked(fixture, s.backend, "unresolved native ownership");
+    CHECK(fixture.count("IFOpenDevice") == 1 && fixture.count("attempt DevClose") == 1);
+}
+
+// R1-2: the consumer's own cleanup of a just-opened device fails (DevGetPort,
+// then DevClose). The producer is tainted and that handle's parents stay open.
+void case_consumer_open_cleanup_failure() {
+    Fixture fixture;
+    auto s = prepare(cognex_profile());
+    {
+        Mock mock;
+        mock.model(fx::Model{});
+        mock.fail("DevGetPort,DevClose=-1010");
+    }
+    fixture.clear();
+    auto opened = s.backend->open(device_a);
+    expect(opened, ErrorCode::io_error, "DevGetPort");
+    CHECK(contains(opened.error().message, "cleanup GenTL DevClose returned GC_ERR_IO"));
+    CHECK(contains(opened.error().message, "parent handles were not closed"));
+    CHECK(fixture.count("attempt DevClose") == 1 && fixture.count("attempt IFClose") == 0);
+    CHECK(fixture.count("attempt TLClose") == 0);
+    {
+        Mock mock;
+        mock.fail("");
+    }
+    expect_blocked(fixture, s.backend, "unresolved native close");
+    CHECK(fixture.count("IFOpenDevice") == 1 && fixture.count("attempt DevClose") == 1);
+}
+
+// R1-3: allocation fails after the native open, then the cleanup it triggers
+// fails. Neither failure may conceal the other.
+void case_allocation_cleanup_failure() {
+    Fixture fixture;
+    auto s = prepare(cognex_profile());
+    {
+        Mock mock;
+        mock.model(fx::Model{});
+        mock.fail("DevClose=-1010");
+    }
+    fixture.clear();
+    g::fail_allocation_for_testing(g::AllocationPoint::device_object);
+    auto opened = s.backend->open(device_a);
+    expect(opened, ErrorCode::resource_exhausted, "allocation failed"); // first failure kept
+    CHECK(contains(opened.error().message, "; cleanup: GenTL DevClose returned GC_ERR_IO"));
+    CHECK(contains(opened.error().message, "retained for the process lifetime"));
+    CHECK(fixture.count("attempt DevClose") == 1 && fixture.count("attempt IFClose") == 0);
+    CHECK(fixture.count("attempt TLClose") == 0 && g::genapi_object_counts().genicams == 0);
+    {
+        Mock mock;
+        mock.fail("");
+    }
+    expect_blocked(fixture, s.backend, "unresolved native ownership");
+    CHECK(fixture.count("IFOpenDevice") == 1 && fixture.count("attempt DevClose") == 1);
+}
+
 } // namespace
 
 
@@ -800,7 +1071,21 @@ int main(int argc, char** argv) {
         {"profile_admission_failure", case_profile_admission_failure},
         {"devclose_failure", [] { case_close_failure("DevClose"); }},
         {"ifclose_failure", [] { case_close_failure("IFClose"); }},
+        {"tlclose_failure", [] { case_close_failure("TLClose"); }},
         {"gcclose_failure", case_gcclose_failure},
+        // GIGE-MEL-GENTL-002-R1
+        {"enum_ifclose_failure", [] { case_enumeration_cleanup("IFClose=-1010", "IFClose", "", 1, 0); }},
+        {"enum_tlclose_failure", [] { case_enumeration_cleanup("TLClose=-1010", "TLClose", "", 1, 1); }},
+        {"enum_discovery_ifclose_failure",
+         [] { case_enumeration_cleanup("IFUpdateDeviceList,IFClose=-1010", "IFUpdateDeviceList", "IFClose", 1, 0); }},
+        {"enum_discovery_tlclose_failure",
+         [] { case_enumeration_cleanup("IFUpdateDeviceList,TLClose=-1010", "IFUpdateDeviceList", "TLClose", 1, 1); }},
+        {"enum_system_discovery_tlclose_failure",
+         [] { case_enumeration_cleanup("TLUpdateInterfaceList,TLClose=-1010", "TLUpdateInterfaceList", "TLClose", 0, 1); }},
+        {"destructor_close_failure_after_backend", case_destructor_close_failure_after_backend},
+        {"partial_open_cleanup_failure", case_partial_open_cleanup_failure},
+        {"consumer_open_cleanup_failure", case_consumer_open_cleanup_failure},
+        {"allocation_cleanup_failure", case_allocation_cleanup_failure},
     };
     const std::vector<std::pair<const char*, void (*)()>> tests{
         {"construction_performs_no_io", construction_performs_no_io},
@@ -822,6 +1107,9 @@ int main(int argc, char** argv) {
         {"unbound_port_access_refused", unbound_port_access_refused},
         {"concurrent_transactions", concurrent_transactions},
         {"profile_portability", profile_portability},
+        {"enumeration_cleanup_control", enumeration_cleanup_control},
+        {"ownership_reservation", ownership_reservation},
+        {"allocation_failure_recovery", allocation_failure_recovery},
     };
     try {
         if (argc == 2) {
