@@ -206,4 +206,65 @@ subprocess-mode close failures do not unwind/retry/unload. They do not qualify
 Balluff's device ownership. Supervisor tests exercise process signals/timeouts
 without any proprietary runtime.
 
-Local matrix results and hosted CI are recorded below after execution.
+### Executed local checks
+
+All lanes configure/build with warnings-as-errors and `--parallel 2`; optional
+lanes enable `GIGE_MEL_BUILD_GENTL_PROBE`, `GIGE_MEL_BUILD_GENTL_BACKEND`, examples,
+the external header path and pinned Aravis `PKG_CONFIG_PATH`. Commands live in
+the external `qualify.sh`, with per-lane logs and exit files. GCC is Debian
+14.2.0-19; Clang is Debian 19.1.7. No new sanitizer suppressions.
+
+| Lane | Result |
+| --- | --- |
+| Required `cmake --preset dev`, build preset dev, CTest preset dev | configure/build exit 0, **34/34 passed** |
+| Optional GCC 14 | configure/build exit 0, **94/94 passed** |
+| Optional Clang 19 | configure/build exit 0, **94/94 passed** |
+| Optional GCC 14 ASan/UBSan, repaired host environment | configure/build/test exit 0, **94/94 passed**, leak detection/halt-on-error; `asan-isolated.log` |
+| Optional GCC 14 TSan, repaired host environment | configure/build/test exit 0, **94/94 passed**, halt-on-error, no new suppressions; `tsan.log` |
+| Optional backend `BUILD_TESTING=OFF`, repaired host environment | configure/build exit 0; consumer/backend archives have no `for_testing` or allocation-injection symbol |
+| Final probe/supervisor changes, GCC and Clang | rebuilt probe, focused **2/2 passed** each (11 Python probe cases and 4 SDK-free supervisor cases) |
+| Header-free default isolation | configure with GenTL OFF and nonexistent header path, provider build, six static isolation assertions: exit 0 |
+| Provider binary isolation, GCC and Clang | zero GenTL/Aravis symbols; zero Aravis/GLib/libxml2 dependencies |
+| `python3 scripts/vendor_upstream.py --verify` | exit 0, 97 pinned files |
+| `python3 scripts/check_proprietary.py --history origin/main` | exit 0, index and new history guarded (369 entries at source commit) |
+| Supervised final fixture, new external directory | namespace check, two load children, interface child all exit 0; **simulation only** |
+| Original Balluff evidence integrity | all recorded log lengths and SHA-256 hashes reverified, original bundle unmodified |
+
+The full GCC/Clang lanes preceded the final additional probe error-path regression
+and external-child-working-directory adjustment. The changed paths were rebuilt
+and retested specifically afterward; unrelated successful contracts were not
+repeated merely to wait for hosted CI. Source commit for these final focused
+checks: `4874bafd0a3fc0f18abe31873967bfc0d6fe2a4c`, tree
+`0bae430190664ee562f9965455bb1cb59518f9eb`. Subsequent commits update this record.
+The successful sanitizer and BUILD_TESTING=OFF checks used that committed source;
+only this validation document was being updated during those runs.
+
+**Host qualification repair, not a source workaround.** `/tmp` exhausted its
+1,048,576 inode allowance (despite free byte capacity). Initial ASan/TSan builds
+and BUILD_TESTING=OFF configure failed creating compiler temporaries; logs are
+retained as `*-initial-tmp-full.log`. A first ASan retry built with external
+`TMPDIR` but existing C++ fixtures hard-code `/tmp` for logs, so those assertions
+failed on `mkstemp`, not on an ownership/sanitizer diagnostic. Those failures are
+retained in `asan-tmp-inodes-full.log`/the first retry log; they are not passing
+tests. No unrelated `/tmp` content was deleted. Final repaired checks use
+`TMPDIR=/home/zboll/gentl-003-evidence/tmp` and a private user/mount namespace
+binding that directory over **only the test processes'** `/tmp`. No host mount,
+test-source contract, network interface or sanitizer suppression was changed:
+
+```sh
+unshare --user --map-root-user --mount -- bash -c \
+  'mount --bind /home/zboll/gentl-003-evidence/tmp /tmp &&
+   ctest --test-dir "$1" --output-on-failure' bash BUILD_DIRECTORY
+```
+
+An initial ad-hoc binary-isolation regex also falsely matched `GLIBCXX` when
+searching for `glib`. GCC/Clang CTest had already passed 94/94; exact GenTL/Aravis
+symbol and SDK dependency checks were rerun successfully without rebuilding
+unrelated source. Original lane exit 1 from this inspection is preserved in
+`gcc.exit`/`clang.exit`; corrected isolation logs and final focused results are
+separate. No test failure is hidden by the corrected inspection.
+
+Hosted CI is checked once after the final push and reported on the PR. Hosted
+default/Aravis jobs are not the optional locally executed GenTL matrix and never
+run the proprietary producer or physical camera. Independent technical review
+is requested; passing tests are not merge approval.
