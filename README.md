@@ -27,6 +27,13 @@ is never selected or installed. Building on it, the default-OFF
 runs the unchanged camera profiles over GenTL GenApi. It is read-only, not
 installed, not in the selection catalog, and qualified only against a simulated fixture.
 
+The [GENTL-003 qualification supervisor](docs/tasks/GIGE-MEL-GENTL-003-design.md)
+runs the probe offline in bounded, network-isolated subprocesses and retains
+structured evidence outside Git. Balluff 3.7.2 initializes but crashes during
+isolated interface update; Euresys 26.10 needs authenticated SDK access. Neither
+producer's read-only camera behavior is qualified. No physical Cognex contact
+was performed in GENTL-003; see the [actual results](docs/tasks/GIGE-MEL-GENTL-003-validation.md).
+
 The optional [Pleora stream-only traffic audit](docs/pleora-stream-only-audit.md)
 observed native GVCP discovery during isolated unicast Open, which then failed to
 establish a loopback receiver. Passive reception remains **incomplete**, not a

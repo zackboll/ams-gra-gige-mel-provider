@@ -8,6 +8,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -33,6 +34,8 @@ constexpr const char* usage_text =
     "                                remote AcquisitionStart or writes features; a device that is\n"
     "                                not already streaming delivers nothing (reported as timeouts).\n"
     "  --repeat N (before COMMAND) repeats the whole load..unload cycle N times\n"
+    "  --offline-qualification (before COMMAND) restricts to load/interfaces, fails on interface\n"
+    "                                update errors, exits without destructor retry after close failure\n"
     "  --no-interface-info (before COMMAND) skips TLGetInterfaceInfo, which faults in some producers\n";
 
 void print(std::string_view indent, const std::vector<gentl::Property>& properties) {
@@ -55,6 +58,7 @@ struct Request {
     std::string producer, command, interface_id, device_id;
     unsigned frames{0}, reopen{1}, repeat{1};
     bool interface_info{true};
+    bool offline_qualification{false};
     gentl::Access access{gentl::Access::read_only};
     bool allow_acquisition{false};
 };
@@ -153,6 +157,7 @@ int inspect(gentl::Interface& interface, const Request& request) {
 }
 
 int session(const Request& request) {
+    std::cout << "BEGIN Producer::load (dlopen, function table, GCInitLib)\n";
     auto producer = gentl::Producer::load(request.producer);
     if (!producer) return fail(producer.error());
     std::cout << "producer " << request.producer << " loaded and initialized\n";
@@ -163,12 +168,36 @@ int session(const Request& request) {
               << " acquisition available=" << producer.value()->has_acquisition() << '\n';
     int status = 0;
     if (request.command != "load") {
+        std::cout << "BEGIN TLOpen\n";
         auto system = producer.value()->open_system();
         if (!system) return fail(system.error());
+        std::cout << "END TLOpen; BEGIN TLGetInfo\n";
         print("  system ", system.value()->info());
-        if (auto s = system.value()->update_interfaces(1000ms); !s) std::cout << "  " << s.error().message() << '\n';
+        std::cout << "BEGIN TLUpdateInterfaceList\n";
+        if (auto s = system.value()->update_interfaces(1000ms); !s) {
+            std::cout << "  " << s.error().message() << '\n';
+            if (request.offline_qualification) status = 1;
+        }
+        std::cout << "END TLUpdateInterfaceList\n";
+        if (status) {
+            std::cout << "BEGIN TLClose after update failure\n";
+            if (auto s = system.value()->close(); !s) std::_Exit(fail(s.error()));
+            std::cout << "BEGIN GCCloseLib after update failure\n";
+            if (auto s = producer.value()->close(); !s) std::_Exit(fail(s.error()));
+            return status;
+        }
+        std::cout << "BEGIN TLGetNumInterfaces/TLGetInterfaceID/TLGetInterfaceInfo\n";
         auto interfaces = system.value()->interfaces(request.interface_info);
-        if (!interfaces) return fail(interfaces.error());
+        if (!interfaces) {
+            const int failed = fail(interfaces.error());
+            if (request.offline_qualification) {
+                std::cout << "BEGIN TLClose after enumeration failure\n";
+                if (auto s = system.value()->close(); !s) std::_Exit(fail(s.error()));
+                std::cout << "BEGIN GCCloseLib after enumeration failure\n";
+                if (auto s = producer.value()->close(); !s) std::_Exit(fail(s.error()));
+            }
+            return failed;
+        }
         for (const auto& description : interfaces.value()) {
             std::cout << "  interface " << description.id << '\n';
             print("    ", description.properties);
@@ -187,9 +216,21 @@ int session(const Request& request) {
             if (request.command == "inspect" || request.command == "acquire") status = inspect(*interface.value(), request);
             if (auto s = interface.value()->close(); !s) return fail(s.error());
         }
-        if (auto s = system.value()->close(); !s) return fail(s.error());
+        std::cout << "BEGIN TLClose\n";
+        if (auto s = system.value()->close(); !s) {
+            const int failed = fail(s.error());
+            if (request.offline_qualification) std::_Exit(failed);
+            return failed;
+        }
+        std::cout << "END TLClose\n";
     }
-    if (auto s = producer.value()->close(); !s) return fail(s.error());
+    std::cout << "BEGIN GCCloseLib\n";
+    if (auto s = producer.value()->close(); !s) {
+        const int failed = fail(s.error());
+        if (request.offline_qualification) std::_Exit(failed);
+        return failed;
+    }
+    std::cout << "END GCCloseLib; native library unmap follows session destruction\n";
     std::cout << "closed in order: device, interface, system, library\n";
     return status;
 }
@@ -206,8 +247,13 @@ int parse_request(const std::vector<std::string_view>& args, Request& request) {
         request.interface_info = false;
         ++at;
     }
+    if (at < args.size() && args[at] == "--offline-qualification") {
+        request.offline_qualification = true;
+        ++at;
+    }
     if (at >= args.size()) return 2;
     request.command = std::string(args[at++]);
+    if (request.offline_qualification && request.command != "load" && request.command != "interfaces") return 2;
     const auto take = [&](std::string& out) {
         if (at >= args.size()) return false;
         out = std::string(args[at++]);
@@ -251,6 +297,8 @@ int parse_request(const std::vector<std::string_view>& args, Request& request) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // Keep the last operation marker even if a proprietary producer crashes.
+    std::cout << std::unitbuf;
     const std::vector<std::string_view> args(argv + 1, argv + argc);
     if (args.size() == 1 && args[0] == "--help") { std::cout << usage_text; return 0; }
     Request request;
