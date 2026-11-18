@@ -1,5 +1,18 @@
 # Experimental image-stream profile, version 0.1
 
+## GenTL producer qualification tooling (GIGE-MEL-GENTL-003)
+
+The uninstalled offline supervisor adds no backend or MEL capability. It runs
+only producer load/interface diagnostics in bounded network-isolated children.
+Balluff Impact Acquire 3.7.2.4495 (GenTL 1.6) initialized/closed in three children,
+then crashed in `TLUpdateInterfaceList` in the isolated no-camera environment.
+Euresys Gigelink 26.10 was not obtained (authenticated download required).
+No real-producer GenApi, read-only wire behavior or physical-camera operation is
+qualified. Existing backend/profile qualification remains fixture-only; all
+ownership, XML limits and admission policies are unchanged. See
+[design](tasks/GIGE-MEL-GENTL-003-design.md) and
+[validation](tasks/GIGE-MEL-GENTL-003-validation.md).
+
 ## Source-backed Image LOS foundation (GIGE-MEL-043)
 
 The common provider conditionally implements `LineOfSightEuler` and
