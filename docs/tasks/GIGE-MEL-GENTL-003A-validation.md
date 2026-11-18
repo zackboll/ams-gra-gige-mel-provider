@@ -1,7 +1,8 @@
 # GIGE-MEL-GENTL-003A — Validation record
 
 Companion [design](GIGE-MEL-GENTL-003A-design.md). Incorporated main:
-`2a8a386553ecdfd7a89d95bec3f8c30843c5b2a1` (PR #43).
+`af1f694fa0e1edcc968cfdef945341a17aa5c614` (PR #44, including PR #43 at
+`2a8a386553ecdfd7a89d95bec3f8c30843c5b2a1`).
 Commit/tree and hosted CI disposition are reported on the PR to avoid self-reference.
 
 ## Evidence classes and producer blockers
@@ -66,8 +67,39 @@ Pre-commit development checks:
 * Upstream manifest verified: 97 unchanged files. No changes under consumer or
   GenTL backend implementation directories.
 
-The final committed-source compiler/sanitizer/default-build matrix and its exact
-exit statuses are recorded below after execution. Hosted default/Aravis CI is
+### Committed-source qualification before latest-main integration
+
+Source `cbeb422e3ac17d54dde0858501d4e243363d6304`, tree
+`442a5b38592621317dfe3cd3213600203129d2fb`:
+
+| Check | Executed result |
+| --- | --- |
+| Default configure/build/development CTest | exit 0, **35/35** |
+| Optional GCC 14.2.0 configure/build/CTest | exit 0, **95/95**, `final-gcc.log` |
+| Optional Clang 19.1.7 configure/build/CTest | exit 0, **95/95**, `clang.log` |
+| Optional GCC ASan/UBSan | exit 0, **95/95**, leak detection/halt-on-error, `asan.log` |
+| Optional GCC TSan | exit 0, **95/95**, halt-on-error, no new suppressions, `tsan.log` |
+| Optional `BUILD_TESTING=OFF` | configure/build exit 0; no testing injection symbols in consumer/backend archives |
+| Header-free default `BUILD_TESTING=OFF` | configure/provider build exit 0 with nonexistent GenTL header path; six isolation tests pass |
+| Provider binary isolation | no GenTL/Aravis symbols or Aravis/GLib/libxml2 dependencies |
+| Vendor upstream / proprietary guard | exit 0; 97 pinned files / 375 Git entries |
+| Manual isolated SDK-free live matrix | **9/9** expected outcomes, `committed-live/matrix.json`; all evidence hashes independently reverified |
+| Non-wire singleton fixture negative | native probe exit 0 with READONLY and all close/quiet markers, but **WIRE_OBSERVATION_UNAVAILABLE** as required |
+| Euresys unavailable record | **PRODUCER_NOT_AVAILABLE**, no SDK launched |
+
+An initial GCC configure/build failed after changing compiler in a reused build
+tree cleared nested external profiles' source-root cache setting. `gcc.log` and
+exit 1 are preserved. A fresh build directory fixed the build-environment issue;
+no source/test workaround. `/tmp` remains inode-exhausted: compiler/Python
+temporaries use the external evidence `tmp`, and CTest runs inside a private
+user/mount namespace binding that directory over only the tests' `/tmp`. No host
+mount/network or sanitizer suppression change was made.
+
+Latest main advanced during validation with PR #44. It was merged as
+`990ba6279a1816d1bdaecc15a51441ab4441cadc`; production/provider changes from that
+merge belong to main, not this harness. The full default/optional matrix is
+repeated on the final integrated committed source; exact final results/source
+identities are reported in the PR delivery comment. Hosted default/Aravis CI is
 separate from optional local GenTL qualification, and never runs a real producer.
 
 ## Remaining qualification

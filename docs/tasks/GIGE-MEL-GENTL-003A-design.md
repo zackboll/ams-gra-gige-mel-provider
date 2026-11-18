@@ -1,6 +1,7 @@
 # GIGE-MEL-GENTL-003A — Isolated read-only wire qualification
 
-Incorporated main: `2a8a386553ecdfd7a89d95bec3f8c30843c5b2a1` (merged PR #43).
+Incorporated main: `af1f694fa0e1edcc968cfdef945341a17aa5c614` (merged PR #44,
+including dependency PR #43 at `2a8a386553ecdfd7a89d95bec3f8c30843c5b2a1`).
 See [executed validation](GIGE-MEL-GENTL-003A-validation.md).
 
 ## Boundaries and foundation audit
