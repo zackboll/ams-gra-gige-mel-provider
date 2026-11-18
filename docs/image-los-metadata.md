@@ -61,6 +61,10 @@ calls consumers. The source keeps at most one pending latest observation,
 coalescing older pending observations under load. Cancellation is concurrent,
 nonblocking and wakes receive promptly; the provider joins before destruction.
 Backend implementers must document their finite open/receive/cancel bounds.
+The recording implementation performs no I/O at support/open/cancel, uses a
+single mutex and owned latest-value slot, and bounds its receive/delivery gate
+by the supplied timeout. Fixture consumer gates have three-second watchdogs;
+they are not source or production pointing measurements.
 
 ## Exact field mapping and validation
 

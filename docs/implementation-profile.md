@@ -523,7 +523,8 @@ bytes until explicit Buffer release; it can then be re-enabled. Operations
 serialize with lifecycle/configuration; no state/callback mutex spans a join or
 backend stop. Configuration/generation, navigation receipt and BadPixelList
 registration are unchanged. No commanded state variable, worker, queue, timer,
-calibration, NUC or LOS state is added. Health retains its observed-state model.
+calibration or NUC state is added by ModeCmd. Standby also retires an enabled
+qualified LOS subscription through Image's auxiliary shutdown. Health retains its observed-state model.
 All other requests are rejected without stopping acquisition. This is logical
 provider state, not physical camera standby/power/health or full ModeCmd/task
 scheduling. The pinned metadata enum separately lacks DiscreteStatus and
@@ -548,7 +549,8 @@ Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
 StackedImage, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
 documented BIT_Command and ModeCmd subsets, and metadata other than communications,
-Image camera/navigation receipt responses and qualified known-empty BadPixelList
+Image camera/navigation receipt responses, qualified source-backed LOS Euler/Report
+and qualified known-empty BadPixelList
 and C2 configuration/BIT/ModeCmd CommandStatus, C2 BIT_Configuration/BIT_Status or Health
 MFA_Status/MFA_StatusDetailed/BIT_Status/SubsystemStatusResp
 return unsupported. The five unsupported C2 commands additionally publish a
