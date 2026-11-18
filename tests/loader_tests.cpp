@@ -11,6 +11,7 @@
 #include "public_bad_pixel_demo.hpp"
 #include "public_required_metadata_demo.hpp"
 #include "public_c2_unsupported_demo.hpp"
+#include "public_los_demo.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -242,6 +243,7 @@ void run(const char* library_path, const std::string& mode) {
     demonstrate_mode(session.control, buffer_factory("synthetic", session.manager));
     demonstrate_navigation(session.control);
     demonstrate_bad_pixels(session.control);
+    demonstrate_no_los(session.control);
 
     const auto capabilities = session.control->getCapabilities();
     const auto selected = std::find_if(capabilities.begin(), capabilities.end(), [](const auto& capability) {
