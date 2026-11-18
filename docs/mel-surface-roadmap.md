@@ -1,5 +1,16 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-GENTL-002 adds an internal, default-OFF GenTL backend foundation
+([design](tasks/GIGE-MEL-GENTL-002-design.md)). It is read-only: enumerate,
+exact open/close, Aravis 0.8.36 GenApi and unchanged profile admission/readback.
+It adds **no MEL surface**, no acquisition, no selection-catalog entry and no
+qualified camera. The remaining milestones, in order:
+
+1. GIGE-MEL-GENTL-003: producer and Cognex hardware qualification. First a
+   read-only open/inspect/close, then a separately authorized Mono8 acquisition task.
+2. GENTL-004: streaming.
+3. GENTL-005: explicit selection opt-in.
+
 GIGE-MEL-042 adds no MEL capability. The five unsupported C2 commands
 (`CalibrationConfigurationCmd`, `CalibrationStatusCmd`, `CameraProtectCmd`,
 `EraseCommand` and `SystemTrackDataResponse`) still return a ready typed

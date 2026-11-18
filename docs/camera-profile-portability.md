@@ -1,5 +1,30 @@
 # Camera profiles across SDK backends
 
+## GenTL as a third backend (GIGE-MEL-GENTL-002)
+
+The unchanged `mono_free_running_v1` profile and the unchanged dynamically
+loaded `cognex_cic_5000r_v1` module both run through the internal GenTL backend.
+The backend provides an `IDeviceFeatures` implementation over Aravis 0.8.36
+`ArvGc` and a GenTL-backed `ArvDevice`. That implementation uses the same node
+semantics as the native Aravis adapter.
+
+No profile, profile interface or module descriptor changed. GenTL composition is
+explicit C++ injection, with no new compatibility bit.
+
+Evidence is fixture-only, using a **simulated** CIC-5000R register model in
+both register byte orders:
+
+* identity match and mismatches;
+* missing and wrong-typed features;
+* native bounds, increments and units;
+* fresh, unclamped readback;
+* propagated native read failures.
+
+The physical Cognex has not been contacted through GenTL. "The same profile
+across Aravis, Pleora and GenTL" is therefore demonstrated at the source and
+fixture level only; hardware qualification is GENTL-003. See the
+[design](tasks/GIGE-MEL-GENTL-002-design.md#9-simulated-fixture-and-camera-profile-execution).
+
 ## Experimental ownership feasibility (GIGE-MEL-039)
 
 The [single-owner experiment](gvcp-single-owner.md) is loopback-only, not a profile
