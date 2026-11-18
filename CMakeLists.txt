@@ -146,6 +146,13 @@ if(BUILD_TESTING)
   target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach -Wl,--export-dynamic-symbol=clock_gettime)
   add_test(NAME provider_contract COMMAND provider_tests)
 
+  add_executable(provider_los_tests tests/provider_los_tests.cpp tests/join_observer.cpp)
+  target_link_libraries(provider_los_tests PRIVATE gige_mel_provider gige_mel_backend
+    gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
+  target_link_options(provider_los_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach)
+  add_test(NAME provider_los_metadata COMMAND provider_los_tests)
+  set_tests_properties(provider_los_metadata PROPERTIES TIMEOUT 45)
+
   # GIGE-MEL-042-R1: deterministic CommandStatus admission versus detach. The
   # same provider sources are compiled again with test-only synchronization
   # points into an uninstalled library; the installed gige_mel_provider never

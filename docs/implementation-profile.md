@@ -1,5 +1,24 @@
 # Experimental image-stream profile, version 0.1
 
+## Source-backed Image LOS foundation (GIGE-MEL-043)
+
+The common provider conditionally implements `LineOfSightEuler` and
+`LineOfSightReport` through an optional, backend-independent owned-value source.
+Support is independently declared before Control discovery; attached capability
+queries agree. Only the explicitly selected SDK-free recording fixture supplies
+qualified values. Default synthetic and production adapters remain unsupported
+and unadvertised. Quaternion and LOS3D are unchanged.
+
+The [LOS profile](image-los-metadata.md) specifies the project-local frame and
+source-relative epoch, exact double/nanosecond mapping, zero optional validity
+claims, bounded latest-event policy, Image enable/disable lifecycle and callback
+ownership. Unknown time/frame declarations and nonzero unnamed validity bits
+fail closed. No pointing is derived from navigation, images or installation
+assumptions; FrameHeader navigation/inertial state is unchanged. This is fixture
+qualification of working callbacks, not physical LOS, UTC, image synchronization
+or complete MEL conformance. See [design](tasks/GIGE-MEL-043-design.md) and
+[validation](tasks/GIGE-MEL-043-validation.md).
+
 ## Internal GenTL backend foundation (GIGE-MEL-GENTL-002)
 
 `GIGE_MEL_BUILD_GENTL_BACKEND` is a default-OFF option that requires the GENTL-001 header/consumer and

@@ -1,5 +1,11 @@
 # Backend-independent NavigationReport forwarding (GIGE-MEL-023)
 
+The separate [Image LOS source path](image-los-metadata.md) does not change this
+mechanism. Navigation acceptance/forwarding is not evidence of aperture LOS;
+an LOS source must independently establish its frame and pointing provenance.
+No NavigationReport-to-LOS conversion or FrameHeader navigation/inertial
+population is introduced.
+
 ## Implemented interface
 
 The separate [register/memory foundation](device-register-transport.md) now exists
