@@ -1,0 +1,27 @@
+/** @page api_extensions Camera extension interfaces (internal, uninstalled)
+
+These are **internal, uninstalled extension interfaces**. They are for authors
+working with the provider source tree, not for installed MEL consumers. See the
+@ref md_docs_2camera-profile-authoring "camera-profile authoring guide" and
+@ref md_docs_2backend-authoring "backend authoring guide" for ownership and
+qualification requirements.
+
+Area | Entry points
+---- | ------------
+@ref src/profiles/camera_profile.hpp "Camera model policy" | @ref gige_mel::backend::profiles::ICameraProfile and its per-device @ref gige_mel::backend::profiles::ICameraProfileState
+@ref src/device_features.hpp "Typed feature service" | @ref gige_mel::backend::device_features::IDeviceFeatures
+@ref src/profiles/profile_module.hpp "Module contract" | @ref gige_mel::backend::profiles::module::Descriptor; @ref gige_mel::selection::load_profile_module in @ref src/selection/profile_loader.hpp "profile_loader.hpp"
+@ref src/selection/backend_catalog.hpp "Catalog" and @ref src/selection/session_selection.hpp "session selection" | @ref gige_mel::selection::BackendCatalog and @ref gige_mel::selection::select_session
+@ref src/profiles/frame_policy.hpp "Common frame facts and policy" | @ref gige_mel::backend::profiles::NativeFrameFacts and @ref gige_mel::backend::profiles::plan_pool
+@ref src/profiles/mono_free_running.hpp "Monochrome free-running policy" | @ref gige_mel::backend::profiles::mono_free_running::validate_frame and @ref gige_mel::backend::profiles::mono_free_running::plan_writes
+@ref src/profiles/mono_free_running_device.hpp "Device configuration transactions" | @ref gige_mel::backend::profiles::mono_free_running::read_configuration and @ref gige_mel::backend::profiles::mono_free_running::apply_configuration
+
+## Matched-C++ modules only
+
+The discovery symbol has C linkage, but profile objects, types and ownership
+cross a C++ boundary. Build trusted modules against the same locked source and
+generated build identity, with the matched compiler, standard library/ABI and
+compatible build settings. Descriptor versions alone do not confer compatibility.
+See @ref md_docs_2runtime-selection "runtime selection and explicit module loading"
+for admission checks and lifetime rules. This is not an SDK plugin ABI.
+*/

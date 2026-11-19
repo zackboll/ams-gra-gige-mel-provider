@@ -10,8 +10,8 @@
 
 namespace gige_mel {
 
-// Source-level embedding seam for an SDK adapter. This is deliberately not a
-// stable plugin ABI. Ordinary MEL consumers use the three upstream factories.
+/// Source-level embedding settings for an SDK adapter, not a stable plugin ABI.
+/// Ordinary MEL consumers use the three upstream factories.
 struct ProviderSettings {
     std::string instance{"synthetic"};
     std::string device_id{"synthetic-0"};
@@ -23,6 +23,7 @@ struct ProviderSettings {
     backend::ClockDomain timestamp_domain{backend::ClockDomain::host_monotonic};
 };
 
+/// Project diagnostics for one manager session.
 struct ProviderStatistics {
     std::uint64_t delivered_frames{};
     std::uint64_t dropped_no_buffer{};
@@ -32,12 +33,13 @@ struct ProviderStatistics {
     std::string last_error;
 };
 
-// Performs no device I/O; Control::init opens the selected device. Each manager
-// is an independent session, even if two managers use the same instance name.
+/// Creates an independent manager session without device I/O.
+/// Control::init opens the selected device. Managers with the same instance
+/// name still have independent sessions.
 std::shared_ptr<API_Manager> make_api_manager(
     ProviderSettings settings, std::shared_ptr<backend::ICameraBackend> backend);
 
-// Project diagnostics, not a claimed extension of MEL InstrumentationReport.
+/// Reads project diagnostics, not a MEL InstrumentationReport extension.
 ProviderStatistics provider_statistics(const std::shared_ptr<API_Manager>& manager);
 
 } // namespace gige_mel

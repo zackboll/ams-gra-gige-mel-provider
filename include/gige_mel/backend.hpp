@@ -165,11 +165,11 @@ struct FrameDescriptor {
     CameraConfiguration configuration{};
 };
 
-// Owning, move-only lease. An adapter must ensure owner keeps the complete SDK
-// resource graph alive and releases/requeues storage without throwing. The byte
-// view stays immutable and valid until this lease is destroyed or moved from,
-// including after stream stop and device close. Only host-readable data is
-// represented by this initial contract; GPU/RDMA need an explicit extension.
+/// Owning, move-only lease for host-readable frame data.
+/// The adapter must ensure the owner keeps the complete SDK resource graph
+/// alive and releases/requeues storage without throwing. The byte view stays
+/// immutable and valid until this lease is destroyed or moved from, including
+/// after stream stop and device close. GPU/RDMA need an explicit extension.
 class FrameLease {
 public:
     FrameLease(FrameDescriptor descriptor, std::span<const std::byte> bytes,
@@ -359,6 +359,7 @@ public:
     virtual Status close() = 0;
 };
 
+/// Enumerates and opens devices through the installed, source-level C++ contract.
 class ICameraBackend {
 public:
     virtual ~ICameraBackend() = default;

@@ -13,6 +13,17 @@ find_package(Threads REQUIRED)
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 option(GIGE_MEL_BUILD_EXAMPLES "Build the native dynamically loaded capture example" ON)
+option(GIGE_MEL_BUILD_DOCS "Enable the SDK-free Doxygen documentation target" OFF)
+if(GIGE_MEL_BUILD_DOCS)
+  find_package(Doxygen 1.14.0 EXACT REQUIRED COMPONENTS doxygen dot)
+  add_custom_target(docs
+    COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_docs.py"
+      --doxygen "$<TARGET_FILE:Doxygen::doxygen>" --dot "$<TARGET_FILE:Doxygen::dot>"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/docs" --version "${PROJECT_VERSION}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Generating and validating SDK-free C++ documentation"
+    VERBATIM)
+endif()
 option(GIGE_MEL_WARNINGS_AS_ERRORS "Treat warnings in project code as errors" ON)
 option(GIGE_MEL_BUILD_ARAVIS "Build the optional, internal Aravis 0.8.36 camera-control adapter, its SDK tests and diagnostic tool" OFF)
 option(GIGE_MEL_BUILD_PLEORA "Build the optional Pleora eBUS backend" OFF)
