@@ -6,7 +6,7 @@ Use the [C++ interface reference](index.md#camera-profile-c-interface) and the
 [Camera Profile Examples](camera-profile-examples.md) alongside this contract.
 A new SDK/transport belongs in [backend authoring](backend-authoring.md) instead. See the
 [documentation index](index.md) for navigation and the
-[complete MEL surface inventory](mel-surface-roadmap.md) plus pinned upstream
+[requirements traceability](mel-traceability.md) plus pinned upstream
 headers for the full MEL requirements; a camera profile does not itself
 implement every required MEL channel or operation.
 

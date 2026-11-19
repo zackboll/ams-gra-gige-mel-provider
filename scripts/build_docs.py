@@ -10,6 +10,7 @@ import subprocess
 from urllib.parse import quote, unquote, urlsplit
 
 from check_docs import REPOSITORY, project_sources, validate_site
+import check_mel_traceability as traceability
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +24,8 @@ GUIDES = {
         "configuration", "camera-profile-authoring", "camera-profile-tutorial",
         "camera-profile-examples", "backend-authoring",
         "camera-profile-portability", "backend-portability", "runtime-selection",
-        "mel-surface-roadmap", "upstream-provenance", "stacked-image-provider",
+        "mel-surface-roadmap", "mel-traceability", "mel-traceability-evidence",
+        "upstream-provenance", "stacked-image-provider",
         "image-los-metadata", "mono12-image-profile", "mode-command", "health-status",
         "software-bit", "subsystem-status", "navigation-reception",
         "navigation-backend-forwarding", "device-register-transport", "documentation-warnings",
@@ -98,10 +100,16 @@ def stage_guide(path, stage, tracked, sources, sha):
 """)
         text = text.replace("<!-- generated-profile-navigation -->",
                             "- [Camera profile C++ interface](@ref api_extensions)\n")
+    if path == "docs/mel-traceability.md":
+        text = text.replace("[C++ Implementation](@ref src/provider.cpp)",
+                            "[C++ Implementation](@ref api_core)")
     output.write_text(text, encoding="utf-8")
 
 
 def build(args):
+    lock, operations = traceability.load()
+    traceability.validate(lock, operations)
+    traceability.negative_checks(lock, operations)
     sha = git("rev-parse", "HEAD").strip()
     dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
     tracked = set(git("ls-files", "-z").split("\0"))
@@ -120,6 +128,8 @@ def build(args):
     stage.mkdir(parents=True)
     for path in sorted(GUIDES):
         stage_guide(path, stage, tracked, sources, sha)
+    (stage / "docs/mel-traceability-evidence.md").write_text(
+        traceability.report(lock, operations, sha), encoding="utf-8")
 
     # Keep provenance visible on every page with Doxygen's standard footer.
     footer = stage / "footer.html"
@@ -154,6 +164,12 @@ PREDEFINED += {version_definitions} GenTLMajorVersion=1 GenTLMinorVersion=6 GC_G
     (out / "Doxyfile").write_text(config, encoding="utf-8")
     subprocess.run([args.doxygen, out / "Doxyfile"], cwd=stage, check=True,
                    env={**os.environ, "LC_ALL": "C"})
+    # Doxygen's crawler helper bypasses the configured HTML footer.
+    crawler = html / "doxygen_crawl.html"
+    if crawler.is_file():
+        text = crawler.read_text(encoding="utf-8")
+        crawler.write_text(text.replace("</body>", f'<div class="footer">{provenance}</div>\n</body>'),
+                           encoding="utf-8")
     # Doxygen retains graph caches even with DOT_CLEANUP enabled. The HTML
     # already embeds the graph maps and needs only the rendered SVG assets.
     for pattern in ("*.map", "*.md5"):

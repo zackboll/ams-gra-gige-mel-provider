@@ -123,7 +123,7 @@ navigation receipt/optional forwarding, and source-conditional LOS and stacked
 image foundations. LOS/stack positive sources are recording fixtures only;
 default synthetic and production adapters do not advertise them. Scheduling,
 tracking, calibration, protection and several required MEL surfaces remain
-unsupported. The [complete MEL surface inventory](docs/mel-surface-roadmap.md)
+unsupported. The [MEL traceability inventory](docs/mel-traceability.md)
 tracks required, conditional and optional work; channel stubs are not conformance.
 
 ## Integration and development starting points
@@ -139,7 +139,7 @@ tracks required, conditional and optional work; channel stubs are not conformanc
   [reference implementations](docs/camera-profile-examples.md).
 - **New backend:** [backend authoring](docs/backend-authoring.md),
   [portability contracts](docs/backend-portability.md).
-- **Complete MEL requirements:** [surface inventory](docs/mel-surface-roadmap.md),
+- **MEL interface obligations:** [requirements traceability](docs/mel-traceability.md),
   exact pinned [IR MEL](third_party/ir-mel/include/) and
   [Common MEL](third_party/common-mel/include/) declarations.
 - **Design and evidence:** [documentation index](docs/index.md#evidence-and-design-history),

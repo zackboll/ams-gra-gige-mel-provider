@@ -1,5 +1,9 @@
 # Experimental image-stream profile, version 0.1
 
+For method-by-method obligations, implementation and evidence, start at
+[Requirements Traceability](mel-traceability.md). This profile describes
+behavior and limits, not a conformance determination.
+
 ## Isolated GenTL wire qualification tooling (GIGE-MEL-GENTL-003A)
 
 The explicitly launched, uninstalled supervisor wire mode adds a pinned Aravis
@@ -209,7 +213,7 @@ and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
 This document is the contract implemented by the bootstrap. It describes a
 useful development subset against the pinned IR/Common MEL 4.0 declarations.
 It is **not full MEL conformance**. Required functionality outside this subset
-remains explicitly unsupported; see [the complete inventory](mel-surface-roadmap.md).
+remains explicitly unsupported; see [the operation inventory](mel-traceability.md).
 
 GIGE-MEL-024 extracts the existing camera-profile policy into an internal,
 SDK-free module. GIGE-MEL-025 adds a typed feature service and shared snapshot,

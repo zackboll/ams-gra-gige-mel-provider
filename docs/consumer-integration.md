@@ -376,7 +376,7 @@ enabled, failed stream does not restart it. An embedding application can use
 - Scheduling, Track, Instrumentation and the alternate direct channel
   factory/registry are not implemented. Most MEL commands (including
   calibration, protection, erase and tracking) and several required metadata
-  surfaces remain unsupported; consult the [surface inventory](mel-surface-roadmap.md).
+  surfaces remain unsupported; consult the [requirements traceability](mel-traceability.md).
 - Image Euler/Report [LOS](image-los-metadata.md) and
   [StackedImage](stacked-image-provider.md) require eligible, explicitly supplied
   sources. Recording fixtures exercise these paths; default synthetic and

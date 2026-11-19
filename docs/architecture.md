@@ -5,7 +5,7 @@ status](status.md). This document describes the native provider boundaries and
 lifecycle contracts; linked task records retain their historical conclusions.
 For a new camera model, start with [camera-profile authoring](camera-profile-authoring.md).
 For complete MEL implementation requirements, use the
-[surface inventory](mel-surface-roadmap.md) and pinned upstream declarations.
+[requirements traceability](mel-traceability.md) and pinned upstream declarations.
 
 GIGE-MEL-038 introduces a separate [controlled GVCP loopback experiment](controlled-gvcp-transport.md),
 not a provider dependency or camera service. Its one-send/deadline contract is
@@ -104,7 +104,7 @@ the destination layout. Source-backed stacks and LOS are conditional foundations
 with recording-fixture sources only, not default production camera capabilities.
 **This is an experimental image-stream implementation, not full MEL 4.0
 conformance.** Required methods still report unsupported and channel families
-remain unavailable. The [surface roadmap](mel-surface-roadmap.md) separates those
+remain unavailable. The [traceability inventory](mel-traceability.md) separates those
 gaps from optional enhancements.
 
 The interface snapshots, exact commits, source licenses, and integrity procedure are recorded in [upstream provenance](upstream-provenance.md). Interface version 4.0 describes the upstream contract; it must not be interpreted as this implementation's completeness or product version.

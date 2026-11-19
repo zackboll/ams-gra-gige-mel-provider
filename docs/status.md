@@ -4,7 +4,7 @@ This summary describes merged `main` as audited for DOC-GIGE-001, starting at
 `15542919b45febb809bfd24d5469dcddb3b456b6` (through PR #45). It does not include
 features from open PRs. See the [documentation index](index.md), the detailed
 [implementation profile](implementation-profile.md), and the
-[complete MEL surface inventory](mel-surface-roadmap.md).
+[MEL requirements traceability inventory](mel-traceability.md).
 
 **Experimental, partial MEL implementation; not full MEL 4.0 conformance or
 production camera/timestamp qualification.** Implemented C++ channel classes and
@@ -90,6 +90,7 @@ UTC/PTP, navigation, production reliability or full MEL conformance.
   are not real-producer passes. Neither producer's read-only camera behavior is
   qualified by these records.
 
-For method-by-method required/conditional/optional distinctions and planned
-implementation gates, use the [MEL surface roadmap](mel-surface-roadmap.md),
-not this summary. Historical test conclusions remain in their original records.
+For method-by-method required/conditional/optional distinctions, use
+[Requirements Traceability](mel-traceability.md). The
+[roadmap](mel-surface-roadmap.md) preserves sequencing and milestone history.
+Historical test conclusions remain in their original records.

@@ -1,0 +1,560 @@
+{
+  "schema": 1,
+  "family": "Channel",
+  "operations": [
+    {
+      "id": "Channel.destroy",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual ~Channel() = default",
+        "line": 30,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::~ChannelCore"
+        }
+      ],
+      "behavior": "Stops workers and unbinds registered buffers; derived workers drain in disable/detach and derived teardown.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "destroying_control_detaches_retained_channels",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resets Control during an auto-release session; checks quiescence, detached handles and a failed second release."
+        },
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "retained_channel_teardown",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks teardown and retained detached handle behavior with LOS source."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Channel.sendKeepAliveRep",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> sendKeepAliveRep() = 0",
+        "line": 35,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::sendKeepAliveRep"
+        }
+      ],
+      "behavior": "Ready Success while attached, InvalidState after detachment; not device heartbeat or a link probe.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        },
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "retained_channel_teardown",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks keep-alive fails after Control retirement."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Channel.ChannelCommsTestReq",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<ChannelCommsTestRep> send(ChannelCommsTestReq channelCommsTestReq) = 0",
+        "line": 40,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::send(ChannelCommsTestReq)"
+        }
+      ],
+      "behavior": "Echoes request and command IDs via future and registered callback; in-process only.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "metadata_callbacks_are_bounded_and_reentry_is_rejected",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks exact request and command IDs, duplicate registration failure, and successful Image and C2 camera reply callback."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts request/command IDs on Stack callback and future."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Channel.registerBuffer",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual Return registerBuffer(std::shared_ptr<Buffer> buffer) = 0",
+        "line": 50,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelCapability.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Config.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Image and source-qualified Stack only; no frame-buffer advertisement on control/status channels",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::registerBuffer"
+        }
+      ],
+      "behavior": "Disabled Image/Stack host pool only; validates affinity, size/ownership and lease state. C2 registration and Health buffer operations do not support frames.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks host registration, affinity, overlap, flags, unregister, reinit and context."
+        },
+        {
+          "path": "tests/provider_health_tests.inc",
+          "scenario": "health_surface",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks both Health buffer operations reject without mutating the buffer."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "callback_results",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Registers and successfully unregisters the Stack buffer after explicit release; validates retention after non-success callbacks."
+        }
+      ],
+      "gap": "Confirm inherited required frame-buffer semantics for non-frame channels with upstream/profile owner; add source-specific pool tests for any new frame family.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "required-incomplete",
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "Channel.unregisterBuffer",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual Return unregisterBuffer(std::shared_ptr<Buffer> buffer) = 0",
+        "line": 53,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelCapability.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Config.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Image and source-qualified Stack only; no frame-buffer advertisement on control/status channels",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::unregisterBuffer"
+        }
+      ],
+      "behavior": "Disabled Image/Stack host pool only; validates affinity, size/ownership and lease state. C2 registration and Health buffer operations do not support frames.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks host registration, affinity, overlap, flags, unregister, reinit and context."
+        },
+        {
+          "path": "tests/provider_health_tests.inc",
+          "scenario": "health_surface",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks both Health buffer operations reject without mutating the buffer."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "callback_results",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Registers and successfully unregisters the Stack buffer after explicit release; validates retention after non-success callbacks."
+        }
+      ],
+      "gap": "Confirm inherited required frame-buffer semantics for non-frame channels with upstream/profile owner; add source-specific pool tests for any new frame family.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "required-incomplete",
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "Channel.enable",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual Return enable() = 0",
+        "line": 56,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::enable"
+        }
+      ],
+      "behavior": "Image/Stack control acquisition and drain workers; Health starts/stops its software publisher; C2 toggles local state without frame I/O.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "disable_waits_for_callback_and_quiesces",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Enables a buffered Image and verifies an image callback is admitted before disable."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "lifecycle",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks acquisition exclusion, disable and restart with source."
+        },
+        {
+          "path": "tests/provider_health_tests.inc",
+          "scenario": "health_lifecycle",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks Health enable publishes and disable quiesces."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Channel.disable",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual Return disable() = 0",
+        "line": 59,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::disable"
+        }
+      ],
+      "behavior": "Image/Stack control acquisition and drain workers; Health starts/stops its software publisher; C2 toggles local state without frame I/O.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "disable_waits_for_callback_and_quiesces",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks active Image disable waits for the admitted callback and quiesces."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "lifecycle",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks acquisition exclusion, disable and restart with source."
+        },
+        {
+          "path": "tests/provider_health_tests.inc",
+          "scenario": "health_lifecycle",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks Health enable publishes and disable quiesces."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Channel.getCapabilities",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "[[nodiscard]] virtual ChannelCapability getCapabilities() const = 0",
+        "line": 62,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelCapability.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Config.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::getCapabilities"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "capability"
+        }
+      ],
+      "behavior": "Returns attached-channel snapshot with current configuration, attachment location and source-gated metadata.",
+      "evidence": [
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "configuration_and_capabilities",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts live Image and C2 geometry agrees with applied or actual readback; uses two SDK-free backends."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Compares stack size/pitch/geometry and exact metadata."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Channel.cb-ChannelCommsTestRep",
+      "family": "Channel",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Channel.h",
+        "declaring": "Channel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ChannelCommsTestRep* const)> callback) = 0",
+        "line": 68,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "metadata": {
+        "enumerator": "ChannelCommsTestRep",
+        "advertisement": "advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::registerMetadataCallback(ChannelCommsTestRep)"
+        }
+      ],
+      "behavior": "Single registered subscriber on each available channel; correlated synchronous echo; callbacks drain on detach.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "metadata_callbacks_are_bounded_and_reentry_is_rejected",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks exact request and command IDs, duplicate registration failure, and successful Image and C2 camera reply callback."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Registers and checks correlated Stack echo."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "detach_drains_metadata_callback_and_closes_admission",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks an admitted comms callback is drained."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    }
+  ]
+}

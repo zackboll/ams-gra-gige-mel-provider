@@ -9,7 +9,7 @@ model on Aravis or Pleora, start instead with
 use the [independent module example](../examples/profile_module/README.md).
 The [documentation index](index.md) and [current status](status.md) separate
 implementation from fixture and physical evidence. Complete MEL requirements
-are in the [surface inventory](mel-surface-roadmap.md) and pinned upstream
+are in the [requirements traceability](mel-traceability.md) and pinned upstream
 declarations, not just the backend contract.
 
 GIGE-MEL-023 adds an optional `INavigationSink` interface alongside

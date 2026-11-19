@@ -1,0 +1,272 @@
+{
+  "schema": 1,
+  "family": "Track",
+  "operations": [
+    {
+      "id": "TrackChannel.destroy",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "~TrackChannel() override = default",
+        "line": 29,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Define worker teardown and track-source cancellation.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "TrackChannel.SystemTrackDataResponse",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<CommandStatus> send(SystemTrackDataResponse systemTrackDataResponse) = 0",
+        "line": 34,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel; @Optional contradicts prose “must be provided … for all IR MEL implementations”",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Define correlation and actual consumption of system tracks.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "TrackChannel.TrackDataUpdate",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<CommandStatus> send(TrackDataUpdate trackDataUpdate) = 0",
+        "line": 40,
+        "annotations": [
+          "@RequiredIfTrackUpdate"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel; MFA accepts track updates",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Define track identity, accepted update semantics and ordering.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "TrackChannel.cb-CandidateObjectMessage",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectMessage* const)> callback) = 0",
+        "line": 48,
+        "annotations": [
+          "@RequiredIfDetectCandidateObjects"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel; MFA provides candidate-object detections (not the same as track tasking); Resolve destination for detection without tracking; also declared on Image",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": {
+        "enumerator": "CandidateObjectMessage",
+        "advertisement": "not advertised"
+      },
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Supply a candidate-detection source; resolve which channel receives it.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "TrackChannel.cb-IRSTTrackReport",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const IRSTTrackReport* const)> callback) = 0",
+        "line": 55,
+        "annotations": [
+          "@RequiredIfTrack"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel; MFA supports tracking; class wording says implementations supporting this channel",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": {
+        "enumerator": "IRSTTrackReport",
+        "advertisement": "not advertised"
+      },
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Implement qualified track output and identity/time mapping.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "TrackChannel.cb-RequestSystemTrackData",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const RequestSystemTrackData* const)> callback) = 0",
+        "line": 63,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": {
+        "enumerator": "RequestSystemTrackData",
+        "advertisement": "not advertised"
+      },
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Define the service request/response workflow for pointing.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented"
+      ]
+    },
+    {
+      "id": "TrackChannel.cb-CandidateObjectPreProcMessage",
+      "family": "Track",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/track/TrackChannel.h",
+        "declaring": "TrackChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectPreProcMessage* const)> callback) = 0",
+        "line": 71,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "Enclosing TrackChannel: MFA supports tracking; class wording says implementations supporting this channel",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Track channel; not advertised or attachable",
+      "metadata": {
+        "enumerator": "CandidateObjectPreProcMessage",
+        "advertisement": "not advertised"
+      },
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Supply actual preprocessed candidate product.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented"
+      ]
+    }
+  ]
+}
