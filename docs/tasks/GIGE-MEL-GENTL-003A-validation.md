@@ -183,3 +183,34 @@ External evidence root: `/home/zboll/gentl-003a-main-integration-evidence/`.
 Physical cameras and proprietary producers remain untested and unauthorized;
 fixture/simulator tests do not establish hardware qualification. Euresys remains
 unavailable, Balluff's prior offline crash unresolved; GENTL-004 remains gated.
+
+Executed integrated-source qualification: ordinary merge
+`831a6cfa36b6249d19bff247fea26e3a2df24846`, tree
+`c870aeb75fd144417cd75ff31e435eeab2af28c3`:
+
+| Check | Result |
+| --- | --- |
+| Default development configure/build/CTest | **38/38**, exit 0 |
+| Optional GenTL GCC 14 / Clang 19 | **98/98 each**, exit 0 |
+| Optional GenTL ASan/UBSan / TSan | **98/98 each**, exit 0; no new suppressions |
+| Optional `BUILD_TESTING=OFF` | configure/build and test-symbol isolation passed |
+| Header-free default `BUILD_TESTING=OFF` | provider build and six isolation checks passed |
+| Stack provider/admission and provider lifecycle | present and passed in all five CTest lanes |
+| Stack provider/admission repetition | 20 each under GCC, ASan/UBSan and TSan: 120 passes |
+| Installed MEL + stack consumers | GCC14/Clang19 builds/runs passed against SDK-free package; Clang optional package also passed |
+| Manual isolated simulator | **12/12 expected outcomes**; complete calibrated captures, zero drops, hashes verified |
+| Upstream / complete-PR-history proprietary guard | 100 pinned files / 428 Git entries, passed |
+
+The supervisor-launched singleton mock also passed native isolation and required
+read/close/quiet with exit 0 but correctly remained `WIRE_OBSERVATION_UNAVAILABLE`
+and `SUCCESS_WITHOUT_WIRE`: native success is not independent traffic evidence.
+R1-specific focused native probe (14 groups) and wire tests (18 groups) passed.
+Evidence includes exact commands, exit statuses, wire packets/drop accounting and
+CTest inventories (38 default, 98 optional). Compiler temporaries/test-only /tmp
+use external scratch/private mount namespace due to host /tmp inode exhaustion.
+
+This results addition is documentation-only after the qualified merge; its final
+commit identity is reported on the PR. No executable, test, build, dependency or
+configuration bytes change afterward. Final integrity checks and clean-worktree
+verification are repeated before normal push. Hosted CI is separate and observed
+once after that push, not inferred from local results.
