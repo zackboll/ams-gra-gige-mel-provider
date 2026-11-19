@@ -2,6 +2,16 @@
 
 ## Starting point
 
+Use this guide when adding a **new SDK/transport adapter**. For a new camera
+model on Aravis or Pleora, start instead with
+[camera-profile authoring](camera-profile-authoring.md), implement
+[`ICameraProfile` and its owned state](../src/profiles/camera_profile.hpp), and
+use the [independent module example](../examples/profile_module/README.md).
+The [documentation index](index.md) and [current status](status.md) separate
+implementation from fixture and physical evidence. Complete MEL requirements
+are in the [surface inventory](mel-surface-roadmap.md) and pinned upstream
+declarations, not just the backend contract.
+
 GIGE-MEL-023 adds an optional `INavigationSink` interface alongside
 `ICameraDevice`, using project-owned navigation values. No sink means unchanged
 receipt-only behavior; an implemented sink must explicitly accept submission or
@@ -20,13 +30,14 @@ describe the original profile, not a limitation of the current provider.
 
 The internal source contract is [`include/gige_mel/backend.hpp`](../include/gige_mel/backend.hpp), in namespace `gige_mel::backend`. The first implementation is [`src/backends/synthetic.cpp`](../src/backends/synthetic.cpp).
 
-There are three distinct levels of test evidence:
+Keep these evidence categories distinct:
 
 | Level | Where | What it establishes |
 | --- | --- | --- |
 | Synthetic-specific backend tests | [`tests/backend_tests.cpp`](../tests/backend_tests.cpp) (`backend_contract`) | The synthetic backend's own discovery, validation, pool, cancellation and lease behavior. Its numbers (pool of four, IDs from 1, 640 × 480) are not adapter requirements |
 | Shared MEL-provider portability scenarios | [`tests/provider_backend_contract_tests.cpp`](../tests/provider_backend_contract_tests.cpp) (`provider_backend_portability`) | The same MEL-facing scenarios pass against the synthetic backend **and** an independent test-only fixture backend with different identities, limits, padded rows, frame IDs, clock and apply semantics. See [backend portability](backend-portability.md) |
-| Future SDK/hardware qualification | Not yet available | Real SDK, camera, transport, timing and disconnection behavior; nothing in the first two levels substitutes for it |
+| Optional SDK/native fixtures | [Aravis integration](aravis-integration.md), [Pleora integration](pleora-integration.md), [GenTL fixture record](tasks/GIGE-MEL-GENTL-002-validation.md) | Real SDK code with Fake/simulated devices or controlled native GenApi/buffers. Positive SDK-pixel MEL tests use virtual time, not a qualified hardware clock |
+| Limited physical observations | [Cognex record](cognex-cic-5000r.md), [Pleora watermarked evaluation](pleora-integration.md#r1-watermarked-hardware-qualification-2026-11-12) | Results for the recorded camera/firmware/setup only; not production MEL, integration-start time, UTC/PTP or general reliability qualification |
 
 A new adapter adds a `BackendCase` to the portability suite and writes its own
 direct contract checks. It does not edit the shared scenarios to accommodate
@@ -34,7 +45,13 @@ itself.
 
 The backend interface contains project-owned C++ values. It must not contain MEL classes, Aravis buffers, pylon grab results, eBUS handles, `GenApi::INodeMap`, vendor exception classes, or platform-specific SDK structures. Keep those inside the adapter implementation. Build the adapter with the provider; this interface is not a stable binary plugin ABI.
 
-No real SDK adapter is included or selected by this bootstrap. Aravis, Pleora eBUS, a vendor SDK such as pylon, and a GenTL consumer are candidates to evaluate. An adapter name in a design document is not a supported CMake option, a working driver, or hardware qualification.
+Aravis 0.8.36 and Pleora eBUS adapters are implemented, optional and uninstalled.
+Both can be explicitly composed through the internal catalog when built; neither
+is selected by the exported `getAPI_Manager` path, which remains synthetic-only.
+The default-OFF GenTL backend is read-only, fixture-qualified and absent from
+the catalog. See [current backend status](status.md#backend-and-camera-profile-matrix).
+Other SDK names in examples or design records are not claims of implemented
+adapters or supported CMake options.
 
 ## The three interfaces
 
@@ -74,9 +91,18 @@ The current `CameraConfiguration` is a complete typed snapshot:
 | `frame_rate_hz` | Integer acquisition rate in hertz |
 | `exposure` | Integration duration as `std::chrono::nanoseconds` |
 
-The profile is staring Mono8, one band, with no external trigger. Do not silently add Bayer conversion, free-running/trigger switching, fractional-rate rounding, auto-exposure, or arbitrary gain controls under the same semantics.
+The current monochrome profile is staring, one band, free-running, with Mono8
+or explicitly admitted unpacked little-endian Mono12. Do not silently add Bayer
+conversion, free-running/trigger switching, fractional-rate rounding,
+auto-exposure, or arbitrary gain controls under the same semantics.
 
-`CameraCapabilities` exposes sensor bounds, ROI increments, rate limits, minimum exposure, and booleans for Mono8, external trigger, and external-buffer acquisition. Some future cameras need a richer capability model: coupled ROI limits, dynamic feature availability, fractional frame rates, multiple pixel formats, or exposure increments. Extend the model with a concrete second-backend use case and tests; do not publish fictitious uniform limits just to fit the current struct.
+`CameraCapabilities` exposes sensor bounds, ROI increments, rate limits, minimum
+exposure, an explicit `pixel_format`, and evidence/support flags including
+`mono8`, `external_trigger`, `external_buffer_acquisition` and `known_empty_defect_map`.
+Do not interpret scalar envelopes as every admissible combination: profiles
+enforce fresh coupled bounds and discrete-rate policy. Fractional configuration
+rates and runtime format switching are not represented. Extend the model only
+with a concrete reviewed use case and tests; do not invent uniform limits.
 
 `apply` requires a stopped device/stream and returns the actual readback. Perform all possible validation before writes. For real hardware, writes to several features are not automatically atomic. If a later write fails, report the failure and preserve access to the real resulting configuration. The provider must decide whether to restore the previous settings or leave the device disabled; never return the requested snapshot as if it were verified readback.
 
@@ -93,14 +119,15 @@ registration and lifetime contract in [camera-profile authoring](camera-profile-
 | Width/height/offset | Feature names, limits/increments, order of updates, acquisition-stop requirement | Read/write typed native features and report actual values |
 | Integration time | Which exposure feature exists; nanoseconds versus its native unit; allowed rounding | Convert with overflow checks, set, read back, and report the actual duration |
 | Frame rate | Whether rate control is enabled; allowable rate; coupling to exposure and trigger mode | Perform native operations without hidden unrelated changes |
-| Mono8 payload | Feature availability, payload/image offset, whether chunks are enabled | Request the selected format and describe the actual returned image |
+| Monochrome payload | Admit the current Mono8 or independently established Mono12 representation, geometry and spans | Decode native facts and describe actual returned bytes; do not silently change pixel format |
 | Camera status | Which events or polling values describe connection/acquisition faults | Translate vendor events into project errors/state |
 
 SFNC is useful naming guidance, but SDK convenience methods can have broader effects than a single feature write. For example, Aravis documents its exposure API in microseconds and states that its frame-rate setter disables triggers. The adapter/profile must account for those behaviors; it cannot assume an exposure number is already nanoseconds or that a frame-rate update preserves trigger configuration. See the official [Aravis camera API][aravis-camera].
 
 The internal `IDeviceFeatures` service and explicitly owned profile registry are
-implemented; there is still no generic native feature-tree API or binary plugin
-ABI. Preserve typed values, availability/access, units, bounds/increments and
+implemented; there is still no generic native feature-tree API or stable
+cross-toolchain plugin ABI. Explicit matched-C++ profile modules are internal
+and require matched build settings. Preserve typed values, availability/access, units, bounds/increments and
 error provenance. Avoid a bare string-to-string control map.
 
 ## Frame lease contract
@@ -117,7 +144,7 @@ The initial contract represents host-readable bytes. GPU pointers and RDMA regis
 | --- | --- |
 | `width`, `height`, `row_stride_bytes` | Actual image layout, with padding represented in stride |
 | `storage_bits_per_pixel`, `significant_bits_per_pixel` | Distinguish storage representation from sensor dynamic range |
-| `bands`, `pixel_format`, `byte_order` | Actual data organization; the first contract accepts only `PixelFormat::mono8` |
+| `bands`, `pixel_format`, `byte_order` | Actual data organization; selected Mono8 or unpacked Mono12 must satisfy the [image format contract](mono12-image-profile.md), including independent byte-order evidence |
 | `status` | Mark incomplete images truthfully; a received buffer is not necessarily a complete image |
 | `native_frame_id` | Preserve the native ID in its available width; MEL conversion/wrap policy belongs in the shared runtime |
 | `stream_generation` | Distinguish stream restarts and stale deliveries |
@@ -169,7 +196,7 @@ A future adapter should expose enough diagnostics to identify source pool pressu
 
 1. Acquire an SDK-owned or SDK-managed source buffer normally.
 2. Return it as a backend lease with accurate metadata.
-3. The provider copies/repackages only valid Mono8 rows into a free registered MEL buffer.
+3. The provider copies/repackages only validated rows of the selected Mono8 or Mono12 representation into a free registered MEL buffer.
 4. Release the source lease independently of the consumer's destination lease.
 
 This is the required first implementation path. It avoids assuming every SDK accepts an arbitrary consumer allocation and lets source layouts differ from the published tight layout.
@@ -190,7 +217,14 @@ GenTL standardizes the transport-layer producer boundary; it does not remove cam
 
 Do not force every backend through GenTL. An SDK with a well-supported native API can implement `ICameraBackend` directly. GenTL is one useful adapter implementation, not the provider's universal internal ABI.
 
-## Current real-SDK adapter: Aravis control and source acquisition
+## Existing adapters and shared profile policy
+
+Aravis and Pleora dispatch through the owned camera-profile interface; the
+default profile wraps the shared monochrome algorithms described below.
+[Pleora integration](pleora-integration.md) documents its native feature service,
+copy stream, licensing and hardware-evaluation limits. The internal
+[GenTL foundation](tasks/GIGE-MEL-GENTL-002-design.md) reuses profile admission
+and readback without configuration writes or acquisition.
 
 The optional `src/backends/aravis/` adapter (GIGE-MEL-008, Aravis 0.8.36) is the
 first code that follows this guide against a real SDK. It writes GenICam nodes
@@ -224,10 +258,12 @@ leases that survive stop and close, a bounded pool, receive timeout, stop and
 close wakeup, restart and failure cleanup, and (GIGE-MEL-009-R1) an uncertain
 acquisition-command outcome that blocks reuse until an explicit stop or close
 resolves it, plus a fresh read-only acquisition preflight
-(`aravis_stream_contract`). It is
-**not yet a supported adapter**: timestamps are deliberately invalid (no time
-mapping), so the common provider rejects its frames; disconnection handling, a
-portability `BackendCase` and any hardware qualification are pending.
+(`aravis_stream_contract`). Its production timestamps remain deliberately
+invalid, so the common provider rejects its frames. Confirmed control-loss
+handling is implemented (see below), and limited physical Mono8 observations
+are recorded in the [Cognex record](cognex-cic-5000r.md). Physical unplug behavior,
+production timing and a portability `BackendCase` remain open; fixture and
+physical capture evidence do not make this a production-supported MEL backend.
 GIGE-MEL-010 (`aravis_timestamp_contract`) observes the raw SDK timestamps. It
 also records the evidence a camera profile needs before it may return a valid
 `FrameTimestamp`, in the
@@ -259,7 +295,7 @@ handshake, SDK cleanup I/O, simulator evidence, explicit recovery and limitation
 are documented in [Aravis integration](aravis-integration.md#confirmed-camera-control-loss-gige-mel-012).
 No public backend/provider contract or provider worker change is needed.
 
-Physical unplug detection, hardware qualification and real integration-start
+Physical unplug detection, broader hardware qualification and real integration-start
 timestamps remain open gates. The existing GIGE-MEL-009-R1 uncertain-command
 recovery policy still applies when the SDK has **not** confirmed control loss.
 
