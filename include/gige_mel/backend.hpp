@@ -4,6 +4,7 @@
 #include <gige_mel/line_of_sight.hpp>
 
 #include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -266,6 +267,82 @@ public:
     // owns a fresh subscription and establishes a fixed nonzero clock generation.
     virtual Result<std::unique_ptr<ILineOfSightStream>> open_line_of_sight(
         std::uint64_t subscription_id) = 0;
+};
+
+// Optional pre-formed stack product. This is not a frame aggregation API.
+// Declarations are immutable for a device lifetime; unknown values fail closed.
+enum class StackLayout { unknown, contiguous_frame_major_row_major_mono8 };
+struct StackIdentity {
+    std::array<std::uint8_t, 16> uuid{};
+    std::string label;
+    bool operator==(const StackIdentity&) const = default;
+};
+struct StackSupport {
+    bool supported{false};
+    std::uint32_t width{}, height{}, depth{}, storage_bits{}, logical_bits{};
+    std::uint64_t packed_bytes{}, source_generation{};
+    StackLayout layout{StackLayout::unknown};
+    std::string source_id, formation_meaning, identity_scheme, fom_meaning;
+    StackIdentity capability, activity;
+    std::uint32_t platform_id{}, txa_fom{};
+    bool mask_information_absent{false};
+    bool operator==(const StackSupport&) const = default;
+};
+inline bool valid_stack_support(const StackSupport& s) noexcept {
+    if (!s.supported || s.layout != StackLayout::contiguous_frame_major_row_major_mono8 ||
+        s.width == 0 || s.width > UINT16_MAX || s.height == 0 || s.height > UINT16_MAX ||
+        s.depth < 2 || s.depth > UINT16_MAX || s.storage_bits != 8 || s.logical_bits != 8 ||
+        s.platform_id > UINT16_MAX || s.txa_fom < 1 || s.txa_fom > 10 ||
+        !s.mask_information_absent || s.source_generation == 0 || s.source_id.empty() ||
+        s.formation_meaning.empty() || s.identity_scheme.empty() || s.fom_meaning.empty() ||
+        s.capability.label.empty() || s.activity.label.empty() ||
+        s.capability.uuid == std::array<std::uint8_t, 16>{} ||
+        s.activity.uuid == std::array<std::uint8_t, 16>{}) return false;
+    std::size_t bytes = s.width;
+    if (s.height > std::numeric_limits<std::size_t>::max() / bytes) return false;
+    bytes *= s.height;
+    if (s.depth > std::numeric_limits<std::size_t>::max() / bytes) return false;
+    bytes *= s.depth;
+    return bytes <= UINT32_MAX && bytes == s.packed_bytes;
+}
+struct StackDescriptor {
+    StackSupport product;
+    std::uint32_t stack_id{}; // source-scheme ID, never a provider frame counter
+    std::uint64_t configuration_generation{};
+};
+class StackLease {
+public:
+    StackLease(StackDescriptor descriptor, std::span<const std::byte> pixels,
+               std::shared_ptr<const void> owner)
+        : descriptor_(std::move(descriptor)), pixels_(pixels), owner_(std::move(owner)) {}
+    StackLease(StackLease&&) = default;
+    StackLease& operator=(StackLease&&) = default;
+    StackLease(const StackLease&) = delete;
+    StackLease& operator=(const StackLease&) = delete;
+    const StackDescriptor& descriptor() const noexcept { return descriptor_; }
+    std::span<const std::byte> pixels() const noexcept { return pixels_; }
+    bool owns_pixels() const noexcept { return static_cast<bool>(owner_); }
+private:
+    StackDescriptor descriptor_;
+    std::span<const std::byte> pixels_;
+    std::shared_ptr<const void> owner_; // immutable bytes survive through copy
+};
+class IStackedImageStream {
+public:
+    virtual ~IStackedImageStream() = default;
+    // Single receiver, finite wait; cancellation wakes receive promptly. No
+    // provider/consumer calls. Destruction occurs after the receiver is joined.
+    virtual Result<StackLease> receive(std::chrono::milliseconds timeout) = 0;
+    virtual void request_stop() noexcept = 0; // concurrent, idempotent, nonblocking
+};
+class IStackedImageSource {
+public:
+    virtual ~IStackedImageSource() = default;
+    virtual StackSupport stacked_image_support() const = 0;
+    // Bounded open; no callbacks or waits requiring provider operations. A fresh
+    // stream cannot replay work predating open. Failure retires partial resources.
+    virtual Result<std::unique_ptr<IStackedImageStream>> open_stacked_images(
+        std::uint64_t configuration_generation) = 0;
 };
 
 class ICameraDevice {

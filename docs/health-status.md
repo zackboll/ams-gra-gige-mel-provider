@@ -64,6 +64,12 @@ retain their established Fail rejection precedence.
 
 ## Current state, not diagnostic-history inference
 
+GIGE-MEL-044 extends this existing software acquisition state to the exclusive
+source-backed StackedImage stream as well as Image. The table's ownership and
+failure rules apply to either. Stack callback non-success is terminal without
+implicit buffer release. Operate never asserts physical scanning or TSI quality;
+see the [stack profile](stacked-image-provider.md).
+
 The settled-state mapping is evaluated from one captured core snapshot:
 
 | Observed condition | MFA_State |

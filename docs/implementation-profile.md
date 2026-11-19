@@ -1,5 +1,18 @@
 # Experimental image-stream profile, version 0.1
 
+## Source-backed stacked-image foundation (GIGE-MEL-044)
+
+The common provider implements the required `StackedImageChannel` class and
+conditionally advertises functional stack delivery only for complete, validated
+`IStackedImageSource` declarations. The test-only recording supplies pre-formed
+contiguous frame-major/row-major Mono8 test volumes; no ordinary frames are
+concatenated. Default synthetic and production adapters remain unsupported and
+unadvertised. Image and Stack acquisition are exclusive, Standby retires either,
+and software Health reflects actual acquisition ownership. Explicit buffer release
+is mandatory on all callback outcomes. See the [stack profile](stacked-image-provider.md),
+[design](tasks/GIGE-MEL-044-design.md) and [validation](tasks/GIGE-MEL-044-validation.md).
+This is fixture-qualified publication, not TSI/sensor/time or full MEL conformance.
+
 ## GenTL producer qualification tooling (GIGE-MEL-GENTL-003)
 
 The uninstalled offline supervisor adds no backend or MEL capability. It runs
@@ -558,8 +571,8 @@ BIT-state revision (`BIT_report`) and a prepared-report sequence
 (`statusSeqNum`). `connectionEstablished` reports the in-process software
 association, not camera reachability.
 
-Image, C2 and partial Health are attachable. Scheduling, Track, Instrumentation,
-StackedImage, and the alternate direct-channel factory/registry path remain
+Image, C2, partial Health and source-qualified StackedImage are attachable.
+Scheduling, Track, Instrumentation, and the alternate direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
 documented BIT_Command and ModeCmd subsets, and metadata other than communications,
 Image camera/navigation receipt responses, qualified source-backed LOS Euler/Report

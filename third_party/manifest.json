@@ -8,7 +8,10 @@
     "irmel/library/image/ImageChannel.h",
     "irmel/library/health-status/HealthStatusChannel.h",
     "irmel/library/irmel-types/ImageListener.h",
-    "irmel/library/irmel-types/FrameHeader.h"
+    "irmel/library/irmel-types/FrameHeader.h",
+    "irmel/library/stacked-image/StackFrameHeader.h",
+    "irmel/library/stacked-image/StackedImageChannel.h",
+    "irmel/library/stacked-image/StackedImageListener.h"
   ],
   "components": [
     {
@@ -803,6 +806,30 @@
       "git_blob_sha1": "4eda04f3cc9a27e62fd38a2345235d245588d157",
       "sha256": "ca32907410241638bd03549e38650cddfe9d92a2aecaf070eba50ccbd6d041fc",
       "size": 949
+    },
+    {
+      "path": "ir-mel/include/irmel/library/stacked-image/StackFrameHeader.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/stacked-image/StackFrameHeader.h",
+      "git_blob_sha1": "16447c1a5ef663bab978b37aeb33baa6588642d0",
+      "sha256": "9ee3d5ec7c5d800f3a9a1dca4e32b63ad67a3e3824db8ba9cb392ab4f02d18a3",
+      "size": 4999
+    },
+    {
+      "path": "ir-mel/include/irmel/library/stacked-image/StackedImageChannel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+      "git_blob_sha1": "7e675aac4d2e7efd15fbdff90ba77d03795b3378",
+      "sha256": "e333f66d597ae337912ec5d1af975e5addac68d1ca1098a0584a94047197124b",
+      "size": 2047
+    },
+    {
+      "path": "ir-mel/include/irmel/library/stacked-image/StackedImageListener.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/stacked-image/StackedImageListener.h",
+      "git_blob_sha1": "04e06b2a1a4355a79b7b637cbd80ba21348222e6",
+      "sha256": "af439ec6c38b929e37871ea8ac97ac88a9f95f7995b56a23bd48661b45d6d420",
+      "size": 2912
     }
   ]
 }

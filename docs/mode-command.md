@@ -36,6 +36,12 @@ The preserved GIGE-MEL-014 acknowledgement:
 
 ### Active: actual logical acquisition transition
 
+GIGE-MEL-044 applies this same transition to the exclusive source-backed
+StackedImage acquisition, if active instead of Image. Cancellation wakes its
+receive, join drains admitted stack callbacks, and held buffers remain occupied
+until explicit release. No scanning or scheduling behavior is added; see the
+[stack profile](stacked-image-provider.md).
+
 With a provider-owned Image acquisition, valid Standby stops frame admission,
 requests stream cancellation, wakes and joins the receiving worker, stops the
 backend stream and unpublishes acquisition ownership. It reuses the same private
