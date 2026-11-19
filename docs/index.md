@@ -13,6 +13,7 @@ MEL means MFA Encapsulation Layer, not Matrox MIL.
    [standalone installed consumer](../examples/installed_consumer/).
 3. [C++ API Reference](#c-api-reference) — project interfaces and source, with
    installed and internal interfaces clearly separated.
+4. [Camera Integration](#camera-integration) — select an adapter or add a model.
 
 ## C++ API Reference
 
@@ -30,21 +31,34 @@ reference for your checkout with the
 | Build and capture without a camera SDK | [README quick start](../README.md#sdk-free-quick-start), [native capture example](../examples/capture.cpp) |
 | Look up MEL behavior in detail | [Implementation profile](implementation-profile.md), [configuration](configuration.md), [installed MEL contract tests](../tests/install_consumer/) |
 | Understand interface boundaries | [Architecture](architecture.md), [consumer integration guide](consumer-integration.md) |
-| Integrate Aravis | [Aravis integration and timing gates](aravis-integration.md) |
-| Integrate Pleora | [Pleora integration, licensing and evaluation limits](pleora-integration.md), [consolidation disposition](pleora-consolidation.md) |
-| Select a compiled backend or explicit profile module | [Internal runtime selection](runtime-selection.md) |
-| Use the Cognex-specific profile | [Module build/admission guide](../camera_profiles/cognex_cic_5000r/README.md), [physical camera record](cognex-cic-5000r.md) |
+
+## Camera Integration
+
+- [Create a Camera Profile](camera-profile-tutorial.md) — implement, build,
+  select and qualify a new model on an existing backend. Keep the
+  [authoring contract](camera-profile-authoring.md) handy.
+- [Aravis integration and timing gates](aravis-integration.md).
+- [Pleora integration, licensing and evaluation limits](pleora-integration.md)
+  and [consolidation disposition](pleora-consolidation.md).
+- [Internal runtime selection](runtime-selection.md) for compiled backends and
+  explicit profile modules.
+- [Cognex module build/admission](../camera_profiles/cognex_cic_5000r/README.md)
+  and [earlier physical camera record](cognex-cic-5000r.md).
+
+### Camera Profile C++ Interface
+
+<!-- generated-profile-navigation -->
+
+- [`ICameraProfile` and its owned state](../src/profiles/camera_profile.hpp)
+  and [`IDeviceFeatures`](../src/device_features.hpp) — internal, uninstalled.
+- [Camera Profile Examples](camera-profile-examples.md) — reference implementations.
 
 ## Develop
 
 1. Read the [architecture](architecture.md) and [repository instructions](../AGENTS.md).
 2. For a **new camera model on an existing SDK**, start with
-   [camera-profile authoring](camera-profile-authoring.md). Implement
-   [`ICameraProfile` and its owned state](../src/profiles/camera_profile.hpp)
-   using the typed [`IDeviceFeatures`](../src/device_features.hpp) service.
-   The [independent module example](../examples/profile_module/README.md) and
-   [Cognex module](../camera_profiles/cognex_cic_5000r/README.md) show build and
-   admission patterns. Do not add SDK policy branches to the MEL facade.
+   [Create a Camera Profile](camera-profile-tutorial.md). Do not add SDK policy
+   branches to the MEL facade.
 3. For a **new SDK/transport**, start with [backend authoring](backend-authoring.md),
    then [backend portability](backend-portability.md) and
    [camera-profile portability](camera-profile-portability.md).
@@ -116,14 +130,11 @@ are linked to GitHub from the generated site, not copied as test evidence.
 ## Documentation follow-up
 
 The following are remaining gaps, not implemented features or claims about the
-scope of future tickets. Suggested allocation for DOC-GIGE-002 through
-DOC-GIGE-006:
+scope of future tickets:
 
 | Campaign item | Remaining documentation work |
 | --- | --- |
 | DOC-GIGE-002 | Doxygen generation, navigation and source checks are available; production publication and live verification are separate `main`-only gates. |
-| DOC-GIGE-003 | Consolidated installed-consumer integration guide: loading, CMake package, callback/release/teardown examples and error handling. |
-| DOC-GIGE-004 | End-to-end camera-profile tutorial with minimal implementation, independent matched-build module and qualification checklist. |
 | DOC-GIGE-005 | MEL requirements-to-implementation/test cross-reference; distinguish required gaps, conditional support and pinned annotation/enum blockers. |
 | DOC-GIGE-006 | Evidence index by SDK/camera/firmware and environment, reproducible validation commands, plus a broader stale-text/link audit of milestone-heavy references. |
 | Core API comments | Expand declaration-level ownership, lifetime and error documentation in the project headers and implementation sources. Source extraction is not complete contract documentation. |

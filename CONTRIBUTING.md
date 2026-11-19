@@ -38,9 +38,11 @@ entry points and writes warnings to `build/documentation/docs/doxygen-warnings.l
 See the [warning baseline](docs/documentation-warnings.md) for known limitations.
 Do not commit generated pages or treat extracted internals as stable API.
 
-For a new camera profile, update [camera-profile authoring](docs/camera-profile-authoring.md)
-or a linked model guide with feature/readback requirements, ownership, module
-compatibility and qualification limits. For backend changes, keep the
+For a new camera profile, follow [Create a Camera Profile](docs/camera-profile-tutorial.md)
+and use its qualification checklist. Keep the [authoring contract](docs/camera-profile-authoring.md)
+for shared semantics; add model-specific requirements and evidence limits to
+the model guide. Use the [Camera Profile Examples](docs/camera-profile-examples.md)
+source browser as an internal reference. For backend changes, keep the
 [backend authoring contract](docs/backend-authoring.md) current and document
 ownership, cancellation, error and thread semantics on the relevant C++
 declarations. Put API comment improvements next to project declarations and

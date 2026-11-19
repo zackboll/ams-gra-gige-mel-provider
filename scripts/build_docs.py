@@ -20,7 +20,8 @@ GUIDES = {
     "README.md", "CONTRIBUTING.md",
     *(f"docs/{name}.md" for name in (
         "index", "consumer-integration", "status", "architecture", "implementation-profile",
-        "configuration", "camera-profile-authoring", "backend-authoring",
+        "configuration", "camera-profile-authoring", "camera-profile-tutorial",
+        "camera-profile-examples", "backend-authoring",
         "camera-profile-portability", "backend-portability", "runtime-selection",
         "mel-surface-roadmap", "upstream-provenance", "stacked-image-provider",
         "image-los-metadata", "mono12-image-profile", "mode-command", "health-status",
@@ -51,10 +52,13 @@ def stage_guide(path, stage, tracked, sources, sha):
             return f"{prefix}{target})"
         resolved = (ROOT / path).parent / unquote(url.path)
         relative = resolved.resolve().relative_to(ROOT).as_posix()
-        if relative == "docs/index.md" and url.fragment == "c-api-reference":
-            # GitHub lands on the index section; the generated guide can go
-            # directly to the installed C++ reference for its audience.
-            return f"{prefix}@ref api_installed)"
+        if relative == "docs/index.md":
+            api_page = {"c-api-reference": "api_installed",
+                        "camera-profile-c-interface": "api_extensions"}.get(url.fragment)
+            if api_page:
+                # GitHub lands on the index; the generated guide can go directly
+                # to the reference for its audience.
+                return f"{prefix}@ref {api_page})"
         if relative in GUIDES:
             # Doxygen resolves staged Markdown links and their heading IDs.
             return f"{prefix}{target})"
@@ -92,6 +96,8 @@ def stage_guide(path, stage, tracked, sources, sha):
 - [Camera extension interfaces (internal, uninstalled)](@ref api_extensions) — for profile and backend authors.
 - [Core implementation reference (internal)](@ref api_core) — for runtime maintainers, with a line-numbered source browser.
 """)
+        text = text.replace("<!-- generated-profile-navigation -->",
+                            "- [Camera profile C++ interface](@ref api_extensions)\n")
     output.write_text(text, encoding="utf-8")
 
 

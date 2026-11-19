@@ -133,10 +133,10 @@ tracks required, conditional and optional work; channel stubs are not conformanc
   [implementation profile](docs/implementation-profile.md).
 - **SDK integration:** [Aravis](docs/aravis-integration.md),
   [Pleora](docs/pleora-integration.md), [runtime composition](docs/runtime-selection.md).
-- **New camera profile:** [authoring contract](docs/camera-profile-authoring.md),
-  [`ICameraProfile` / owned state](src/profiles/camera_profile.hpp),
-  [independent module example](examples/profile_module/README.md),
-  [Cognex module](camera_profiles/cognex_cic_5000r/README.md).
+- **New camera profile:** [Create a Camera Profile](docs/camera-profile-tutorial.md),
+  [authoring contract](docs/camera-profile-authoring.md),
+  [C++ interface](docs/index.md#camera-profile-c-interface),
+  [reference implementations](docs/camera-profile-examples.md).
 - **New backend:** [backend authoring](docs/backend-authoring.md),
   [portability contracts](docs/backend-portability.md).
 - **Complete MEL requirements:** [surface inventory](docs/mel-surface-roadmap.md),
