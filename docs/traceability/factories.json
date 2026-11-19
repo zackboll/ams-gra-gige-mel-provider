@@ -1,0 +1,229 @@
+{
+  "schema": 1,
+  "family": "Factories",
+  "operations": [
+    {
+      "id": "API_Manager.destroy",
+      "family": "Factories",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+        "declaring": "API_Manager",
+        "signature": "virtual ~API_Manager() = default",
+        "line": 27,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "Class Required, default virtual destructor without method annotation",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "Manager"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "Runtime::~Runtime"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::~ControlImpl"
+        }
+      ],
+      "behavior": "Manager owns shared runtime, not the sole lifetime of retained handles; Control retires channels; runtime closes the device on final release.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "indirect",
+          "level": "SDK-free",
+          "demonstrates": "Shuts down and destroys the graph before dlclose; does not test manager-first destruction."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "destroying_control_detaches_retained_channels",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resets Control during an auto-release session; checks quiescence, detached handles and a failed second release."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "teardown",
+          "result": "indirect",
+          "level": "SDK-free",
+          "demonstrates": "Drops Control and manager after retirement; stack Buffer still retains its bytes and permits explicit release."
+        }
+      ],
+      "gap": "Add direct manager-first destruction and final backend-close ordering assertions.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "missing-positive-test"
+      ]
+    },
+    {
+      "id": "API_Manager.getAPI_Manager",
+      "family": "Factories",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+        "declaring": "Global",
+        "signature": "extern \"C\" std::shared_ptr<API_Manager> getAPI_Manager(const std::string& instance)",
+        "line": 48,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/factories.cpp",
+          "symbol": "::getAPI_Manager"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "gige_mel::make_api_manager"
+        }
+      ],
+      "behavior": "Exported C-linkage lookup with C++ ABI; synthetic only. Explicit C++ composition uses make_api_manager instead.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resolves all three factory symbols with dlsym and exercises them using the matching synthetic instance."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Control.getControl",
+      "family": "Factories",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "ams::iface::irmel (free function)",
+        "signature": "extern \"C\" IR_MEL_EXPORT std::shared_ptr<Control> getControl(std::string_view instance, std::shared_ptr<::API_Manager> sam)",
+        "line": 70,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Unannotated exported loader declaration for the required class; part of current manager-based path",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/factories.cpp",
+          "symbol": "ams::iface::irmel::getControl"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "gige_mel::control_for"
+        }
+      ],
+      "behavior": "Validates concrete manager and instance; reuses live Control or makes a new one.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resolves all three factory symbols with dlsym and exercises them using the matching synthetic instance."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.getBuffer",
+      "family": "Factories",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "ams::iface::irmel (free function)",
+        "signature": "extern \"C\" IR_MEL_EXPORT std::shared_ptr<Buffer> getBuffer(std::string_view instance, std::shared_ptr<::API_Manager> sam)",
+        "line": 113,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Unannotated exported loader declaration for the required class; part of current manager-based path",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/factories.cpp",
+          "symbol": "ams::iface::irmel::getBuffer"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "gige_mel::buffer_for"
+        }
+      ],
+      "behavior": "Allocates manager-affine buffer wrapper; consumer supplies storage.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resolves all three factory symbols with dlsym and exercises them using the matching synthetic instance."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    }
+  ]
+}

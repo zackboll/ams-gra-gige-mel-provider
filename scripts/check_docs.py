@@ -19,6 +19,12 @@ PAGES = "https://zackboll.github.io/ams-gra-gige-mel-provider/"
 CONSUMER_GUIDE = "md_docs_2consumer-integration.html"
 PROFILE_TUTORIAL = "md_docs_2camera-profile-tutorial.html"
 PROFILE_EXAMPLES = "md_docs_2camera-profile-examples.html"
+MEL_PROFILE = "md_docs_2implementation-profile.html"
+TRACEABILITY = "md_docs_2mel-traceability.html"
+TRACE_EVIDENCE = "md_docs_2mel-traceability-evidence.html"
+TRACE_LINKS = (
+    "src/provider.cpp", "tests/provider_standby_tests.inc", "tests/install_consumer/main.cpp",
+)
 EXAMPLE_SOURCES = {
     "Cognex profile implementation": "camera_profiles/cognex_cic_5000r/profile.cpp",
     "Cognex profile declaration": "camera_profiles/cognex_cic_5000r/profile.hpp",
@@ -48,10 +54,14 @@ SECTIONS = {
     PROFILE_EXAMPLES: ("internal development references", tuple(EXAMPLE_SOURCES)),
 }
 SEARCH = ("search/search.js", "search/searchdata.js")
-ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, *SECTIONS)
+ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, MEL_PROFILE, TRACEABILITY, TRACE_EVIDENCE, *SECTIONS)
 ENTRY_LINKS = {
     "index.html": (CONSUMER_GUIDE, PROFILE_TUTORIAL, "api_installed.html", "api_extensions.html",
-                   "api_core.html"),
+                   "api_core.html", MEL_PROFILE, TRACEABILITY),
+    MEL_PROFILE: (TRACEABILITY,),
+    TRACEABILITY: (MEL_PROFILE, "api_core.html", TRACE_EVIDENCE),
+    "api_core.html": (TRACEABILITY, TRACE_EVIDENCE),
+    TRACE_EVIDENCE: (TRACEABILITY, "api_core.html", "md_docs_2status.html"),
     CONSUMER_GUIDE: ("api_installed.html", "provider_8hpp.html", "backend_8hpp.html",
                      "navigation_8hpp.html", "line__of__sight_8hpp.html"),
     "api_installed.html": (CONSUMER_GUIDE,),
@@ -146,6 +156,11 @@ def verify_entry(page, parsed, text, sha):
         for label, source in EXAMPLE_BUILDS.items():
             if (f"{REPOSITORY}/blob/{sha}/{source}", label) not in parsed.links:
                 raise ValueError(f"{page}: missing revision-pinned link for {source}")
+    if page == TRACE_EVIDENCE:
+        urls = {href for href, _ in parsed.links}
+        for source in TRACE_LINKS:
+            if f"{REPOSITORY}/blob/{sha}/{source}" not in urls:
+                raise ValueError(f"{page}: missing revision-pinned evidence/implementation link: {source}")
     if page in SECTIONS:
         title, symbols = SECTIONS[page]
         if title.casefold() not in text.casefold():
@@ -188,11 +203,17 @@ def validate_site(root, sha, sources):
                              if re.fullmatch(r"search/all_[0-9a-f]+\.js", path))
 
     for path, parsed in pages.items():
+        if (f"{REPOSITORY}/commit/{sha}", f"Source commit: {sha}") not in parsed.links:
+            errors.append(f"{path}: missing source provenance for {sha}")
         for href in {*parsed.assets, *(url for url, _ in parsed.links)}:
             target = local_target(path, href)
             if target and (target[0] not in files or
                            (target[1] and target[0] in pages and target[1] not in pages[target[0]].anchors)):
                 errors.append(f"{path}: broken local URL: {href}")
+
+    for target in (TRACEABILITY, TRACE_EVIDENCE, TRACE_EVIDENCE + "#c2channel-modecmd"):
+        if f"'../{target}'" not in search_index:
+            errors.append(f"Missing traceability search result: {target}")
 
     for path in ENTRY_PAGES:
         if path not in pages:

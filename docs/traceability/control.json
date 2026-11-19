@@ -1,0 +1,330 @@
+{
+  "schema": 1,
+  "family": "Control",
+  "operations": [
+    {
+      "id": "Control.destroy",
+      "family": "Control",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "Control",
+        "signature": "virtual ~Control() = default",
+        "line": 30,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::~ControlImpl"
+        }
+      ],
+      "behavior": "Retires and drains owned channels, including retained detached handles.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "destroying_control_detaches_retained_channels",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resets Control during an auto-release session; checks quiescence, detached handles and a failed second release."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Control.init",
+      "family": "Control",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "Control",
+        "signature": "virtual Return init(const std::string& apertureConfigID = \"\") = 0",
+        "line": 35,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::init"
+        }
+      ],
+      "behavior": "Accepts empty or mono8-bootstrap identifier, admits exact configured device and profile, then snapshots declarations; repeat init does not reopen.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        },
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "identity_and_discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks exact selected device ID, one open, and no I/O during manager/Control construction."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Control.getCapabilities",
+      "family": "Control",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "Control",
+        "signature": "[[nodiscard]] virtual const std::vector<ChannelCapability>& getCapabilities() const = 0",
+        "line": 42,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelCapability.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Config.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::getCapabilities"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::init"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "capability"
+        }
+      ],
+      "behavior": "Empty before init, then immutable channel discovery snapshot; not current image geometry after reconfiguration.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "larger_configuration_requires_larger_buffers",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts discovery width stays stable while attached Image buffer size grows to 128×96."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks conditional stack discovery and rejection of invalid support declarations."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Control.getVersionInfo",
+      "family": "Control",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "Control",
+        "signature": "[[nodiscard]] virtual ams::iface::mel::VersionInfo getVersionInfo() const = 0",
+        "line": 45,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::getVersionInfo"
+        }
+      ],
+      "behavior": "Reports API field 4, library field 1, provider vendor and software version text; not a certification.",
+      "evidence": [
+        {
+          "path": "tests/provider_subsystem_tests.inc",
+          "scenario": "subsystem_surface",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts API/library values, vendor and version text."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Control.attachChannel",
+      "family": "Control",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "Control",
+        "signature": "virtual std::shared_ptr<Channel> attachChannel(const Config& config) = 0",
+        "line": 49,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelCapability.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Config.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image, C2, Health; Stack only if declared valid; no Scheduling, Track or Instrumentation",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::attachChannel"
+        }
+      ],
+      "behavior": "Matches advertised identity/type, checks listener, and permits one attachment of each available type.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "factory_initialization_and_channel_identity",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks pre-init discovery, stable Control handle, repeat init, attachment validation and attached image geometry."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Rejects absent/wrong listener and mismatched stack ID; attaches advertised stack."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Control.detachChannel",
+      "family": "Control",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Control.h",
+        "declaring": "Control",
+        "signature": "virtual Return detachChannel(std::shared_ptr<Channel> channel) = 0",
+        "line": 52,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ControlImpl::detachChannel"
+        }
+      ],
+      "behavior": "Retires owned channel, stops/joins publishers and closes callback admission without reclaiming consumer-held bytes.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "detach_preserves_delivered_buffer",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks successful detach, preserved bytes and explicit release with detached channel."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "detach_drains_metadata_callback_and_closes_admission",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks in-flight metadata drains and later sends/registration fail."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    }
+  ]
+}

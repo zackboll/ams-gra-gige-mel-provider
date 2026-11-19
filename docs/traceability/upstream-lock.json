@@ -1,0 +1,1740 @@
+{
+  "schema": 1,
+  "components": {
+    "ir-mel": {
+      "id": "ir-mel",
+      "repo": "open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel",
+      "revision": "8d9224519f12b44e0b28815755c56a32a28d24a0",
+      "tree": "bfc72a6a2e1929db9a90c0af78328085fb0ae3ec",
+      "tree_paths": 106
+    },
+    "common-mel": {
+      "id": "common-mel",
+      "repo": "open-arsenal/ams-gra-hello-world-sk-interfaces-common-mel",
+      "revision": "f6908437d8fd2f7fb69896f9eb9cfd272d10c439",
+      "tree": "f1f146d79f03a2ca0a59412aaf3d2c6d7dfba40f",
+      "tree_paths": 37
+    }
+  },
+  "files": [
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/BIT_Command.h",
+      "blob": "8847d5958dc2d50c749a271ee8ca59844bb1e2db",
+      "vendored": null
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/BIT_Configuration.h",
+      "blob": "25b661d8b18a0134aefa8e3917066c2140e2379f",
+      "vendored": "third_party/common-mel/include/mel/library/BIT_Configuration.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/BIT_Status.h",
+      "blob": "3c5a358cfe0424dd4e94f56839e390f9be4ed349",
+      "vendored": "third_party/common-mel/include/mel/library/BIT_Status.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/CalibrationStatus.h",
+      "blob": "db2b091dca0f42c56cd6901b2cc7f01159ae521f",
+      "vendored": "third_party/common-mel/include/mel/library/CalibrationStatus.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/CommonMEL.h",
+      "blob": "54f591b39e887cddcd138c037eef000661b266be",
+      "vendored": "third_party/common-mel/include/mel/library/CommonMEL.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/DiscreteStatus.h",
+      "blob": "3b31e4028725906066817d94c5583d4cc526c31b",
+      "vendored": "third_party/common-mel/include/mel/library/DiscreteStatus.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/MFA_StatusDetailed.h",
+      "blob": "3bca2d3906f9b96e835adfd4c9a4cd62fd60331e",
+      "vendored": "third_party/common-mel/include/mel/library/MFA_StatusDetailed.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/NavigationReport.h",
+      "blob": "d98d6d93a5d553e52e6e154be1a86261ddc7e60a",
+      "vendored": "third_party/common-mel/include/mel/library/NavigationReport.h"
+    },
+    {
+      "component": "common-mel",
+      "path": "include/mel/library/securityauditrecord/MFA_SecurityAuditRecord.h",
+      "blob": "163ca6b39da9fbd69b33f96cb6f7f06bf923bcb6",
+      "vendored": "third_party/common-mel/include/mel/library/securityauditrecord/MFA_SecurityAuditRecord.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/c2/C2Channel.h",
+      "blob": "8235c18d393f3267edf89a9ae207ed0d33b811ce",
+      "vendored": "third_party/ir-mel/include/irmel/library/c2/C2Channel.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/c2/ConfigSetCommand.h",
+      "blob": "f97993bc69c02f8d84b32bd6bae9581ea9ae0060",
+      "vendored": "third_party/ir-mel/include/irmel/library/c2/ConfigSetCommand.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRCreateFunctions.h",
+      "blob": "c8fcce15be12cc8c46faecea77972d23788c6723",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRFactory.h",
+      "blob": "fc74f1b8f1c4e208823fa5934e07ffb940666948",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+      "blob": "33b40344cf1e38b45667eda64c7c5998b2cc3eda",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRRegistry.h",
+      "blob": "a1fc642358c58f38fdcbde4d4901cc235481f223",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+      "blob": "1f7807e5bb85e5be97b24db2cc28b38fdb8dbbf6",
+      "vendored": "third_party/ir-mel/include/irmel/library/health-status/HealthStatusChannel.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/image/ImageChannel.h",
+      "blob": "b470da717aae799e9b941abc86b15091ce9dda62",
+      "vendored": "third_party/ir-mel/include/irmel/library/image/ImageChannel.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/image/NavigationReportResp.h",
+      "blob": "06d98b552c4ff7c548117d0037a1e2628f263ba8",
+      "vendored": "third_party/ir-mel/include/irmel/library/image/NavigationReportResp.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+      "blob": "6662431fab66d516cffb78a8ae3fc28fdc0318f2",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Buffer.h",
+      "blob": "e98b1f84aa55aea128f01ee10da2d893290143b9",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/Buffer.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Channel.h",
+      "blob": "621238ed2d3512ac92d13d0558587ef875f51414",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/Channel.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/ChannelCapability.h",
+      "blob": "acd00c7b49bc6f9c8a48b560ce7d74f8e21b7731",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/ChannelCapability.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h",
+      "blob": "14b5449058a366dcccf6e9eeb77d7e5ddfcfcfa4",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/ChannelType.h",
+      "blob": "c2ed3133a719050ee20b74e5a142c9a500af5ca4",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/ChannelType.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+      "blob": "0fc9bd51b6b4b08b58be85b65cd925d7d133f3a3",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/CommonIR_MEL.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Config.h",
+      "blob": "2602f2b4c9e03f43519adf16691ad7ead250c66f",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/Config.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Control.h",
+      "blob": "3f0bb20294374e37d88ea636c089d92bfab1d7a8",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/Control.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/FrameHeader.h",
+      "blob": "4922f1c4b7c8195087484f7def93ffa5505c16af",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/FrameHeader.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/ImageListener.h",
+      "blob": "9ad79ecf4b1779309bb390bf883ceb074ba2b897",
+      "vendored": "third_party/ir-mel/include/irmel/library/irmel-types/ImageListener.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+      "blob": "f11932ac09f2644aa47b00ed7623bb3b8ca9ddf2",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/stacked-image/StackFrameHeader.h",
+      "blob": "16447c1a5ef663bab978b37aeb33baa6588642d0",
+      "vendored": "third_party/ir-mel/include/irmel/library/stacked-image/StackFrameHeader.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+      "blob": "7e675aac4d2e7efd15fbdff90ba77d03795b3378",
+      "vendored": "third_party/ir-mel/include/irmel/library/stacked-image/StackedImageChannel.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+      "blob": "04e06b2a1a4355a79b7b637cbd80ba21348222e6",
+      "vendored": "third_party/ir-mel/include/irmel/library/stacked-image/StackedImageListener.h"
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/track/TrackChannel.h",
+      "blob": "d7cbb9bf704dcbc2436f0f51cf490b1ad9ec0ae0",
+      "vendored": null
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/utils/LibraryLoader.hpp",
+      "blob": "7740f1ca3f473d78cfb6a108cc9221c489a8ab16",
+      "vendored": null
+    }
+  ],
+  "interfaces": [
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+      "interface": "API_Manager",
+      "class_line": 24,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "API_Manager.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+          "declaring": "API_Manager",
+          "signature": "virtual ~API_Manager() = default",
+          "line": 27,
+          "annotations": []
+        },
+        {
+          "id": "API_Manager.getAPI_Manager",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/CommonIR_MEL.h",
+          "declaring": "Global",
+          "signature": "extern \"C\" std::shared_ptr<API_Manager> getAPI_Manager(const std::string& instance)",
+          "line": 48,
+          "annotations": [
+            "@Required"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Control.h",
+      "interface": "Control",
+      "class_line": 26,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "Control.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "Control",
+          "signature": "virtual ~Control() = default",
+          "line": 30,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Control.init",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "Control",
+          "signature": "virtual Return init(const std::string& apertureConfigID = \"\") = 0",
+          "line": 35,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Control.getCapabilities",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "Control",
+          "signature": "[[nodiscard]] virtual const std::vector<ChannelCapability>& getCapabilities() const = 0",
+          "line": 42,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Control.getVersionInfo",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "Control",
+          "signature": "[[nodiscard]] virtual ams::iface::mel::VersionInfo getVersionInfo() const = 0",
+          "line": 45,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Control.attachChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "Control",
+          "signature": "virtual std::shared_ptr<Channel> attachChannel(const Config& config) = 0",
+          "line": 49,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Control.detachChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "Control",
+          "signature": "virtual Return detachChannel(std::shared_ptr<Channel> channel) = 0",
+          "line": 52,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Control.getControl",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Control.h",
+          "declaring": "ams::iface::irmel (free function)",
+          "signature": "extern \"C\" IR_MEL_EXPORT std::shared_ptr<Control> getControl(std::string_view instance, std::shared_ptr<::API_Manager> sam)",
+          "line": 70,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Buffer.h",
+      "interface": "Buffer",
+      "class_line": 22,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "Buffer.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "virtual ~Buffer() = default",
+          "line": 26,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.init",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "virtual Return init(void* addr, const size_t sz, const int64_t ctx) = 0",
+          "line": 37,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.getBufferAddress",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "[[nodiscard]] virtual void* getBufferAddress() const = 0",
+          "line": 44,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.getImageAddress",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "[[nodiscard]] virtual void* getImageAddress() const = 0",
+          "line": 51,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.getSize",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "[[nodiscard]] virtual int64_t getSize() const = 0",
+          "line": 59,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.getContext",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "[[nodiscard]] virtual int64_t getContext() const = 0",
+          "line": 66,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.release",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "virtual Return release() = 0",
+          "line": 72,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.getFlags",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "virtual Return getFlags(std::vector<BufferFlag>& flags) const = 0",
+          "line": 81,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.addFlag",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "virtual void addFlag(BufferFlag flag) = 0",
+          "line": 88,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.setFlags",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "Buffer",
+          "signature": "virtual void setFlags(const std::vector<BufferFlag>& flags) = 0",
+          "line": 95,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Buffer.getBuffer",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Buffer.h",
+          "declaring": "ams::iface::irmel (free function)",
+          "signature": "extern \"C\" IR_MEL_EXPORT std::shared_ptr<Buffer> getBuffer(std::string_view instance, std::shared_ptr<::API_Manager> sam)",
+          "line": 113,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/Channel.h",
+      "interface": "Channel",
+      "class_line": 26,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "Channel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual ~Channel() = default",
+          "line": 30,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.sendKeepAliveRep",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> sendKeepAliveRep() = 0",
+          "line": 35,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.ChannelCommsTestReq",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<ChannelCommsTestRep> send(ChannelCommsTestReq channelCommsTestReq) = 0",
+          "line": 40,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.registerBuffer",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual Return registerBuffer(std::shared_ptr<Buffer> buffer) = 0",
+          "line": 50,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.unregisterBuffer",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual Return unregisterBuffer(std::shared_ptr<Buffer> buffer) = 0",
+          "line": 53,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.enable",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual Return enable() = 0",
+          "line": 56,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.disable",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual Return disable() = 0",
+          "line": 59,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.getCapabilities",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "[[nodiscard]] virtual ChannelCapability getCapabilities() const = 0",
+          "line": 62,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "Channel.cb-ChannelCommsTestRep",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/Channel.h",
+          "declaring": "Channel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ChannelCommsTestRep* const)> callback) = 0",
+          "line": 68,
+          "annotations": [
+            "@Required"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/c2/C2Channel.h",
+      "interface": "C2Channel",
+      "class_line": 31,
+      "class_annotation": "@Required",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "C2Channel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "~C2Channel() override = default",
+          "line": 35,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "C2Channel.BIT_Command",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> send(BIT_Command bit_Command) = 0",
+          "line": 40,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "C2Channel.CalibrationConfigurationCmd",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<ams::iface::mel::CalibrationConfiguration> send( CalibrationConfigurationCmd calibrationConfigurationCmd) = 0",
+          "line": 45,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "C2Channel.CalibrationStatusCmd",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<ams::iface::mel::CalibrationStatus> send(CalibrationStatusCmd calibrationStatusCmd) = 0",
+          "line": 51,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "C2Channel.CameraCommand",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<CameraCommandResp> send(CameraCommand cameraCommand) = 0",
+          "line": 57,
+          "annotations": [
+            "@RequiredIfCameraCtrl"
+          ]
+        },
+        {
+          "id": "C2Channel.CameraProtectCmd",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<CameraProtectCmdResp> send(CameraProtectCmd cameraProtectCmd) = 0",
+          "line": 63,
+          "annotations": [
+            "@RequiredIfCameraProtect"
+          ]
+        },
+        {
+          "id": "C2Channel.EraseCommand",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<EraseCommandType> send(EraseCommand eraseCommand) = 0",
+          "line": 68,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "C2Channel.SystemTrackDataResponse",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<CommandStatus> send(SystemTrackDataResponse systemTrackDataResponse) = 0",
+          "line": 73,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "C2Channel.ModeCmd",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<MFA_Mode> send(ModeCmd modeCmd) = 0",
+          "line": 78,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "C2Channel.ConfigSetCommand",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> send(ConfigSetCommand config) = 0",
+          "line": 83,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "C2Channel.cb-BIT_Configuration",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::BIT_Configuration* const)> callback) = 0",
+          "line": 90,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "C2Channel.cb-CommandStatus",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CommandStatus* const)> callback) = 0",
+          "line": 97,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "C2Channel.cb-CalibrationConfiguration",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual Return registerMetadataCallback( std::function<void(Channel& channel, const ams::iface::mel::CalibrationConfiguration* const)> callback) = 0",
+          "line": 105,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "C2Channel.cb-CameraProtectCmdResp",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CameraProtectCmdResp* const)> callback) = 0",
+          "line": 114,
+          "annotations": [
+            "@RequiredIfCameraProtect"
+          ]
+        },
+        {
+          "id": "C2Channel.cb-CalibrationStatus",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::CalibrationStatus* const)> callback) = 0",
+          "line": 122,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "C2Channel.cb-BIT_Status",
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/C2Channel.h",
+          "declaring": "C2Channel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::BIT_Status* const)> callback) = 0",
+          "line": 129,
+          "annotations": [
+            "@Required"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/image/ImageChannel.h",
+      "interface": "ImageChannel",
+      "class_line": 30,
+      "class_annotation": "@Required",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "ImageChannel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "~ImageChannel() override = default",
+          "line": 34,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageChannel.CameraCommand",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<CameraCommandResp> send(CameraCommand cameraCommand) = 0",
+          "line": 40,
+          "annotations": [
+            "@RequiredIfCameraCtrl"
+          ]
+        },
+        {
+          "id": "ImageChannel.NavigationReport",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<NavigationReportResp> send(NavigationReport navigationReport) = 0",
+          "line": 46,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-BadPixelList",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const BadPixelList* const)> callback) = 0",
+          "line": 53,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-OpticalDistortionMap",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const OpticalDistortionMap* const)> callback) = 0",
+          "line": 61,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-LineOfSightReport",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LineOfSightReport* const)> callback) = 0",
+          "line": 68,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-LineOfSightQuaternion",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LineOfSightQuaternion* const)> callback) = 0",
+          "line": 76,
+          "annotations": [
+            "@RequiredIfLOSQuaternion"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-LineOfSightEuler",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LineOfSightEuler* const)> callback) = 0",
+          "line": 83,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-CameraCommandResp",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CameraCommandResp* const)> callback) = 0",
+          "line": 91,
+          "annotations": [
+            "@RequiredIfCameraCtrl"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-NavigationReportResp",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const NavigationReportResp* const)> callback) = 0",
+          "line": 98,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-LOS3D_KinematicsType",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LOS3D_KinematicsType* const)> const& callback) = 0",
+          "line": 105,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-CandidateObjectMessage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectMessage* const)> callback) = 0",
+          "line": 113,
+          "annotations": [
+            "@RequiredIfDetectCandidateObjects"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-CandidateObjectPreProcMessage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectPreProcMessage* const)> callback) = 0",
+          "line": 121,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "ImageChannel.cb-NUC_TempData",
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/ImageChannel.h",
+          "declaring": "ImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const NUC_TempData* const)> callback) = 0",
+          "line": 129,
+          "annotations": [
+            "@Optional"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/irmel-types/ImageListener.h",
+      "interface": "ImageListener",
+      "class_line": 26,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "ImageListener.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ImageListener.h",
+          "declaring": "ImageListener",
+          "signature": "virtual ~ImageListener() = default",
+          "line": 30,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "ImageListener.onImage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ImageListener.h",
+          "declaring": "ImageListener",
+          "signature": "virtual void onImage(const Channel& channel, const FrameHeader& header, std::shared_ptr<Buffer> buffer) = 0",
+          "line": 42,
+          "annotations": [
+            "@Required"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+      "interface": "HealthStatusChannel",
+      "class_line": 23,
+      "class_annotation": "@Required",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "HealthStatusChannel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "~HealthStatusChannel() override = default",
+          "line": 27,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-LFStatus",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LFStatus* const)> callback) = 0",
+          "line": 35,
+          "annotations": [
+            "@RequiredIfLFSupport"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-MFA_Status",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::MFA_Status* const)> callback) = 0",
+          "line": 42,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-BIT_Status",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::BIT_Status* const)> callback) = 0",
+          "line": 49,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-SubsystemStatusResp",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const SubsystemStatusResp* const)> callback) = 0",
+          "line": 56,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-DiscreteStatus",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::DiscreteStatus* const)> callback) = 0",
+          "line": 63,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-MFA_SecurityAuditRecord",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback( std::function<void(Channel& channel, const ams::iface::mel::MFA_SecurityAuditRecord* const)> callback) = 0",
+          "line": 70,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-MFA_StatusDetailed",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::MFA_StatusDetailed* const)> callback) = 0",
+          "line": 78,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "HealthStatusChannel.cb-NUC_TempData",
+          "component": "ir-mel",
+          "path": "include/irmel/library/health-status/HealthStatusChannel.h",
+          "declaring": "HealthStatusChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const NUC_TempData* const)> callback) = 0",
+          "line": 86,
+          "annotations": [
+            "@Optional"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+      "interface": "SchedulingChannel",
+      "class_line": 29,
+      "class_annotation": "@RequiredIfIRSTTrackTasking",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "SchedulingChannel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "~SchedulingChannel() override = default",
+          "line": 42,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.PrioritizedTrackListCmd",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<TrackListResponse> send(PrioritizedTrackListCmd prioritizedTrackListCmd) = 0",
+          "line": 47,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.cb-TaskExecutingRep",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const TaskExecutingRep* const)> callback) = 0",
+          "line": 55,
+          "annotations": [
+            "@RequiredIfIRSTTrackTasking"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.cb-ExecuteTaskAck",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ExecuteTaskAck* const)> callback) = 0",
+          "line": 63,
+          "annotations": [
+            "@RequiredIfIRSTTrackTasking"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.cb-SchedCreatedRep",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const SchedCreatedRep* const)> callback) = 0",
+          "line": 71,
+          "annotations": [
+            "@RequiredIfIRSTTrackTasking"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.cb-UpdateTrackListResponse",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const UpdateTrackListResponse* const)> callback) = 0",
+          "line": 79,
+          "annotations": [
+            "@RequiredIfTrack"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.cb-TaskEvents",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const TaskEvents* const)> callback) = 0",
+          "line": 86,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.cb-ScanPerformanceReport",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ScanPerformanceReport* const)> callback) = 0",
+          "line": 94,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.AbortTask",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> exec(AbortTask abortTask) = 0",
+          "line": 106,
+          "annotations": [
+            "@RequiredIfIRSTScanTasking",
+            "@RequiredIfIRSTStareTasking",
+            "@RequiredIfIRSTTrackTasking"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.IRSTScanTask",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> exec(IRSTScanTask irstScanTask) = 0",
+          "line": 114,
+          "annotations": [
+            "@RequiredIfIRSTScanTasking"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.IRSTStareTask",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> exec(IRSTStareTask irstStareTask) = 0",
+          "line": 122,
+          "annotations": [
+            "@RequiredIfIRSTStareTasking"
+          ]
+        },
+        {
+          "id": "SchedulingChannel.IRSTTrackTask",
+          "component": "ir-mel",
+          "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+          "declaring": "SchedulingChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<Return> exec(IRSTTrackTask irstTrackTask) = 0",
+          "line": 130,
+          "annotations": [
+            "@RequiredIfIRSTTrackTasking"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/track/TrackChannel.h",
+      "interface": "TrackChannel",
+      "class_line": 25,
+      "class_annotation": "@RequiredIfTrack",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "TrackChannel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "~TrackChannel() override = default",
+          "line": 29,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "TrackChannel.SystemTrackDataResponse",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<CommandStatus> send(SystemTrackDataResponse systemTrackDataResponse) = 0",
+          "line": 34,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "TrackChannel.TrackDataUpdate",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<CommandStatus> send(TrackDataUpdate trackDataUpdate) = 0",
+          "line": 40,
+          "annotations": [
+            "@RequiredIfTrackUpdate"
+          ]
+        },
+        {
+          "id": "TrackChannel.cb-CandidateObjectMessage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectMessage* const)> callback) = 0",
+          "line": 48,
+          "annotations": [
+            "@RequiredIfDetectCandidateObjects"
+          ]
+        },
+        {
+          "id": "TrackChannel.cb-IRSTTrackReport",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const IRSTTrackReport* const)> callback) = 0",
+          "line": 55,
+          "annotations": [
+            "@RequiredIfTrack"
+          ]
+        },
+        {
+          "id": "TrackChannel.cb-RequestSystemTrackData",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const RequestSystemTrackData* const)> callback) = 0",
+          "line": 63,
+          "annotations": [
+            "@Optional"
+          ]
+        },
+        {
+          "id": "TrackChannel.cb-CandidateObjectPreProcMessage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/track/TrackChannel.h",
+          "declaring": "TrackChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectPreProcMessage* const)> callback) = 0",
+          "line": 71,
+          "annotations": [
+            "@Optional"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+      "interface": "InstrumentationChannel",
+      "class_line": 21,
+      "class_annotation": "@RequiredIfInstrumentation",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "InstrumentationChannel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+          "declaring": "InstrumentationChannel",
+          "signature": "~InstrumentationChannel() override = default",
+          "line": 26,
+          "annotations": [
+            "@RequiredIfInstrumentation"
+          ]
+        },
+        {
+          "id": "InstrumentationChannel.InstrumentationLevelCmd",
+          "component": "ir-mel",
+          "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+          "declaring": "InstrumentationChannel",
+          "signature": "virtual ams::iface::mel::RequestFor<InstrumentationReport> send(InstrumentationLevelCmd instrumentationLevelCmd) = 0",
+          "line": 32,
+          "annotations": [
+            "@RequiredIfInstrumentation"
+          ]
+        },
+        {
+          "id": "InstrumentationChannel.cb-InstrumentationReport",
+          "component": "ir-mel",
+          "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+          "declaring": "InstrumentationChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const InstrumentationReport* const)> callback) = 0",
+          "line": 40,
+          "annotations": [
+            "@RequiredIfInstrumentation"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+      "interface": "StackedImageChannel",
+      "class_line": 19,
+      "class_annotation": "@Required",
+      "inherits": "Channel",
+      "declarations": [
+        {
+          "id": "StackedImageChannel.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+          "declaring": "StackedImageChannel",
+          "signature": "~StackedImageChannel() override = default",
+          "line": 23,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "StackedImageChannel.cb-LOS3D_KinematicsType",
+          "component": "ir-mel",
+          "path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+          "declaring": "StackedImageChannel",
+          "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LOS3D_KinematicsType* const)> const& callback) = 0",
+          "line": 30,
+          "annotations": [
+            "@Optional"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+      "interface": "StackedImageListener",
+      "class_line": 23,
+      "class_annotation": "@RequiredIfImageStack",
+      "inherits": "ImageListener",
+      "declarations": [
+        {
+          "id": "StackedImageListener.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+          "declaring": "StackedImageListener",
+          "signature": "virtual ~StackedImageListener() = default",
+          "line": 27,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "StackedImageListener.onImage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+          "declaring": "StackedImageListener",
+          "signature": "void onImage(const Channel& /*channel*/, const FrameHeader& /*header*/, std::shared_ptr<Buffer> /*buffer*/) override",
+          "line": 40,
+          "annotations": []
+        },
+        {
+          "id": "StackedImageListener.onImageStack",
+          "component": "ir-mel",
+          "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+          "declaring": "StackedImageListener",
+          "signature": "virtual Return onImageStack(Channel& /*channel*/, const StackFrameHeader& /*header*/, std::shared_ptr<Buffer> /*buffer*/)",
+          "line": 47,
+          "annotations": [
+            "@RequiredIfImageStack"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRFactory.h",
+      "interface": "IRFactory",
+      "class_line": 25,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "IRFactory.loadChannelTrack",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<TrackChannel> loadChannelTrack(int id, const ams::iface::irmel::Config& config)",
+          "line": 39,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadChannelC2",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<C2Channel> loadChannelC2(int id, const ams::iface::irmel::Config& config)",
+          "line": 45,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadChannelHealthStatus",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<HealthStatusChannel> loadChannelHealthStatus(int id, const ams::iface::irmel::Config& config)",
+          "line": 51,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadChannelImage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<ImageChannel> loadChannelImage(int id, const ams::iface::irmel::Config& config)",
+          "line": 57,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadChannelInstrumentation",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<InstrumentationChannel> loadChannelInstrumentation(int id, const ams::iface::irmel::Config& config)",
+          "line": 63,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadChannelScheduling",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<SchedulingChannel> loadChannelScheduling(int id, const ams::iface::irmel::Config& config)",
+          "line": 69,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadChannelStackedImage",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<StackedImageChannel> loadChannelStackedImage(int id, const ams::iface::irmel::Config& config)",
+          "line": 75,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.loadRegistry",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static bool loadRegistry(std::string_view filePath)",
+          "line": 80,
+          "annotations": []
+        },
+        {
+          "id": "IRFactory.baseCreateChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRFactory.h",
+          "declaring": "IRFactory",
+          "signature": "static std::shared_ptr<Channel> baseCreateChannel(int id, std::string_view fnSymbol, ams::iface::irmel::Config config)",
+          "line": 91,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRRegistry.h",
+      "interface": "IRRegistry",
+      "class_line": 26,
+      "class_annotation": "@Required",
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "IRRegistry.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRRegistry.h",
+          "declaring": "IRRegistry",
+          "signature": "~IRRegistry()",
+          "line": 30,
+          "annotations": []
+        },
+        {
+          "id": "IRRegistry.IsInitialized",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRRegistry.h",
+          "declaring": "IRRegistry",
+          "signature": "[[nodiscard]] bool IsInitialized() const",
+          "line": 38,
+          "annotations": []
+        },
+        {
+          "id": "IRRegistry.ReadRegistry",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRRegistry.h",
+          "declaring": "IRRegistry",
+          "signature": "void ReadRegistry(std::string_view filename)",
+          "line": 42,
+          "annotations": []
+        },
+        {
+          "id": "IRRegistry.LoadLibrary",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRRegistry.h",
+          "declaring": "IRRegistry",
+          "signature": "bool LoadLibrary(int id)",
+          "line": 47,
+          "annotations": []
+        },
+        {
+          "id": "IRRegistry.GetSymbol",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRRegistry.h",
+          "declaring": "IRRegistry",
+          "signature": "void* GetSymbol(int id, const char* name)",
+          "line": 53,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+      "interface": "IRInterfaceBase",
+      "class_line": 12,
+      "class_annotation": null,
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "IRInterfaceBase.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+          "declaring": "IRInterfaceBase",
+          "signature": "virtual ~IRInterfaceBase() = default",
+          "line": 15,
+          "annotations": []
+        },
+        {
+          "id": "IRInterfaceBase.QueryInterface",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+          "declaring": "IRInterfaceBase",
+          "signature": "virtual IRInterfaceBase* QueryInterface(int id) = 0",
+          "line": 19,
+          "annotations": []
+        },
+        {
+          "id": "IRInterfaceBase.QueryInterface-typed",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+          "declaring": "IRInterfaceBase",
+          "signature": "T* QueryInterface()",
+          "line": 24,
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/library/factory/IRCreateFunctions.h",
+      "interface": "IRCreateFunctions",
+      "class_line": null,
+      "class_annotation": null,
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "IRCreateFunctions.fnTrackChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnTrackChannel = std::add_pointer<std::shared_ptr<TrackChannel>(Config&)>::type",
+          "line": 29,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "IRCreateFunctions.fnC2Channel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnC2Channel = std::add_pointer<std::shared_ptr<C2Channel>(Config&)>::type",
+          "line": 34,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "IRCreateFunctions.fnHealthStatusChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnHealthStatusChannel = std::add_pointer<std::shared_ptr<HealthStatusChannel>(Config&)>::type",
+          "line": 39,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "IRCreateFunctions.fnImageChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnImageChannel = std::add_pointer<std::shared_ptr<ImageChannel>(Config&)>::type",
+          "line": 44,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "IRCreateFunctions.fnInstrumentationChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnInstrumentationChannel = std::add_pointer<std::shared_ptr<InstrumentationChannel>(Config&)>::type",
+          "line": 49,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "IRCreateFunctions.fnSchedulingChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnSchedulingChannel = std::add_pointer<std::shared_ptr<SchedulingChannel>(Config&)>::type",
+          "line": 54,
+          "annotations": [
+            "@Required"
+          ]
+        },
+        {
+          "id": "IRCreateFunctions.fnStackedImageChannel",
+          "component": "ir-mel",
+          "path": "include/irmel/library/factory/IRCreateFunctions.h",
+          "declaring": "IRCreateFunctions",
+          "signature": "using fnStackedImageChannel = std::add_pointer<std::shared_ptr<StackedImageChannel>(Config&)>::type",
+          "line": 59,
+          "annotations": [
+            "@Required"
+          ]
+        }
+      ]
+    },
+    {
+      "component": "ir-mel",
+      "path": "include/irmel/utils/LibraryLoader.hpp",
+      "interface": "LibraryLoader",
+      "class_line": 34,
+      "class_annotation": null,
+      "inherits": null,
+      "declarations": [
+        {
+          "id": "LibraryLoader.destroy",
+          "component": "ir-mel",
+          "path": "include/irmel/utils/LibraryLoader.hpp",
+          "declaring": "LibraryLoader",
+          "signature": "~LibraryLoader()",
+          "line": 38,
+          "annotations": []
+        },
+        {
+          "id": "LibraryLoader.parseAndLoadLibrary-default",
+          "component": "ir-mel",
+          "path": "include/irmel/utils/LibraryLoader.hpp",
+          "declaring": "LibraryLoader",
+          "signature": "void parseAndLoadLibrary(int argc, const std::vector<char *> &argv)",
+          "line": 64,
+          "annotations": []
+        },
+        {
+          "id": "LibraryLoader.parseAndLoadLibrary-named-option",
+          "component": "ir-mel",
+          "path": "include/irmel/utils/LibraryLoader.hpp",
+          "declaring": "LibraryLoader",
+          "signature": "void parseAndLoadLibrary(int argc, const std::vector<char *> &argv, const std::string &optionName)",
+          "line": 70,
+          "annotations": []
+        },
+        {
+          "id": "LibraryLoader.loadLibrary",
+          "component": "ir-mel",
+          "path": "include/irmel/utils/LibraryLoader.hpp",
+          "declaring": "LibraryLoader",
+          "signature": "void loadLibrary(const std::string &so_filename)",
+          "line": 74,
+          "annotations": []
+        }
+      ]
+    }
+  ]
+}

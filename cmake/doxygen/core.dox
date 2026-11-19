@@ -18,7 +18,8 @@ Configuration and transport | @ref src/config_parser.cpp "config_parser.cpp", @r
 
 Use @ref md_docs_2architecture "architecture and lifecycle" to understand
 ownership, @ref api_extensions for profile/backend composition, and the
-@ref md_docs_2mel-surface-roadmap "MEL surface roadmap" to locate implementation
-and test gaps before adding a capability. Vendor and upstream headers are
+@ref md_docs_2mel-traceability "Requirements Traceability" for upstream obligations.
+Continue to @ref md_docs_2mel-traceability-evidence "Tests/Evidence" for operation-level
+assertions and gaps before adding a capability. Vendor and upstream headers are
 intentionally not part of the source browser.
 */

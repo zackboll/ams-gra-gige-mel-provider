@@ -31,7 +31,7 @@ A profile returns camera facts and policy decisions. It does not implement MEL
 channels, deliver buffers, or confer support for optional capabilities. For
 example, accepting Mono8 frames does not prove the device produces LOS data or
 has a qualified timestamp source. Read the [architecture](architecture.md) and
-the [MEL surface inventory](mel-surface-roadmap.md) for those boundaries.
+the [MEL traceability inventory](mel-traceability.md) for those boundaries.
 
 Aravis and Pleora can each pass their own implementation of the same typed
 feature service to one profile. The profile makes the same decisions given the

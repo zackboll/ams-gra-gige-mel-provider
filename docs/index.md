@@ -32,6 +32,12 @@ reference for your checkout with the
 | Look up MEL behavior in detail | [Implementation profile](implementation-profile.md), [configuration](configuration.md), [installed MEL contract tests](../tests/install_consumer/) |
 | Understand interface boundaries | [Architecture](architecture.md), [consumer integration guide](consumer-integration.md) |
 
+## MEL Implementation
+
+Follow the [implementation profile](implementation-profile.md) to
+[Requirements Traceability](mel-traceability.md), then to the C++ reference
+and [Tests/Evidence](mel-traceability-evidence.md).
+
 ## Camera Integration
 
 - [Create a Camera Profile](camera-profile-tutorial.md) — implement, build,
@@ -63,7 +69,7 @@ reference for your checkout with the
    then [backend portability](backend-portability.md) and
    [camera-profile portability](camera-profile-portability.md).
 4. For **MEL implementation work**, use the
-   [complete MEL surface inventory and requirements](mel-surface-roadmap.md)
+   [MEL requirements traceability inventory](mel-traceability.md)
    together with the exact pinned [IR MEL declarations](../third_party/ir-mel/include/)
    and [Common MEL declarations](../third_party/common-mel/include/).
    The [implementation profile](implementation-profile.md) describes current
@@ -135,6 +141,5 @@ scope of future tickets:
 | Campaign item | Remaining documentation work |
 | --- | --- |
 | DOC-GIGE-002 | Doxygen generation, navigation and source checks are available; production publication and live verification are separate `main`-only gates. |
-| DOC-GIGE-005 | MEL requirements-to-implementation/test cross-reference; distinguish required gaps, conditional support and pinned annotation/enum blockers. |
 | DOC-GIGE-006 | Evidence index by SDK/camera/firmware and environment, reproducible validation commands, plus a broader stale-text/link audit of milestone-heavy references. |
 | Core API comments | Expand declaration-level ownership, lifetime and error documentation in the project headers and implementation sources. Source extraction is not complete contract documentation. |

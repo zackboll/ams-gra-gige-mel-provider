@@ -1,0 +1,246 @@
+{
+  "schema": 1,
+  "family": "StackedImage",
+  "operations": [
+    {
+      "id": "StackedImageChannel.destroy",
+      "family": "StackedImage",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+        "declaring": "StackedImageChannel",
+        "signature": "~StackedImageChannel() override = default",
+        "line": 23,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration; Class is Required (no predicate); current attachment is gated on source, not an upstream waiver",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Stack advertised/attachable only with valid source and stack listener",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::~ChannelCore"
+        }
+      ],
+      "behavior": "Concrete channel shares ChannelCore teardown; family-specific publishers retire with attachment.",
+      "evidence": [
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "teardown",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks stack worker and callback teardown and lifetime ordering."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "StackedImageChannel.cb-LOS3D_KinematicsType",
+      "family": "StackedImage",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/stacked-image/StackedImageChannel.h",
+        "declaring": "StackedImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LOS3D_KinematicsType* const)> const& callback) = 0",
+        "line": 30,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration; Class is Required (no predicate); current attachment is gated on source, not an upstream waiver",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "Stack advertised/attachable only with valid source and stack listener",
+      "metadata": {
+        "enumerator": "LOS3DKinematicsType",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "StackedImageChannelImpl::registerMetadataCallback(LOS3D_KinematicsType)"
+        }
+      ],
+      "behavior": "NotSupported even with attachable Stack and a working stack source.",
+      "evidence": [
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "discovery",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Attempts Stack LOS3D registration and checks NotSupported."
+        }
+      ],
+      "gap": "Supply stack-associated LOS3D with qualified sensor kinematic provenance if selected.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "StackedImageListener.destroy",
+      "family": "StackedImage",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+        "declaring": "StackedImageListener",
+        "signature": "virtual ~StackedImageListener() = default",
+        "line": 27,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "Enclosing StackedImageListener: MFA delivers TSI image stacks; valid IStackedImageSource; service supplies StackedImageListener",
+        "current": "fixture-only"
+      },
+      "status": "supported",
+      "availability": "Stack advertised/attachable only with valid source and stack listener",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::~ChannelCore"
+        }
+      ],
+      "behavior": "Listener destructor is supplied by upstream/service; provider holds the listener while dispatch is admitted.",
+      "evidence": [
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "teardown",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks stack worker and callback teardown and lifetime ordering."
+        }
+      ],
+      "gap": null,
+      "responsibility": "external system",
+      "gap_groups": []
+    },
+    {
+      "id": "StackedImageListener.onImage",
+      "family": "StackedImage",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+        "declaring": "StackedImageListener",
+        "signature": "void onImage(const Channel& /*channel*/, const FrameHeader& /*header*/, std::shared_ptr<Buffer> /*buffer*/) override",
+        "line": 40,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Enclosing StackedImageListener: MFA delivers TSI image stacks; valid IStackedImageSource; service supplies StackedImageListener",
+        "current": "unresolved"
+      },
+      "status": "unresolved",
+      "availability": "Stack advertised/attachable only with valid source and stack listener",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream override is inline no-op; provider uses onImageStack on Stack. Ordinary Image delivery remains a distinct service responsibility.",
+      "evidence": [],
+      "gap": "Clarify service listener reuse; do not use inherited no-op to consume/release ordinary frames.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "StackedImageListener.onImageStack",
+      "family": "StackedImage",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/stacked-image/StackedImageListener.h",
+        "declaring": "StackedImageListener",
+        "signature": "virtual Return onImageStack(Channel& /*channel*/, const StackFrameHeader& /*header*/, std::shared_ptr<Buffer> /*buffer*/)",
+        "line": 47,
+        "annotations": [
+          "@RequiredIfImageStack"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/stacked-image/StackFrameHeader.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing StackedImageListener: MFA delivers TSI image stacks; valid IStackedImageSource; service supplies StackedImageListener; MFA delivers TSI image stacks; valid IStackedImageSource; service supplies StackedImageListener",
+        "current": "fixture-only"
+      },
+      "status": "partial",
+      "availability": "Stack advertised/attachable only with valid source and stack listener",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::run_stacks"
+        },
+        {
+          "path": "include/gige_mel/backend.hpp",
+          "symbol": "IStackedImageSource"
+        }
+      ],
+      "behavior": "Service callback receives one source-formed Mono8 volume and complete StackFrameHeader; no ordinary frame aggregation. Source-required stack/callback; upstream default returns NotSupported.",
+      "evidence": [
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "payload_ownership",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts complete volume/header, protected retained buffer and explicit release."
+        },
+        {
+          "path": "tests/install_stack_consumer/main.cpp",
+          "scenario": "main",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks the isolated installed consumer receives and releases a complete stack."
+        },
+        {
+          "path": "tests/provider_stack_tests.cpp",
+          "scenario": "callback_results",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks rejected/thrown callback recovery without reporting rejection as capability success."
+        }
+      ],
+      "gap": "Integrate real TSI stack source and qualify geometry, navigation/time and device lifecycle.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision",
+        "sensor-source",
+        "hardware-qualification"
+      ]
+    }
+  ]
+}
