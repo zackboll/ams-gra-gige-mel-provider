@@ -1,0 +1,95 @@
+# Current capability and evidence status
+
+This summary describes merged `main` as audited for DOC-GIGE-001, starting at
+`15542919b45febb809bfd24d5469dcddb3b456b6` (through PR #45). It does not include
+features from open PRs. See the [documentation index](index.md), the detailed
+[implementation profile](implementation-profile.md), and the
+[complete MEL surface inventory](mel-surface-roadmap.md).
+
+**Experimental, partial MEL implementation; not full MEL 4.0 conformance or
+production camera/timestamp qualification.** Implemented C++ channel classes and
+unsupported stubs are not equivalent to functional, advertised capabilities.
+
+## How to read the evidence
+
+- **Implemented:** merged source provides the behavior under its stated admission
+  and lifecycle contracts.
+- **Fixture-qualified:** deterministic SDK-free recordings, SDK Fake devices or
+  controlled native-buffer/GenApi tests exercised a contract. This is not
+  physical sensor, transport or clock qualification.
+- **Physical evidence:** observations for the recorded SDK/camera/firmware and
+  temporary setup only; not a general support or production-readiness claim.
+- **Unsupported / planned:** unavailable or gated work. No capability may be
+  inferred from a class declaration, design record or successful fixture run.
+
+## Backend and camera-profile matrix
+
+| Backend / profile | Implemented path and availability | Evidence and important limits |
+| --- | --- | --- |
+| Synthetic / default | SDK-free default; exported `getAPI_Manager("synthetic")`; deterministic Mono8, optional explicit Mono12, camera controls and registered-host-buffer MEL delivery | [Backend tests](../tests/backend_tests.cpp), [provider tests](../tests/provider_tests.cpp) and [shared portability tests](../tests/provider_backend_contract_tests.cpp). Virtual integration-start clock and virtual optics only; no hardware/UTC claim. |
+| Aravis / `mono_free_running_v1` | Default-OFF, internal/uninstalled Aravis **0.8.36** adapter: discovery, exact open, configuration/readback, bounded source acquisition, leases and terminal control-loss handling. Available in the internal catalog when compiled, not through exported MEL factory selection | Fake and loopback simulator contracts plus [physical Cognex evidence](cognex-cic-5000r.md). Production `FrameTimestamp{}` is invalid, so the provider rejects frames. Positive MEL pixel delivery uses a test-only virtual clock. [Integration and timing gates](aravis-integration.md). |
+| Pleora / `mono_free_running_v1` | Default-OFF, internal/uninstalled eBUS **Pv 6.5.3.7155** adapter (matching GenApi 3.4.1): exact MAC open, shared feature policy, bounded native reception and host-copy leases. Internal catalog when compiled; not an exported factory choice | Native GenApi/PvBuffer fixtures and recorded Cognex Mono8 watermarked receiver evaluation. Default policy does not enable that evaluation. SDK entitlement/production licensing unresolved; timestamps invalid, so production MEL frames are rejected. [Integration/evidence](pleora-integration.md), [consolidation](pleora-consolidation.md). |
+| Aravis or Pleora / `cognex_cic_5000r_v1` | Independently built matched-C++ module; exact COGNEX/CIC-5000R/V3.7-1 identity; Mono8 and conservative **1/2/4/5/8/10 Hz** admission | [Module guide](../camera_profiles/cognex_cic_5000r/README.md), [fixture qualification](tasks/GIGE-MEL-036-validation.md). Earlier physical capture evidence informed policy; the module itself has no new physical qualification. No Mono12 or clock qualification. |
+| GenTL / injected existing profiles | Default-OFF, internal/uninstalled **read-only** backend foundation using EMVA GenTL 1.6 and Aravis 0.8.36 GenApi. Enumerate, exact open/close, profile admission and readback; no `apply`, streaming or catalog registration | [Controlled simulated-register producer qualification](tasks/GIGE-MEL-GENTL-002-validation.md) only. Reuse of the Cognex module in this fixture does not change its Aravis/Pleora module compatibility declaration or qualify real-camera GenTL. |
+
+The internal catalog's canonical default profile is `mono_free_running_v1`;
+`aravis-mono8-free-running-v1` remains a historical diagnostic identifier.
+Synthetic uses its own fixed policy, not an arbitrary loaded camera profile.
+The alternate rate-limited example/test profile demonstrates independent policy
+and lifetime behavior; it is not a supported physical-camera profile.
+
+### Physical evidence is deliberately narrower than production support
+
+The [Cognex record](cognex-cic-5000r.md) identifies serial 21874533, firmware
+`106349-08;U;CIC-5000R;V3.7-1;0`, and full-frame 2592×1944 Mono8 observations.
+Aravis 0.8.36 sustained 2, 5 and 10 Hz on the observed 1 Gb/s link; heavy-load
+loss was also observed. The power-on rate-control-disabled configuration is
+unsupported, and 14 Hz is not exactly representable under the integer-Hz
+contract. Pleora's [R1 watermarked hardware evaluation](pleora-integration.md#r1-watermarked-hardware-qualification-2026-11-12)
+has its own limited scope, not a paired benchmark or licensed production result.
+Neither record qualifies integration-start timestamps, optics/calibration,
+UTC/PTP, navigation, production reliability or full MEL conformance.
+
+## MEL behavior summary
+
+| Surface | Current implemented behavior | Boundary / evidence |
+| --- | --- | --- |
+| Loading and buffers | Exact upstream manager/control/buffer factories; independent sessions; copy-first registered host memory and explicit consumer release | Factory instance is exactly `synthetic`; unknown names return null. Held bytes must survive stop/close until release. [Architecture](architecture.md), [profile](implementation-profile.md). |
+| Image | Mono8 and explicitly selected unpacked little-endian Mono12; camera command/readback and bounded publication | Format admission is per device/profile, not a CameraCommand format switch. Aravis/Pleora require independently established byte order for Mono12; physical Cognex Mono12 is unqualified. [Mono12 contract](mono12-image-profile.md). |
+| C2 | CameraCommand, complete ConfigSet v1, communications and bounded BIT/ModeCmd subsets | [Configuration](configuration.md), [BIT](software-bit.md), [Standby-only ModeCmd subset](mode-command.md). Not full operational C2/tasking. |
+| Health | Software MFA_Status, MFA_StatusDetailed, BIT_Status and SubsystemStatusResp | Observed provider-software state, not camera health or hardware BIT. [Health](health-status.md), [subsystem profile](subsystem-status.md). |
+| BadPixelList | Known-empty metadata for the synthetic generator's explicitly declared defect-map evidence | No physical defect-map source, correction or calibration. [Profile](implementation-profile.md#synthetic-known-empty-badpixellist-gige-mel-016). |
+| Navigation | Structural receipt validation/acknowledgement; optional typed backend sink forwarding when supplied | No production navigation transport, image association or navigation-quality claim. [Reception](navigation-reception.md), [forwarding](navigation-backend-forwarding.md). |
+| Image LOS | Conditional Euler/Report support from a validated optional source, declared before discovery | Only an explicitly selected SDK-free recording fixture supplies qualified observations. Default synthetic and production adapters remain unsupported/unadvertised; no inferred pointing or physical time alignment. [LOS contract](image-los-metadata.md). |
+| StackedImage | Conditional delivery of source-provided, pre-formed contiguous Mono8 volumes; explicit release and acquisition exclusion | Recording fixture only, not ordinary-frame concatenation. Default synthetic/production adapters unsupported/unadvertised; no sensor TSI/time qualification. [Stack contract](stacked-image-provider.md), [fixture validation](tasks/GIGE-MEL-044-validation.md). |
+
+### Unsupported and planned work
+
+- Scheduling, Track, Instrumentation and the alternate direct-channel
+  factory/registry path are unimplemented on this audited `main`.
+- Calibration, protection, erase and tracking commands remain unsupported.
+  Five unsupported C2 commands also issue correlated rejected CommandStatus;
+  rejection reporting does not advertise support.
+- Health DiscreteStatus and MFA_SecurityAuditRecord remain unsupported and
+  unadvertised, with pinned-enum/event-source blockers recorded in the
+  [Health gap classification](tasks/GIGE-MEL-041-design.md).
+- Hardware integration-start time mapping, physical Mono12 qualification,
+  licensed production Pleora use and GenTL streaming/selection remain gates,
+  not delivered capabilities. Direct registered-storage acquisition and a stable
+  cross-toolchain backend/profile ABI are not implemented.
+- The [controlled GVCP](controlled-gvcp-transport.md) and
+  [single-owner](gvcp-single-owner.md) work is loopback-only experimentation,
+  not production SDK ownership integration or navigation transport. The internal
+  [register/memory service](device-register-transport.md) adds no MEL capability
+  and does not extend profile module v1.
+- GenTL probe/supervisor/wire tooling adds no camera capability. In the merged
+  [GENTL-003 results](tasks/GIGE-MEL-GENTL-003-validation.md), Balluff 3.7.2
+  initializes then crashes during isolated interface update; Euresys 26.10 was
+  unavailable without authenticated access. The
+  [GENTL-003A wire harness](tasks/GIGE-MEL-GENTL-003A-validation.md) self-tests
+  are not real-producer passes. Neither producer's read-only camera behavior is
+  qualified by these records.
+
+For method-by-method required/conditional/optional distinctions and planned
+implementation gates, use the [MEL surface roadmap](mel-surface-roadmap.md),
+not this summary. Historical test conclusions remain in their original records.

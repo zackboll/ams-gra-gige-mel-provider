@@ -36,8 +36,10 @@ objects, cancellation, and a direct-capture diagnostic. See
 
 Every frame carries the default, **invalid** `FrameTimestamp{}`, so the common
 MEL provider rejects it: there is no production Aravis MEL Image publication.
-The adapter is not an installed or selectable image backend, and it does not
-qualify any physical camera.
+The adapter is uninstalled and is not selected through the exported MEL factories.
+It is explicitly selectable in the [internal catalog](runtime-selection.md) when
+compiled. Limited physical capture observations are recorded below, but they do
+not qualify production MEL delivery or camera timing. See [current status](status.md).
 
 GIGE-MEL-010 adds two things:
 

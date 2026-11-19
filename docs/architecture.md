@@ -1,5 +1,12 @@
 # Architecture and scope
 
+Start with the [documentation index](index.md) and [current capability/evidence
+status](status.md). This document describes the native provider boundaries and
+lifecycle contracts; linked task records retain their historical conclusions.
+For a new camera model, start with [camera-profile authoring](camera-profile-authoring.md).
+For complete MEL implementation requirements, use the
+[surface inventory](mel-surface-roadmap.md) and pinned upstream declarations.
+
 GIGE-MEL-038 introduces a separate [controlled GVCP loopback experiment](controlled-gvcp-transport.md),
 not a provider dependency or camera service. Its one-send/deadline contract is
 independently tested; SDK ownership and sensor navigation integration remain
@@ -44,7 +51,8 @@ GIGE-MEL-033 adds an explicitly owned SDK-free backend catalog and exact
 device/profile binding in a separate, uninstalled composition target. Optional
 factories are registered only when built; the provider and shared profile sources
 remain unchanged. [Runtime selection](runtime-selection.md) specifies validation,
-no-I/O selection, lifecycle, ownership boundaries and future plugin work.
+no-I/O selection, lifecycle and ownership boundaries; explicit matched-C++
+profile loading is implemented, while dynamic backend plugins are not.
 
 The optional [Pleora backend](pleora-integration.md) implements the existing
 source interfaces using the same SDK-free profile and typed feature service.
@@ -69,11 +77,35 @@ copies. Aravis requires independent native endianness readback; PFNC alone does
 not specify it. [Mono12 profile](mono12-image-profile.md) separates synthetic
 and simulated evidence from pending physical Cognex and timestamp qualification.
 
-This repository bootstraps a **native C++ provider of the AMS-GRA IR MEL API**. Its first image source is a deterministic synthetic camera. A real GigE Vision transport implementation is a subsequent adapter, selected after its SDK, license, platforms, and camera have been qualified.
+This repository implements a **native C++ provider of the AMS-GRA IR MEL API**. The default image source is deterministic synthetic. Optional Aravis and Pleora adapters supply real SDK control and source acquisition; production MEL image delivery remains gated by timestamp and camera-profile qualification.
 
-**Real SDK status (GIGE-MEL-008).** An optional, internal Aravis 0.8.36 camera-control foundation is implemented and tested against the real SDK and its in-process Fake device. It covers discovery, exact selection, ownership, capabilities, configuration and truthful readback. It is OFF by default, uninstalled, and not selectable through `getAPI_Manager()`. GIGE-MEL-009 adds bounded Mono8 source acquisition (`IFrameStream`, SDK-buffer leases, cancellation, direct capture), also exercised only with the Fake device. Its frames carry an invalid timestamp, so the common provider rejects them; a time mapping, the first physical-camera qualification, and a second real SDK implementation are still pending. GIGE-MEL-010 adds read-only observation of the raw SDK timestamps. It also adds a test-only virtual-clock decorator (in `tests/support`) that drives genuine Aravis pixels through the unchanged provider to real MEL Image callbacks. Neither changes the production timestamp, which stays invalid, nor qualifies any camera time. GIGE-MEL-011 runs the unchanged production GigE backend against the pinned SDK's network camera simulator (`ArvGvFakeCamera`) on IPv4 loopback, from a test-only fixture. That exercises real GigE discovery, GVCP control and GVSP image transport over UDP, the diagnostic routines, and network-pixel MEL publication under the test-only clock. This is simulated network transport: no physical camera, NIC or timing is qualified, and production code is unchanged. The GIGE-MEL-011 client restricts GigE discovery and normal GVCP/GVSP traffic to loopback. However, pinned Aravis 0.8.36's network simulator also creates a global GVCP discovery listener bound to 255.255.255.255:3956. On Linux that binding is effectively wildcard, so the simulator process is not strictly confined to loopback. The test uses an explicitly documented test-only exception, audited by socket identity (GIGE-MEL-011-R1). It is not network isolation, and its acceptance is pending with the repository owner. See [Aravis integration](aravis-integration.md) and [Network exposure](aravis-integration.md#network-exposure-of-the-simulator-gige-mel-011-r1).
+**Current SDK status.** Aravis 0.8.36 and Pleora eBUS Pv 6.5.3.7155 are
+optional, internal and uninstalled. Both support discovery, exact device open,
+shared camera-profile configuration/readback and bounded source acquisition.
+They can be composed through the internal catalog when built, but the exported
+`getAPI_Manager` still accepts only `synthetic`. Both adapters return invalid
+production timestamps, so their frames are rejected by the common provider.
+Positive MEL pixel tests use a test-only virtual integration-start clock.
 
-The initial profile is deliberately narrow: one staring camera, one image stream, one band, Mono8 pixels, tightly packed rows, and consumer-provided host memory. The provider exposes selected operations through the pinned MEL 4.0 C++ interfaces. **This is an experimental image-stream bootstrap, not a claim of full MEL 4.0 conformance.** Several members marked required by upstream still report unsupported, and additional channel families remain unavailable. The [surface roadmap](mel-surface-roadmap.md) separates those gaps from optional enhancements.
+Aravis Fake and loopback simulator tests, Pleora native GenApi/PvBuffer fixtures,
+and limited physical Cognex observations establish different evidence scopes;
+see [current status](status.md), [Aravis integration](aravis-integration.md),
+[Pleora integration](pleora-integration.md) and the
+[physical record](cognex-cic-5000r.md). Aravis loopback clients restrict their
+traffic to loopback, but the pinned simulator also binds a wildcard discovery
+listener under a documented test-only exception, not network isolation.
+Physical capture does not qualify production integration-start time, optics,
+UTC/PTP, reliability or full MEL conformance.
+
+The image profile is deliberately narrow: one staring camera, one image stream,
+one band, Mono8 or explicitly admitted unpacked little-endian Mono12, and
+consumer-provided host memory. Padded source rows are validated and repacked into
+the destination layout. Source-backed stacks and LOS are conditional foundations
+with recording-fixture sources only, not default production camera capabilities.
+**This is an experimental image-stream implementation, not full MEL 4.0
+conformance.** Required methods still report unsupported and channel families
+remain unavailable. The [surface roadmap](mel-surface-roadmap.md) separates those
+gaps from optional enhancements.
 
 The interface snapshots, exact commits, source licenses, and integrity procedure are recorded in [upstream provenance](upstream-provenance.md). Interface version 4.0 describes the upstream contract; it must not be interpreted as this implementation's completeness or product version.
 
@@ -99,8 +131,9 @@ flowchart TD
     MEL --> Runtime["Shared camera runtime"]
     Runtime --> Contract["Internal C++ backend contract"]
     Contract --> Synthetic["Synthetic camera"]
-    Contract -.-> SDK["SDK adapter (optional internal Aravis control and source acquisition; timestamps unqualified)"]
-    SDK -.-> Camera["GigE Vision camera (not yet qualified)"]
+    Contract --> SDK["Optional internal Aravis / Pleora adapters; production timestamps invalid"]
+    SDK --> Profile["Owned SDK-free camera-profile policy"]
+    SDK --> Camera["GigE Vision camera; limited physical capture evidence, not production MEL qualification"]
     SDK -. "GVCP/GVSP over 127.0.0.1 (tests only)" .-> Simulator["Aravis ArvGvFakeCamera simulator (GVCP/GVSP on 127.0.0.1; wildcard 255.255.255.255:3956 discovery listener, test-only exception)"]
 ```
 
@@ -113,6 +146,29 @@ There are three contracts with different responsibilities:
 | SDK adapter → transport implementation | SDK initialization, device access, native feature operations, stream management, and native buffer lifetime | Qualify separately for each pinned SDK and supported camera family |
 
 The second boundary is **not a stable binary plugin ABI**. A virtual C++ interface is appropriate for adapters built with this project. It is not sufficient to promise compiler-independent plugin compatibility. GIGE-MEL-035 adds only the matched-C++ profile-module boundary above, not dynamic backend loading. A stable cross-toolchain plugin ABI remains a separate design decision.
+
+### Installed versus internal interfaces
+
+The install rules in [CMakeLists.txt](../CMakeLists.txt) export
+`gige_mel::provider`, `gige_mel::backend` (synthetic implementation) and
+`gige_mel::mel_headers` in the `GigeMelProvider` CMake package. They install the
+pinned upstream headers and all four project headers in
+[`include/gige_mel/`](../include/gige_mel/): `provider.hpp`, `backend.hpp`,
+`navigation.hpp` and `line_of_sight.hpp`.
+
+The upstream factories/channels are the MEL consumer-facing interface.
+`provider.hpp` offers project source-level embedding and diagnostics;
+`backend.hpp` is an SDK/MEL-independent C++ source contract with project-owned
+values. Installation does not make these seams a stable binary SDK/plugin ABI.
+The common shared provider has no optional vendor SDK dependency.
+
+Camera-profile/feature interfaces in `src/profiles/` and `src/device_features.hpp`,
+catalog/session/loader interfaces in `src/selection/`, optional adapter targets
+and profile implementations are **uninstalled**. Profile modules use trusted,
+explicit matched-build C++ calls after their versioned discovery entry point;
+they are not a stable cross-toolchain ABI. See
+[profile authoring](camera-profile-authoring.md) and
+[selection/loading](runtime-selection.md) for exact matching and lifetime rules.
 
 ## Native C++ factory ABI
 
@@ -167,7 +223,19 @@ An SDK adapter answers “how do I perform this operation with this library?” 
 
 The internal device interface uses a typed `CameraConfiguration`. GIGE-MEL-024 extracts SDK-free policy into `src/profiles/mono_free_running.hpp/.cpp`, compiled by the internal `gige_mel_camera_profiles` target. GIGE-MEL-025 adds `src/device_features.hpp` and shared orchestration in `mono_free_running_device.hpp/.cpp`: feature aliases, fresh snapshots, configuration write plans and actual readback now use typed, owned values without SDK handles. Pure profile and recording-service tests run in the default build.
 
-Aravis implements native feature operations, current type/access/range enforcement, SDK error translation and native frame decoding in `src/backends/aravis/aravis_backend.cpp`. Its device lock and native lifetime cover each complete shared transaction. Explicit synchronous guards preserve connection checks around readback and before each write. Native command-attempt tracking, acquisition uncertainty, stream cancellation and buffer ownership stay with the adapter. Adapter pool budgets live in `acquisition_policy.hpp` and are explicit inputs to common planning. The next step is a narrow Pleora implementation of the same feature and acquisition contracts; see [camera-profile portability](camera-profile-portability.md). The shared service is internal and does not define selectable profiles or a binary plugin ABI.
+Aravis implements native feature operations, current type/access/range enforcement,
+SDK error translation and native frame decoding in
+`src/backends/aravis/aravis_backend.cpp`. Its device lock and native lifetime
+cover each complete shared transaction. Explicit synchronous guards preserve
+connection checks around readback and before each write. Native command-attempt
+tracking, acquisition uncertainty, stream cancellation and buffer ownership stay
+with the adapter. Adapter pool budgets live in `acquisition_policy.hpp` and are
+explicit inputs to common planning. Pleora implements the same feature and
+profile contracts with native GenApi access and bounded host-copy acquisition;
+see [camera-profile portability](camera-profile-portability.md) and
+[Pleora integration](pleora-integration.md). `IDeviceFeatures` remains internal;
+the separate owned `ICameraProfile`/state interface and explicit catalog provide
+selectable policy implementations without a stable cross-toolchain ABI.
 
 Examples of profile concerns include exposure units, `OffsetX`/`OffsetY` handling, ROI increments, when offsets must be cleared before resizing, whether acquisition must stop, and whether frame-rate controls interact with trigger mode. A generic string-to-string feature bag loses type, availability, range, and unit information; avoid making it the core contract.
 
@@ -288,12 +356,12 @@ dispatch (MFA_Status, Detailed, BIT_Status, SubsystemStatusResp) without
 rereading the runtime. It adds no worker, backend call, public ABI or
 factory change.
 
-The next development sequence is:
+Current development gates are:
 
 1. Keep native MEL loading, memory ownership, and synthetic lifecycle tests green.
-2. Add the required operational C2, Image metadata/navigation, and Health surfaces with an explicit sensor/profile interpretation.
-3. Implement one real SDK adapter and camera profile using the portable copy path. The [backend portability](backend-portability.md) suite already runs the same MEL-facing scenarios against the synthetic backend and an independent test-only fixture backend. It shows that the existing provider code is not tied to synthetic assumptions, but it is not this step.
-4. Add a second narrow SDK adapter to test whether the internal contract is genuinely reusable.
+2. Close remaining required C2, Image, Health and mission-channel gaps with real sources and explicit semantics; existing bounded software/recording profiles do not close the full contract.
+3. Qualify production integration-start time, optics and physical lifecycle/failure behavior for a selected SDK/camera combination. Existing Aravis/Pleora source capture is not production MEL qualification. The [backend portability](backend-portability.md) suite remains synthetic plus an independent test-only fixture, not physical-camera proof.
+4. Extend shared scenarios and independent SDK/camera evidence without weakening lease, callback or configuration contracts. Two SDK adapters now exist; further implementation alone does not resolve qualification gates.
 5. Add format/time features and direct registered-storage acquisition only after their qualification criteria are satisfied.
 
 Detailed implementation gates are in [the roadmap](mel-surface-roadmap.md), and the adapter contract is in [backend authoring](backend-authoring.md).

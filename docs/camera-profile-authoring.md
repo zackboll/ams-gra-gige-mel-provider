@@ -1,5 +1,15 @@
 # Camera-profile authoring (GIGE-MEL-034/035)
 
+**Start here for a new camera model on an existing SDK adapter.** Implement the
+profile and owned-state operations below; use the
+[independent module example](../examples/profile_module/README.md) for a separate
+matched-build project. A new SDK/transport belongs in
+[backend authoring](backend-authoring.md) instead. See the
+[documentation index](index.md) for navigation and the
+[complete MEL surface inventory](mel-surface-roadmap.md) plus pinned upstream
+headers for the full MEL requirements; a camera profile does not itself
+implement every required MEL channel or operation.
+
 The [Cognex CIC-5000R profile](../camera_profiles/cognex_cic_5000r/README.md)
 is a real-camera-specific module using this unchanged interface: exact identity,
 owned state, discrete-rate policy and shared representation algorithms without
