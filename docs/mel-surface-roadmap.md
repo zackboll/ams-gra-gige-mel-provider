@@ -1,5 +1,12 @@
 # MEL surface inventory and implementation order
 
+GIGE-MEL-GENTL-003A adds isolated simulated-camera wire qualification tooling,
+**no MEL surface** ([design](tasks/GIGE-MEL-GENTL-003A-design.md)). Independent
+observation now detects writes, privilege changes, unknown/repeated commands and
+post-close traffic; offline harness self-tests do not qualify a real producer.
+Authenticated Euresys evaluation remains next; Balluff's GENTL-003 crash is not
+resolved. Physical-camera authorization and GENTL-004 remain separate gates.
+
 GIGE-MEL-GENTL-003 adds only bounded offline qualification tooling
 ([evidence](tasks/GIGE-MEL-GENTL-003-validation.md)), **no MEL surface**.
 Balluff 3.7.2 initializes but crashes in isolated interface update; Euresys

@@ -429,7 +429,7 @@ GC_API IFUpdateDeviceList(IF_HANDLE handle, bool8_t* changed, uint64_t) {
 GC_API IFGetNumDevices(IF_HANDLE handle, uint32_t* count) {
     std::lock_guard lock(state.mutex);
     if (handle != &iface_handle || !state.iface) return error(GC_ERR_INVALID_HANDLE, "IFGetNumDevices handle");
-    *count = state.discovered ? 2 : 0;
+    *count = state.discovered ? (std::getenv("GENTL_MOCK_SINGLE_DEVICE") ? 1 : 2) : 0;
     return GC_ERR_SUCCESS;
 }
 
@@ -510,6 +510,12 @@ GC_API GCReadPort(PORT_HANDLE port, uint64_t address, void* buffer, size_t* size
     if (port_index(port) < 0) return error(GC_ERR_INVALID_HANDLE, "GCReadPort handle");
     if (!buffer || !size) return error(GC_ERR_INVALID_PARAMETER, "GCReadPort arguments");
     MOCK_INJECT("GCReadPort");
+    if (address == 0x1f0) {
+        if (const char* code = std::getenv("GENTL_MOCK_REQUIRED_READ_ERROR")) {
+            log("required TestRegister failure");
+            return error(static_cast<GC_ERROR>(std::atoi(code)), "injected required TestRegister read failure");
+        }
+    }
     const auto bytes = state.port.size();
     if (address > bytes || *size > bytes - address) return error(GC_ERR_INVALID_ADDRESS, "outside mock port");
     if (state.read_fail_code != GC_ERR_SUCCESS && state.read_fail_address >= address &&
