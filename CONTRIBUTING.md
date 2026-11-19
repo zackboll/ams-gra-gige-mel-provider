@@ -47,6 +47,11 @@ declarations. Put API comment improvements next to project declarations and
 maintainer notes next to the relevant implementation; do not edit pinned upstream
 headers. Use the [documentation index](docs/index.md) for new guide navigation.
 
+For consumer-facing changes, check [Integrating a MEL Consumer](docs/consumer-integration.md)
+against the provider contracts and build the [standalone example](examples/installed_consumer/)
+against a freshly installed prefix. Keep it independent of `src/` and repository
+test helpers; advanced behavior belongs in the focused contract tests and guides.
+
 The [documentation workflow](.github/workflows/documentation.yml) builds the exact
 PR head and validates without deploying. A successful `main` push build uploads
 the same-run Pages artifact, then separate jobs deploy and verify the live source

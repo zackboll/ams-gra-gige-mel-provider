@@ -40,14 +40,16 @@ The native [capture example](examples/capture.cpp) demonstrates factory loading,
 channel setup, registered memory and release. The standard factory instance is
 exactly `synthetic`; an arbitrary instance string is not a backend selector.
 
-For an installed CMake consumer:
+For an installed CMake consumer, follow
+[Integrating a MEL Consumer](docs/consumer-integration.md) or build the
+[standalone example](examples/installed_consumer/) directly:
 
 ```sh
 cmake --install build/dev --prefix "$PWD/build/install"
-cmake -S tests/install_consumer -B build/install-consumer -G Ninja \
+cmake -S examples/installed_consumer -B build/installed-example -G Ninja \
   -DCMAKE_PREFIX_PATH="$PWD/build/install"
-cmake --build build/install-consumer --parallel 2
-./build/install-consumer/installed_consumer
+cmake --build build/installed-example
+./build/installed-example/capture_one
 ```
 
 ### Build controls
@@ -126,8 +128,9 @@ tracks required, conditional and optional work; channel stubs are not conformanc
 
 ## Integration and development starting points
 
-- **MEL consumer:** [implementation profile](docs/implementation-profile.md),
-  [configuration](docs/configuration.md), [installed consumer](tests/install_consumer/).
+- **MEL consumer:** [integration guide](docs/consumer-integration.md),
+  [standalone example](examples/installed_consumer/),
+  [implementation profile](docs/implementation-profile.md).
 - **SDK integration:** [Aravis](docs/aravis-integration.md),
   [Pleora](docs/pleora-integration.md), [runtime composition](docs/runtime-selection.md).
 - **New camera profile:** [authoring contract](docs/camera-profile-authoring.md),

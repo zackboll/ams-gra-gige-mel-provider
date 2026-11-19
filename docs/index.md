@@ -5,6 +5,22 @@ MEL **provider**. Start with the [README](../README.md) for the SDK-free build
 and the [current capability and evidence status](status.md) for scope and limits.
 MEL means MFA Encapsulation Layer, not Matrox MIL.
 
+## Getting Started
+
+1. [Build and capture without a camera SDK](../README.md#sdk-free-quick-start).
+2. [Integrating a MEL Consumer](consumer-integration.md) — install the provider,
+   link or load it, then capture and release an image with the
+   [standalone installed consumer](../examples/installed_consumer/).
+3. [C++ API Reference](#c-api-reference) — project interfaces and source, with
+   installed and internal interfaces clearly separated.
+
+## C++ API Reference
+
+The [generated reference](https://zackboll.github.io/ams-gra-gige-mel-provider/)
+documents project C++ interfaces, not the pinned upstream MEL API. Build the
+reference for your checkout with the
+[local documentation instructions](../README.md#build-the-documentation).
+
 <!-- generated-api-navigation -->
 
 ## Use and integrate
@@ -12,8 +28,8 @@ MEL means MFA Encapsulation Layer, not Matrox MIL.
 | Need | Start here |
 | --- | --- |
 | Build and capture without a camera SDK | [README quick start](../README.md#sdk-free-quick-start), [native capture example](../examples/capture.cpp) |
-| Integrate a MEL consumer and understand supported operations | [Implementation profile](implementation-profile.md), [configuration](configuration.md) |
-| Understand loading, installation and interface boundaries | [Architecture](architecture.md), [installed consumer example](../tests/install_consumer/) |
+| Look up MEL behavior in detail | [Implementation profile](implementation-profile.md), [configuration](configuration.md), [installed MEL contract tests](../tests/install_consumer/) |
+| Understand interface boundaries | [Architecture](architecture.md), [consumer integration guide](consumer-integration.md) |
 | Integrate Aravis | [Aravis integration and timing gates](aravis-integration.md) |
 | Integrate Pleora | [Pleora integration, licensing and evaluation limits](pleora-integration.md), [consolidation disposition](pleora-consolidation.md) |
 | Select a compiled backend or explicit profile module | [Internal runtime selection](runtime-selection.md) |

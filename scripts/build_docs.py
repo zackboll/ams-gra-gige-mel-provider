@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GUIDES = {
     "README.md", "CONTRIBUTING.md",
     *(f"docs/{name}.md" for name in (
-        "index", "status", "architecture", "implementation-profile",
+        "index", "consumer-integration", "status", "architecture", "implementation-profile",
         "configuration", "camera-profile-authoring", "backend-authoring",
         "camera-profile-portability", "backend-portability", "runtime-selection",
         "mel-surface-roadmap", "upstream-provenance", "stacked-image-provider",
@@ -51,6 +51,10 @@ def stage_guide(path, stage, tracked, sources, sha):
             return f"{prefix}{target})"
         resolved = (ROOT / path).parent / unquote(url.path)
         relative = resolved.resolve().relative_to(ROOT).as_posix()
+        if relative == "docs/index.md" and url.fragment == "c-api-reference":
+            # GitHub lands on the index section; the generated guide can go
+            # directly to the installed C++ reference for its audience.
+            return f"{prefix}@ref api_installed)"
         if relative in GUIDES:
             # Doxygen resolves staged Markdown links and their heading IDs.
             return f"{prefix}{target})"
@@ -84,9 +88,7 @@ def stage_guide(path, stage, tracked, sources, sha):
     output.parent.mkdir(parents=True, exist_ok=True)
     text = "".join(chunks) + LINK.sub(rewrite, "".join(prose))
     if path == "docs/index.md":
-        text = text.replace("<!-- generated-api-navigation -->", """## C++ API and source reference
-
-- [Installed C++ interfaces](@ref api_installed) — for MEL consumers and native C++ integrators.
+        text = text.replace("<!-- generated-api-navigation -->", """- [Installed C++ interfaces](@ref api_installed) — for MEL consumers and native C++ integrators.
 - [Camera extension interfaces (internal, uninstalled)](@ref api_extensions) — for profile and backend authors.
 - [Core implementation reference (internal)](@ref api_core) — for runtime maintainers, with a line-numbered source browser.
 """)
