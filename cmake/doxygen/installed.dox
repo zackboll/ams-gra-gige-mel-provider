@@ -1,9 +1,9 @@
 /** @page api_installed Installed C++ interfaces
 
 The four project headers under `include/gige_mel/` are installed by
-`GigeMelProvider`. Start with the @ref md_docs_2architecture "architecture",
-the @ref md_docs_2implementation-profile "MEL implementation profile", and the
-installation and capture examples linked from the @ref md_docs_2index "landing page".
+`GigeMelProvider`. Start with @ref md_docs_2consumer-integration "Integrating a MEL Consumer"
+for installation and capture, then see @ref md_docs_2architecture "architecture"
+and the @ref md_docs_2implementation-profile "MEL implementation profile".
 
 Ordinary native MEL consumers use the pinned upstream factory declarations and
 channels; this reference does not regenerate the upstream MEL API. The installed

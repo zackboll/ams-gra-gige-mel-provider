@@ -16,6 +16,7 @@ from check_proprietary import violation
 
 REPOSITORY = "https://github.com/zackboll/ams-gra-gige-mel-provider"
 PAGES = "https://zackboll.github.io/ams-gra-gige-mel-provider/"
+CONSUMER_GUIDE = "md_docs_2consumer-integration.html"
 SECTIONS = {
     "api_installed.html": ("Installed C++ interfaces", (
         "make_api_manager", "ProviderSettings", "ProviderStatistics", "ICameraBackend",
@@ -33,6 +34,13 @@ SECTIONS = {
     )),
 }
 SEARCH = ("search/search.js", "search/searchdata.js")
+ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, *SECTIONS)
+ENTRY_LINKS = {
+    "index.html": (CONSUMER_GUIDE, *SECTIONS),
+    CONSUMER_GUIDE: ("api_installed.html", "provider_8hpp.html", "backend_8hpp.html",
+                     "navigation_8hpp.html", "line__of__sight_8hpp.html"),
+    "api_installed.html": (CONSUMER_GUIDE,),
+}
 
 
 def project_sources(paths):
@@ -97,12 +105,11 @@ def section_targets(page, parsed):
 def verify_entry(page, parsed, text, sha):
     if (f"{REPOSITORY}/commit/{sha}", f"Source commit: {sha}") not in parsed.links:
         raise ValueError(f"{page}: missing source provenance for {sha}")
-    if page == "index.html":
-        linked = {local_target(page, href) for href, _ in parsed.links}
-        for section in SECTIONS:
-            if (section, "") not in linked:
-                raise ValueError(f"{page}: no navigation to {section}")
-    elif page in SECTIONS:
+    linked = {local_target(page, href) for href, _ in parsed.links}
+    for target in ENTRY_LINKS.get(page, ()):
+        if (target, "") not in linked:
+            raise ValueError(f"{page}: no navigation to {target}")
+    if page in SECTIONS:
         title, symbols = SECTIONS[page]
         if title.casefold() not in text.casefold():
             raise ValueError(f"{page}: missing audience label: {title}")
@@ -137,7 +144,7 @@ def validate_site(root, sha, sources):
             if item.suffix == ".html":
                 pages[path] = Page(data.decode("utf-8"))
 
-    for path in ("index.html", "files.html", *SECTIONS, *SEARCH):
+    for path in (*ENTRY_PAGES, "files.html", *SEARCH):
         if path not in files:
             errors.append(f"Missing required generated file: {path}")
     search_index = "\n".join((root / path).read_text(encoding="utf-8") for path in sorted(files)
@@ -150,7 +157,7 @@ def validate_site(root, sha, sources):
                            (target[1] and target[0] in pages and target[1] not in pages[target[0]].anchors)):
                 errors.append(f"{path}: broken local URL: {href}")
 
-    for path in ("index.html", *SECTIONS):
+    for path in ENTRY_PAGES:
         if path not in pages:
             continue
         targets = verify_entry(path, pages[path], (root / path).read_text(encoding="utf-8"), sha)
@@ -191,7 +198,7 @@ def verify_live(sha):
     for attempt in range(6):
         try:
             targets = set()
-            for path in ("index.html", *SECTIONS):
+            for path in ENTRY_PAGES:
                 text = fetch(path)
                 targets.update(verify_entry(path, Page(text), text, sha).values())
             for target, fragment in sorted(targets):
