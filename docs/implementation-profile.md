@@ -1,5 +1,20 @@
 # Experimental image-stream profile, version 0.1
 
+## Virtual stare tasking foundation (GIGE-MEL-045)
+
+The common provider conditionally advertises Scheduling for qualified
+ITaskExecutionSource declarations. Only the SDK-free recording fixture supplies
+owned Operate/TaskSched admission, single-active/no-queue immediate replacement,
+current-task cancellation and genuine ExecuteTaskAck correlation. Default
+synthetic and production adapters remain unsupported. TaskExecutingRep has no
+unambiguous pinned stare enum mapping and remains unsupported; completion is
+source-observed, not fabricated as MEL metadata. Image/Stack and task sessions
+are exclusive. Health Operate means virtual session ownership, not physical
+operation. See [exact conventions](task-scheduling-provider.md),
+[design](tasks/GIGE-MEL-045-design.md) and [validation](tasks/GIGE-MEL-045-validation.md).
+This is not complete TaskSched/MEL conformance; older unsupported-tasking
+statements below apply to the default/production image-stream profile.
+
 ## Source-backed stacked-image foundation (GIGE-MEL-044)
 
 The common provider implements the required `StackedImageChannel` class and

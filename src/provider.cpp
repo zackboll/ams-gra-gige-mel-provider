@@ -11,6 +11,8 @@
 #include <irmel/library/irmel-types/FrameHeader.h>
 #include <irmel/library/irmel-types/ImageListener.h>
 #include <irmel/library/stacked-image/StackedImageChannel.h>
+#include <irmel/library/scheduling/SchedulingChannel.h>
+#include <gige_mel/task_execution.hpp>
 #include <irmel/library/stacked-image/StackedImageListener.h>
 
 #include <algorithm>
@@ -67,6 +69,9 @@ static_assert(next_counter(0) == 1 && next_counter(std::numeric_limits<std::uint
 #if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
 thread_local test_seams::UnsupportedStatusHook unsupported_status_hook = nullptr;
 thread_local void* unsupported_status_hook_context = nullptr;
+thread_local test_seams::TaskHook task_hook = nullptr;
+thread_local void* task_hook_context = nullptr;
+#define GIGE_MEL_TASK_SEAM() do { if (task_hook) task_hook(task_hook_context); } while (false)
 std::atomic<test_seams::StackHook> stack_hook{nullptr};
 std::atomic<void*> stack_hook_context{nullptr};
 #define GIGE_MEL_STACK_SEAM(point) \
@@ -77,6 +82,7 @@ std::atomic<void*> stack_hook_context{nullptr};
             unsupported_status_hook(test_seams::UnsupportedStatusPoint::point, unsupported_status_hook_context); \
     } while (false)
 #else
+#define GIGE_MEL_TASK_SEAM() do {} while (false)
 #define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) do {} while (false)
 #define GIGE_MEL_STACK_SEAM(point) do {} while (false)
 #endif
@@ -190,6 +196,11 @@ struct Runtime {
     backend::CameraCapabilities camera_capabilities;
     backend::LosSupport los_support; // immutable after init, before discovery
     backend::StackSupport stack_support;
+    backend::TaskExecutionSupport task_support;
+    std::unique_ptr<backend::ITaskExecutionSession> task_session; // operations
+    std::array<std::uint32_t, 256> task_ids{}; // bounded session duplicate history
+    std::size_t task_admissions{0};
+    bool tasking_active{false}; // state_mutex; genuine session, not physical activity
     std::vector<std::weak_ptr<HostBuffer>> registered_memory; // operations
     std::uint64_t los_subscription{0}; // operations; never reused across attachments
     bool initialized{false};
@@ -212,6 +223,7 @@ struct Runtime {
     std::uint32_t subsystem_sequence{0};
 
     ~Runtime() {
+        if (task_session) task_session->retire();
         if (device) {
             try { (void)device->close(); } catch (...) { /* destructors must not throw */ }
         }
@@ -222,6 +234,24 @@ struct Runtime {
         last_error = std::move(message);
     }
 };
+
+constexpr auto task_call_bound = std::chrono::milliseconds{100};
+auto task_deadline() { return std::chrono::steady_clock::now() + task_call_bound; }
+
+template<class F> auto task_call(F call) -> decltype(call()) {
+    try { return call(); }
+    catch (const std::exception& e) { return backend::Error{backend::ErrorCode::io_error, e.what()}; }
+    catch (...) { return backend::Error{backend::ErrorCode::io_error, "task source threw"}; }
+}
+
+// operations held. Mandatory retirement never waits for consumer callbacks.
+void retire_tasking(Runtime& r) noexcept {
+    if (r.task_session) r.task_session->retire();
+    r.task_session.reset();
+    r.task_admissions = 0;
+    std::lock_guard lock(r.state_mutex);
+    r.tasking_active = false;
+}
 
 // Stack frames live on the callback's stack: admission cannot be stranded by
 // allocation failure, and nested callbacks retain every runtime in the chain.
@@ -277,7 +307,7 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
         cap.setImageSize(static_cast<std::uint32_t>(s.packed_bytes));
         cap.setNumberOfBands(1);
         cap.setFormat(ir::PixelFormat::Mono);
-    } else if (type != ir::ChannelType::HealthAndStatus) {
+    } else if (type != ir::ChannelType::HealthAndStatus && type != ir::ChannelType::Scheduling) {
         cap.setWidth(c.width);
         cap.setHeight(c.height);
         const auto layout = backend::image_layout(runtime.camera_capabilities.pixel_format, c.width, c.height);
@@ -304,6 +334,10 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
         metadata.insert(ir::ChannelMetadataCapabilityType::CommandStatus);
         metadata.insert(ir::ChannelMetadataCapabilityType::BITConfiguration);
         metadata.insert(ir::ChannelMetadataCapabilityType::BITStatus);
+    }
+    if (type == ir::ChannelType::Scheduling) {
+        cap.setTaskScheduleDepth(0); // actual immediate replacement, no queue
+        metadata.insert(ir::ChannelMetadataCapabilityType::ExecuteTaskAck);
     }
     if (type == ir::ChannelType::HealthAndStatus) {
         metadata.insert(ir::ChannelMetadataCapabilityType::MFAStatus);
@@ -461,6 +495,7 @@ struct HealthSnapshot {
     std::uint32_t bit_revision;
     std::optional<ir::SubsystemStatusResp> subsystem;
     std::exception_ptr subsystem_error;
+    bool tasking{false};
 };
 
 // Provider-defined software subsystem profile; see docs/subsystem-status.md.
@@ -479,7 +514,7 @@ ir::SubsystemStatusResp subsystem_report(const HealthSnapshot& s) {
     const bool unable = !s.configuration_valid || (s.active && s.failed);
     const auto failure = !s.initialized ? ir::Failure::NA : unable ? ir::Failure::Major : ir::Failure::Available;
     const auto mode = !s.initialized || unable ? ir::CSCIMode::Unknown :
-        s.active ? ir::CSCIMode::Imaging : ir::CSCIMode::Idle;
+        s.tasking ? ir::CSCIMode::Operational : s.active ? ir::CSCIMode::Imaging : ir::CSCIMode::Idle;
     ir::SubsystemCSCIInfo csci;
     csci.setCsci(ProviderSoftware::name);
     csci.setMode(mode);
@@ -515,7 +550,7 @@ HealthSnapshot health_snapshot(Runtime& r, bool execute = false, bool prepare_bi
         acquisition && acquisition->failed.load(), r.configuration_generation,
         {r.delivered.load(), r.dropped.load(), r.rejected.load(),
          r.callback_failures.load(), r.stream_failures.load(), r.last_error}, {}, {},
-        r.bit_revision, {}, {}};
+        r.bit_revision, {}, {}, r.tasking_active};
     if (!prepare_bit) return s;
     try {
         auto observations = r.fault_observations;
@@ -661,6 +696,7 @@ public:
         if (is_detached()) return ir::Return::Fail;
         if (enabled_) return stream_state_ && stream_state_->failed ? ir::Return::Fail : ir::Return::Success;
         if (type() != ir::ChannelType::IRSTImage && type() != ir::ChannelType::StackedImage) { enabled_ = true; return ir::Return::Success; }
+        if (runtime_->task_session) return ir::Return::Fail;
         if (buffers_.empty() || !config_.getImgLstnr()) return ir::Return::Fail;
 
         auto state = std::make_shared<StreamState>();
@@ -807,6 +843,8 @@ protected:
     // Callback-free shared transaction. Caller holds operations, has admitted
     // this submission and pins Control/channel through result and dispatch.
     ConfigurationOutcome configure_locked(const backend::CameraConfiguration& requested, bool profile_valid = true) {
+        if (runtime_->task_session)
+            return ConfigurationOutcome::failure({backend::ErrorCode::invalid_state, "retire tasking before configuring"});
         {
             std::lock_guard lock(runtime_->state_mutex);
             if (runtime_->image_active)
@@ -1491,6 +1529,98 @@ private:
     std::optional<mel::NavigationReport> latest_navigation_; // Runtime::operations
 };
 
+class SchedulingChannelImpl final : public ChannelCore, public ir::SchedulingChannel {
+public:
+    using ChannelCore::ChannelCore;
+    using ChannelCore::send;
+    using ChannelCore::registerMetadataCallback;
+    mel::RequestFor<ir::TrackListResponse> send(ir::PrioritizedTrackListCmd) override {
+        return failed<ir::TrackListResponse>(mel::ErrorCode::Unsupported, "track lists are unsupported");
+    }
+    mel::RequestFor<ir::Return> exec(ir::IRSTScanTask) override {
+        return failed<ir::Return>(mel::ErrorCode::Unsupported, "scanning is unsupported");
+    }
+    mel::RequestFor<ir::Return> exec(ir::IRSTTrackTask) override {
+        return failed<ir::Return>(mel::ErrorCode::Unsupported, "tracking is unsupported");
+    }
+    GIGE_UNSUPPORTED_CALLBACK(ir::TaskExecutingRep)
+    GIGE_UNSUPPORTED_CALLBACK(ir::SchedCreatedRep)
+    GIGE_UNSUPPORTED_CALLBACK(ir::UpdateTrackListResponse)
+    GIGE_UNSUPPORTED_CALLBACK(ir::TaskEvents)
+    GIGE_UNSUPPORTED_CALLBACK(ir::ScanPerformanceReport)
+    ir::Return registerMetadataCallback(Callback<ir::ExecuteTaskAck> callback) override {
+        return register_callback(ack_callback_, std::move(callback));
+    }
+    mel::RequestFor<ir::Return> exec(ir::IRSTStareTask command) override {
+        if (in_provider_callback())
+            return failed<ir::Return>(mel::ErrorCode::InvalidState, "submit tasks outside provider callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<ir::Return>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        const auto info = command.getTaskInfo();
+        const auto p = command.getParams();
+        const auto center = p.getCenter();
+        const ir::ExecuteTaskAck ack(command.getCommandID(), info.getReqId());
+        auto result = ready(ir::Return::Success); // allocate before source mutation
+        Callback<ir::ExecuteTaskAck> callback;
+        {
+            std::lock_guard operation(runtime_->operations);
+            if (is_detached() || !runtime_->task_session)
+                return failed<ir::Return>(mel::ErrorCode::InvalidState, "TaskSched session required");
+            const auto& s = runtime_->task_support;
+            if (info.getAction() != ir::TaskListAction::Immediate)
+                return failed<ir::Return>(mel::ErrorCode::Unsupported, "only Immediate; no queue or embedded abort");
+            if (info.getSystemTime() != std::chrono::nanoseconds{0} || info.getPriority() != 0 ||
+                info.getPrecedenceWithinPriority() != 0 || center.az != s.azimuth || center.el != s.elevation ||
+                p.getCentFrameRefAz() != ir::CoordFrameRef::Aircraft ||
+                p.getCentFrameRefEl() != ir::CoordFrameRef::Aircraft ||
+                p.getDurationNanoseconds() < s.minimum_duration || p.getDurationNanoseconds() > s.maximum_duration)
+                return failed<ir::Return>(mel::ErrorCode::InvalidParameters, "outside qualified virtual stare parameters");
+            const auto end = runtime_->task_ids.begin() + static_cast<std::ptrdiff_t>(runtime_->task_admissions);
+            if (std::find(runtime_->task_ids.begin(), end, info.getReqId()) != end)
+                return failed<ir::Return>(mel::ErrorCode::InvalidId, "duplicate request ID in this session");
+            if (runtime_->task_admissions >= s.session_admissions)
+                return failed<ir::Return>(mel::ErrorCode::InsufficientLocalResources, "bounded session exhausted; enter Standby");
+            // Copy potentially allocating consumer function before source admission.
+            { std::lock_guard lock(callback_mutex_); callback = ack_callback_; }
+            const auto admitted = task_call([&] { return runtime_->task_session->admit(
+                {command.getCommandID(), info.getReqId(), info.getSystemTime(), p.getDurationNanoseconds(),
+                 center.az, center.el}, task_deadline()); });
+            if (!admitted) {
+                runtime_->report(admitted.error().message);
+                return failed<ir::Return>(map_error(admitted.error().code), admitted.error().message);
+            }
+            runtime_->task_ids[runtime_->task_admissions++] = info.getReqId();
+            admit_callback(callback); // detach drains reservation before returning
+        }
+        GIGE_MEL_TASK_SEAM();
+        invoke(callback, ack, nullptr, true);
+        return result;
+    }
+    mel::RequestFor<ir::Return> exec(ir::AbortTask) override {
+        // Pinned AbortTask has no accessor: never inspect or claim targeted IDs.
+        if (in_provider_callback())
+            return failed<ir::Return>(mel::ErrorCode::InvalidState, "abort outside provider callbacks");
+        const auto control_pin = runtime_->control.load().lock();
+        if (!control_pin) return failed<ir::Return>(mel::ErrorCode::InvalidState, "control is closing");
+        const auto self = shared_from_this();
+        auto result = ready(ir::Return::Success);
+        std::lock_guard operation(runtime_->operations);
+        if (is_detached() || !runtime_->task_session)
+            return failed<ir::Return>(mel::ErrorCode::InvalidState, "TaskSched session required");
+        auto cancelled = task_call([&] { return runtime_->task_session->cancel_current(task_deadline()); });
+        if (!cancelled) {
+            runtime_->report(cancelled.error().message);
+            return failed<ir::Return>(map_error(cancelled.error().code), cancelled.error().message);
+        }
+        return result;
+    }
+protected:
+    void stop_auxiliary_locked() override { retire_tasking(*runtime_); }
+private:
+    Callback<ir::ExecuteTaskAck> ack_callback_;
+};
+
 class C2ChannelImpl final : public ChannelCore, public ir::C2Channel {
 public:
     using ChannelCore::ChannelCore;
@@ -1582,6 +1712,9 @@ public:
         if (!control_pin) return failed<ir::MFA_Mode>(mel::ErrorCode::InvalidState, "control is closing");
         const auto self = shared_from_this();
         ConfigurationOutcome outcome;
+        Callback<ir::CommandStatus> callback;
+        std::optional<ir::CommandStatus> status;
+        mel::RequestFor<ir::MFA_Mode> result;
         {
             std::lock_guard operation(runtime_->operations);
             if (is_detached()) return failed<ir::MFA_Mode>(mel::ErrorCode::InvalidState, "channel is detached");
@@ -1598,8 +1731,42 @@ public:
                 reject(backend::ErrorCode::invalid_argument, "invalid ModeCmd state/mode combination");
             else if (state == mel::MFA_State::Standby && !unset_scan(command.getScanParameters()))
                 reject(backend::ErrorCode::invalid_argument, "Standby requires every ScanParam field at its upstream default");
+            else if (state == mel::MFA_State::Operate && mode == ir::MFA_Mode::TaskSched &&
+                     backend::valid_task_support(runtime_->task_support)) {
+                bool valid, active;
+                { std::lock_guard lock(runtime_->state_mutex);
+                  valid = runtime_->initialized && runtime_->configuration_valid;
+                  active = runtime_->image_active; }
+                if (!unset_scan(command.getScanParameters()))
+                    reject(backend::ErrorCode::invalid_argument, "TaskSched does not accept scan parameters");
+                else if (!valid || active)
+                    reject(backend::ErrorCode::invalid_state, "TaskSched requires valid idle Image/Stack ownership");
+                else if (runtime_->task_session) outcome.success = true;
+                else {
+                    auto* source = dynamic_cast<backend::ITaskExecutionSource*>(runtime_->device.get());
+                    auto opened = task_call([&]() -> backend::Result<std::unique_ptr<backend::ITaskExecutionSession>> {
+                        if (!source || source->task_execution_support() != runtime_->task_support)
+                            return backend::Error{backend::ErrorCode::unsupported, "task source declaration changed"};
+                        return source->open_task_session(task_deadline());
+                    });
+                    if (!opened) outcome = ConfigurationOutcome::failure(opened.error());
+                    else if (!opened.value()) reject(backend::ErrorCode::io_error, "null task session");
+                    else {
+                        auto observed = task_call([&] { return opened.value()->observe(task_deadline()); });
+                        if (!observed || observed.value().phase != backend::TaskPhase::idle || observed.value().task) {
+                            opened.value()->retire();
+                            reject(backend::ErrorCode::io_error, "new task session did not establish idle admission state");
+                        } else {
+                            runtime_->task_session = std::move(opened).value();
+                            runtime_->task_admissions = 0;
+                            { std::lock_guard lock(runtime_->state_mutex); runtime_->tasking_active = true; }
+                            outcome.success = true;
+                        }
+                    }
+                }
+            }
             else if (state != mel::MFA_State::Standby)
-                reject(backend::ErrorCode::unsupported, "only Standby/Unused is implemented");
+                reject(backend::ErrorCode::unsupported, "only Standby/Unused and source-qualified Operate/TaskSched are implemented");
             else {
                 bool valid, active;
                 {
@@ -1612,6 +1779,19 @@ public:
                 }
                 if (!valid)
                     reject(backend::ErrorCode::invalid_state, "Standby requires initialized provider and known-valid configuration");
+                else if (runtime_->task_session) {
+                    auto observed = task_call([&] { return runtime_->task_session->observe(task_deadline()); });
+                    if (!observed) outcome = ConfigurationOutcome::failure(observed.error());
+                    else {
+                        const auto phase = observed.value().phase;
+                        if (phase == backend::TaskPhase::admitted || phase == backend::TaskPhase::executing) {
+                            auto cancelled = task_call([&] { return runtime_->task_session->cancel_current(task_deadline()); });
+                            if (!cancelled) outcome = ConfigurationOutcome::failure(cancelled.error());
+                            else outcome.success = true;
+                        } else outcome.success = true;
+                        if (outcome.success) retire_tasking(*runtime_);
+                    }
+                }
                 else if (active) {
                     const auto image_pin = runtime_->acquisition_channel.lock();
                     if (!image_pin || image_pin->is_detached())
@@ -1626,10 +1806,13 @@ public:
                     }
                 } else outcome.success = true; // Idempotent, no backend I/O.
             }
+            result = outcome.error ? failed<ir::MFA_Mode>(map_error(outcome.error->code), outcome.description)
+                                   : ready(command.getMode());
+            status.emplace(outcome.status(command.getCommandID()));
+            { std::lock_guard lock(callback_mutex_); callback = status_callback_; }
+            admit_callback(callback);
         }
-        auto result = outcome.error ? failed<ir::MFA_Mode>(map_error(outcome.error->code), outcome.description)
-                                    : ready(ir::MFA_Mode::Unused);
-        on_command_status(outcome.status(command.getCommandID()));
+        invoke(callback, *status, nullptr, true);
         return result;
     }
     mel::RequestFor<ir::Return> send(ir::ConfigSetCommand command) override { return config_set(command); }
@@ -1824,14 +2007,15 @@ private:
                                        want_subsystem);
         const auto state = !s.initialized ? mel::MFA_State::Unknown :
             !s.configuration_valid || (s.active && s.failed) ? mel::MFA_State::Degraded :
-            s.active ? mel::MFA_State::Operate : mel::MFA_State::Standby;
+            s.active || s.tasking ? mel::MFA_State::Operate : mel::MFA_State::Standby;
         const auto description = !s.initialized ? "Provider not initialized" :
             !s.configuration_valid ? "Actual camera configuration is not known valid" :
             s.active && s.failed ? "Owned Image/Stack acquisition has observed a terminal failure; explicitly disable before recovery" :
+            s.tasking ? "Virtual task-admission session owned; no physical sensor operation claimed" :
             s.active ? "Image/Stack acquisition is logically owned without an observed terminal failure" :
             "Idle with known valid configuration; explicit Image/Stack enable may be attempted (not a physical connection probe)";
         mel::MFA_Status status(state, description,
-            "Experimental Mono8 image-stream profile with provider-software BIT and bounded Standby ModeCmd; no task scheduling, scanning, hardware BIT or calibration",
+            "Experimental image/virtual-task profile; no physical task scheduling, scanning, hardware BIT or calibration",
             mel::StateTransitionStatus::NotTransitioning,
             mel::About(std::string(ProviderSoftware::name) + " (software provider)", "", ProviderSoftware::version_text, "", ""), {});
         mel::MFA_StatusDetailed detailed;
@@ -1904,6 +2088,7 @@ public:
     ~ControlImpl() override {
         std::lock_guard operation(runtime_->operations);
         for (const auto& channel : channels_) channel->detach_locked();
+        retire_tasking(*runtime_);
     }
 
     ir::Return init(const std::string& aperture_config_id) override {
@@ -1919,6 +2104,11 @@ public:
                 const auto caps = device->capabilities();
                 backend::LosSupport los;
                 backend::StackSupport stacks;
+                backend::TaskExecutionSupport tasks;
+                if (auto* source = dynamic_cast<backend::ITaskExecutionSource*>(device.get())) {
+                    tasks = source->task_execution_support();
+                    if (!backend::valid_task_support(tasks)) tasks = {};
+                }
                 if (auto* source = dynamic_cast<backend::IStackedImageSource*>(device.get())) {
                     stacks = source->stacked_image_support();
                     if (!backend::valid_stack_support(stacks)) stacks = {};
@@ -1944,6 +2134,7 @@ public:
                     runtime_->camera_capabilities = caps;
                     runtime_->los_support = std::move(los);
                     runtime_->stack_support = std::move(stacks);
+                    runtime_->task_support = std::move(tasks);
                     runtime_->configuration_valid = true;
                     runtime_->initialized = true;
                 }
@@ -1964,6 +2155,12 @@ public:
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::IRSTImage, image_id));
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::CommandAndControl, c2_id));
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::HealthAndStatus, health_id));
+                if (runtime_->task_support.virtual_stare) {
+                    auto uuid = health_uuid;
+                    uuid.back() = 5;
+                    capabilities_.push_back(capability(*runtime_, ir::ChannelType::Scheduling,
+                        mel::UCI_ID(uuid, runtime_->settings.instance + "/scheduling")));
+                }
                 if (runtime_->stack_support.supported) {
                     auto uuid = health_uuid;
                     uuid.back() = 4;
@@ -1990,10 +2187,11 @@ public:
         if (!runtime_->initialized) return {};
         const auto type = config.getChannelType();
         if (type != ir::ChannelType::IRSTImage && type != ir::ChannelType::CommandAndControl &&
-            type != ir::ChannelType::HealthAndStatus && type != ir::ChannelType::StackedImage) return {};
+            type != ir::ChannelType::HealthAndStatus && type != ir::ChannelType::StackedImage &&
+            type != ir::ChannelType::Scheduling) return {};
         const auto found = std::find_if(capabilities_.begin(), capabilities_.end(), [&](const auto& cap) {
             return cap.getChanID().getUUID() == config.getChanID().getUUID() && cap.getChannelTypes().front() == type &&
-                (type != ir::ChannelType::StackedImage || cap.getChanID() == config.getChanID());
+                ((type != ir::ChannelType::StackedImage && type != ir::ChannelType::Scheduling) || cap.getChanID() == config.getChanID());
         });
         if (found == capabilities_.end()) return {};
         if (std::any_of(channels_.begin(), channels_.end(), [type](const auto& channel) { return channel->type() == type; })) return {};
@@ -2004,6 +2202,7 @@ public:
         if (type == ir::ChannelType::IRSTImage) channel = std::make_shared<ImageChannelImpl>(runtime_, config);
         else if (type == ir::ChannelType::StackedImage) channel = std::make_shared<StackedImageChannelImpl>(runtime_, config);
         else if (type == ir::ChannelType::CommandAndControl) channel = std::make_shared<C2ChannelImpl>(runtime_, config);
+        else if (type == ir::ChannelType::Scheduling) channel = std::make_shared<SchedulingChannelImpl>(runtime_, config);
         else channel = std::make_shared<HealthChannelImpl>(runtime_, config);
         channels_.push_back(channel);
         if (type == ir::ChannelType::IRSTImage) runtime_->image_channel = channel;
@@ -2046,6 +2245,10 @@ void set_unsupported_status_hook(UnsupportedStatusHook hook, void* context) noex
 void set_stack_hook(StackHook hook, void* context) noexcept {
     stack_hook_context = context;
     stack_hook = hook;
+}
+void set_task_hook(TaskHook hook, void* context) noexcept {
+    task_hook = hook;
+    task_hook_context = context;
 }
 } // namespace test_seams
 #endif

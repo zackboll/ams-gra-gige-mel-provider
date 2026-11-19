@@ -18,6 +18,12 @@ does not introduce a provider-facing C ABI or multilingual provider SDK.
 
 ## Quick start
 
+An explicitly selected SDK-free recording executor now exercises a bounded
+[virtual stare TaskSched foundation](docs/task-scheduling-provider.md) through
+the common provider. Default synthetic and production backends do not advertise
+tasking. No physical pointing, real sensor scheduling or full MEL conformance
+is claimed.
+
 A default-OFF [GenTL consumer feasibility probe](docs/tasks/GIGE-MEL-GENTL-001-design.md)
 (`-DGIGE_MEL_BUILD_GENTL_PROBE=ON`, after `scripts/provision_gentl_header.sh`)
 loads an explicit `.cti` producer for diagnostics only. It is not a backend and
@@ -400,9 +406,9 @@ for the working payload, limits, results, callback ordering and detach policy.
 | AMS Math | `00be45190f0e47d268cece8b8c2f8fb58b5418d2` |
 | nlohmann/json 3.12.0 (private, MIT) | `55f93686c01528224f448c19128836e7df245f72` |
 
-The checked-in closure is 94 unchanged headers plus six original license/intent
+The checked-in closure is 114 unchanged headers plus six original license/intent
 files. It requires no Boost, RF MEL, VITA implementation, or upstream shared
-library. Every normal build verifies the 100 source files against the checked-in
+library. Every normal build verifies the 120 source files against the checked-in
 manifest. Details and source links are in
 [upstream provenance](docs/upstream-provenance.md).
 

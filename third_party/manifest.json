@@ -11,7 +11,8 @@
     "irmel/library/irmel-types/FrameHeader.h",
     "irmel/library/stacked-image/StackFrameHeader.h",
     "irmel/library/stacked-image/StackedImageChannel.h",
-    "irmel/library/stacked-image/StackedImageListener.h"
+    "irmel/library/stacked-image/StackedImageListener.h",
+    "irmel/library/scheduling/SchedulingChannel.h"
   ],
   "components": [
     {
@@ -456,6 +457,14 @@
       "size": 2095
     },
     {
+      "path": "ir-mel/include/irmel/library/irmel-types/AbortTask.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/AbortTask.h",
+      "git_blob_sha1": "2223fa50d3a78bd03621a2f910b09dcc69b534a6",
+      "sha256": "8eedb701561ef1daaf37c9ded72cd6eb41fb54bad786412072fd1c8ce4b0e7f6",
+      "size": 983
+    },
+    {
       "path": "ir-mel/include/irmel/library/irmel-types/AbsoluteReferencePoint.h",
       "component": "ir-mel",
       "source_path": "include/irmel/library/irmel-types/AbsoluteReferencePoint.h",
@@ -648,6 +657,30 @@
       "size": 3151
     },
     {
+      "path": "ir-mel/include/irmel/library/irmel-types/IRSTScanTask.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/IRSTScanTask.h",
+      "git_blob_sha1": "469c5755f52c0b43cbe507ff22cbbd5bc0099a0c",
+      "sha256": "9793e3135dc3c032c83bb393a8f6e6d04d1bbc60d3481aab8fff64dd41242400",
+      "size": 1952
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/IRSTStareTask.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/IRSTStareTask.h",
+      "git_blob_sha1": "23b3a8695abdaf68d072ac4498d9040914e24b83",
+      "sha256": "7383731eaf3879acb9935e4090968f5eb0f43f64d8de9f0704dd719e50b7e3db",
+      "size": 2004
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/IRSTTrackTask.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/IRSTTrackTask.h",
+      "git_blob_sha1": "2d4735bc31bb8fbae32109d3a284667cf4643506",
+      "sha256": "1db6720244d23a9859cd7553a85ddba65f534ea04bd93ae533093de7d505af3b",
+      "size": 2013
+    },
+    {
       "path": "ir-mel/include/irmel/library/irmel-types/IR_Directional.h",
       "component": "ir-mel",
       "source_path": "include/irmel/library/irmel-types/IR_Directional.h",
@@ -728,6 +761,14 @@
       "size": 4655
     },
     {
+      "path": "ir-mel/include/irmel/library/irmel-types/PrioritizedTrackListCmd.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/PrioritizedTrackListCmd.h",
+      "git_blob_sha1": "d8ff82d65f0beca36c8d468cc6cde64175d886ae",
+      "sha256": "c0a67ef2d21c2a5ef05390e307565ef748fc54c2d1f4217c06551b7410ebf926",
+      "size": 2923
+    },
+    {
       "path": "ir-mel/include/irmel/library/irmel-types/RelativeSlantRangeLOS3D.h",
       "component": "ir-mel",
       "source_path": "include/irmel/library/irmel-types/RelativeSlantRangeLOS3D.h",
@@ -776,12 +817,28 @@
       "size": 7929
     },
     {
+      "path": "ir-mel/include/irmel/library/irmel-types/StareTaskParam.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/StareTaskParam.h",
+      "git_blob_sha1": "021364909e907bd17a565ec89475dae3d11d4001",
+      "sha256": "91284108a1d920c125b66e8010cae0acc8f19bbfb6289e03dd5cf6fb4efa0b6f",
+      "size": 2313
+    },
+    {
       "path": "ir-mel/include/irmel/library/irmel-types/SystemTrackDataResponse.h",
       "component": "ir-mel",
       "source_path": "include/irmel/library/irmel-types/SystemTrackDataResponse.h",
       "git_blob_sha1": "848fd799df611a5f7e79d8da6e83b3ed825b5b20",
       "sha256": "2f16f2903154f4541bd4e8715e28450e3073b93bda91ca2e80e7045b905c6ba7",
       "size": 4008
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/TaskInfo.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/TaskInfo.h",
+      "git_blob_sha1": "b2590330f32ffb56cab07c9f2ef20c78c53f57c1",
+      "sha256": "28951d487d3211ad393b01b5bd8557be7f2ae8753a65706e98cd23fcce49b878",
+      "size": 3051
     },
     {
       "path": "ir-mel/include/irmel/library/irmel-types/TempPoint.h",
@@ -792,6 +849,38 @@
       "size": 3905
     },
     {
+      "path": "ir-mel/include/irmel/library/irmel-types/TrackData.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/TrackData.h",
+      "git_blob_sha1": "d019a525a56b62b820bdc61729c3e3e10be3d6a8",
+      "sha256": "a20c1a609b4369e70fd1adbfd1d062004cbdcf83ebf1c335c044bbf691ac2220",
+      "size": 6779
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/TrackListResponse.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/TrackListResponse.h",
+      "git_blob_sha1": "39172d49d3dbbeb85cdb330d792e87b3c563b8d5",
+      "sha256": "281634d8ad8d646f6dc90b7924fced9538709b459016da1b5fad648b795f308d",
+      "size": 820
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/TrackTaskData.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/TrackTaskData.h",
+      "git_blob_sha1": "d2aa159a954553b71e470edf161b48727e358c2e",
+      "sha256": "6095b9b45a4011fb1ada1ab316161f8ff8f91fb8fafa97168c7bb761b69253e6",
+      "size": 1692
+    },
+    {
+      "path": "ir-mel/include/irmel/library/irmel-types/TrackTaskParam.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/TrackTaskParam.h",
+      "git_blob_sha1": "8f84eae3192e651f78e7e62831bc2ac34e1203d0",
+      "sha256": "1adbbac97817aac09203fb3ffc20f1f68e7adea21d58f83e79c1b09a88aab757",
+      "size": 2407
+    },
+    {
       "path": "ir-mel/include/irmel/library/irmel-types/Uncertainty.h",
       "component": "ir-mel",
       "source_path": "include/irmel/library/irmel-types/Uncertainty.h",
@@ -800,12 +889,84 @@
       "size": 1519
     },
     {
+      "path": "ir-mel/include/irmel/library/irmel-types/UpdateTrackListResponse.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/irmel-types/UpdateTrackListResponse.h",
+      "git_blob_sha1": "ac4c7f5be4444192e0330d26f685b5713ad0939b",
+      "sha256": "57d1f489aeca4aa7e7d95346cfe0c72045228f99ae69b6f6bc0a06d4e499de96",
+      "size": 1935
+    },
+    {
       "path": "ir-mel/include/irmel/library/irmel-types/mel_export.h",
       "component": "ir-mel",
       "source_path": "include/irmel/library/irmel-types/mel_export.h",
       "git_blob_sha1": "4eda04f3cc9a27e62fd38a2345235d245588d157",
       "sha256": "ca32907410241638bd03549e38650cddfe9d92a2aecaf070eba50ccbd6d041fc",
       "size": 949
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/ActivityRecord.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/ActivityRecord.h",
+      "git_blob_sha1": "b82978db90b0d23600c23cb6395fb97228d2d1f2",
+      "sha256": "3a9cd51e8558b14d4001c6d29bb67f3e74b9ebdc5d9ecdbff0485299a382bcbc",
+      "size": 2357
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/EventType.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/EventType.h",
+      "git_blob_sha1": "6670b2bc45fe1db337abdc32f204446f4ce4643b",
+      "sha256": "b7a75ecd1db411faf74f663dde109d86a6aee01615af063473fb003c571339cc",
+      "size": 1005
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/ExecuteTaskAck.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/ExecuteTaskAck.h",
+      "git_blob_sha1": "4593cb1357038f157f77df11a022e706d3cbcd21",
+      "sha256": "0372fa68dcfbf698e478425b959151f4dea9cc3905a2a543a8417b58700ea708",
+      "size": 1848
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/ScanPerformanceReport.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/ScanPerformanceReport.h",
+      "git_blob_sha1": "210e304bf710083340e77e7c5befe5867810cdef",
+      "sha256": "291787d4e5ae4fe8409f4a8b2bfa4718b5051622e13d2d7f233f56593a3884a8",
+      "size": 1726
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/SchedCreatedRep.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/SchedCreatedRep.h",
+      "git_blob_sha1": "240b7b7a0d4e7daa75de45ad83c1c96b3d8f0fed",
+      "sha256": "74b3f5fac331fd5352cc36295075e464407abc6f3dc547492775d5ef81ab5492",
+      "size": 2746
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/SchedulingChannel.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/SchedulingChannel.h",
+      "git_blob_sha1": "f11932ac09f2644aa47b00ed7623bb3b8ca9ddf2",
+      "sha256": "9e90fcd4066d82bf67d001283c1e07d8efb32077d1b62938a98bde910af13191",
+      "size": 8872
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/TaskEvents.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/TaskEvents.h",
+      "git_blob_sha1": "06ddc86196fb16ce95531c11531ac1ca82b7ecf7",
+      "sha256": "a935607a508bf2b17c8c34380a6d8e73206790ffbeab2590e121d01351c4d0c4",
+      "size": 2026
+    },
+    {
+      "path": "ir-mel/include/irmel/library/scheduling/TaskExecutingRep.h",
+      "component": "ir-mel",
+      "source_path": "include/irmel/library/scheduling/TaskExecutingRep.h",
+      "git_blob_sha1": "31ac02721e3a11bc1f107086efc311e6f2caf9ef",
+      "sha256": "c1c1372a3b2922f49f81c6c11534bd9e874c21da021fb81276b688461b47bba8",
+      "size": 3390
     },
     {
       "path": "ir-mel/include/irmel/library/stacked-image/StackFrameHeader.h",

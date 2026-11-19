@@ -1,5 +1,18 @@
 # Bounded C2 ModeCmd: commanded Standby (GIGE-MEL-014 / GIGE-MEL-017)
 
+## Conditional operational extension (GIGE-MEL-045)
+
+An explicitly qualified task source additionally permits Operate/TaskSched only
+after opening/observing a genuine owned admission session. Its exact upstream
+future contains TaskSched; correlated terminal C2 status is Accepted. Standby
+cancels/retires the session; source failure rejects and retains recoverable
+ownership. No source continues returning Unsupported/CapabilityUnavailable.
+Mode statuses reserve delivery before command admission is released, so detach
+drains them. See the [task profile](task-scheduling-provider.md) for exact inputs,
+capacity-zero replacement, current-only abort, lifecycle and conformance gaps.
+The Standby-only statements below describe the original/default image-stream
+profile, not this explicitly selected conditional extension.
+
 This is a **partial implementation of a required MEL operation**, not complete
 ModeCmd conformance or an operational task-scheduling contract. It uses the
 unchanged IR MEL `8d9224519f12b44e0b28815755c56a32a28d24a0` and Common MEL
