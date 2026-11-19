@@ -125,9 +125,22 @@ def synthetic(config):
     send(2, b"", 1)
     marker("open_readonly")
     marker("inspect")
-    send(0x80, struct.pack("!I", 0x1f0), 2)
-    send(0x84, struct.pack("!IHH", 0x200, 0, 16), 3)
     scenario = config["self_test"]
+    if scenario != "missing-read":
+        marker("required_read_attempt")
+        if scenario == "failed-read":
+            marker("required_read_failed")
+        elif scenario == "wrong-source-ack":
+            # Unsolicited/forged ACK from another loopback endpoint, no matching
+            # camera read. A marker alone must never establish wire completion.
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as rogue:
+                rogue.bind(("127.0.0.2", 3956))
+                rogue.sendto(struct.pack("!HHHHI", 0, 0x81, 4, 2, 123), sock.getsockname())
+            marker("required_read_success")
+        else:
+            send(0x80, struct.pack("!I", 0x1f0), 2)
+            marker("required_read_success")
+    send(0x84, struct.pack("!IHH", 0x200, 0, 16), 3)
     if scenario in ("control-write", "register-write", "memory-write"):
         command = 0x86 if scenario == "memory-write" else 0x82
         address = 0xa00 if scenario == "control-write" else 0x1f0
@@ -147,7 +160,7 @@ def synthetic(config):
     time.sleep(config["quiet"])
     marker("quiet_complete")
     sock.close()
-    return 0
+    return int(scenario == "failed-read")
 
 
 def markers_from(path):
@@ -189,7 +202,7 @@ def worker(config, script):
         stderr = (output / (name + ".stderr.log")).open("xb")
         logs.extend([stdout, stderr])
         child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                                 cwd=output)
+                                 cwd=output, pass_fds=(config["origin_netns_fd"],) if name == "producer" else ())
         children.append(child)
         return child
     camera_process = None
@@ -217,7 +230,7 @@ def worker(config, script):
         command = ([sys.executable, str(script), "--wire-synthetic", str(output / "config.json")]
                    if config["self_test"] else
                    [config["probe"], config["producer"], "wire-readonly", config["interface"],
-                    str(int(config["quiet"] * 1000))])
+                    str(int(config["quiet"] * 1000)), "--origin-netns-fd", str(config["origin_netns_fd"])])
         write_json(output / "producer-command.json", command)
         native["started_ns"] = time.time_ns()
         producer = launch(command, "producer")
@@ -245,9 +258,12 @@ def worker(config, script):
         native["exited_ns"] = time.time_ns()
         observer.drain("producer")
         markers = markers_from(output / "producer.stdout.log")
+        native["required_read_diagnostics"] = [line for line in
+            (output / "producer.stdout.log").read_text(errors="replace").splitlines()
+            if line.startswith("REQUIRED_READ_ERROR")]
         # Additional bounded quiet observation after process exit: detects helpers
         # surviving a successful producer close, before terminating/reaping them.
-        deadline = time.monotonic() + (config["quiet"] if native["returncode"] == 0 else 0)
+        deadline = time.monotonic() + (config["quiet"] if "native_closed" in markers else 0)
         while time.monotonic() < deadline:
             observer.drain("producer")
             if violations(observer.records, markers.get("device_closed")):
@@ -306,8 +322,8 @@ def collect(args, run_stage, digest, script):
               "interface": args.interface, "quiet": args.quiet, "timeout": args.timeout,
               "self_test": args.self_test, "host_namespace": os.readlink("/proc/self/ns/net"),
               "host_user_namespace": os.readlink("/proc/self/ns/user")}
-    write_json(args.output / "config.json", config)
     report = {"schema": "gige-mel.gentl-offline-qualification", "version": 2,
+              "wire_evidence_revision": "GENTL-003A-R1",
               "mode": "isolated-wire", "requested_access": "DEVICE_ACCESS_READONLY",
               "physical_camera": "NOT_AUTHORIZED_NOT_RUN", "synthetic": bool(args.self_test),
               "started_ns": time.time_ns(), "files": {}, "result": "WIRE_OBSERVATION_UNAVAILABLE"}
@@ -317,10 +333,17 @@ def collect(args, run_stage, digest, script):
     if not args.self_test and (not args.producer or not args.producer.is_file()):
         report["result"] = "PRODUCER_NOT_AVAILABLE"
     else:
+        origin = os.open("/proc/self/ns/net", os.O_RDONLY)
+        config["origin_netns_fd"] = origin
+        write_json(args.output / "config.json", config)
         command = ["unshare", "--user", "--map-root-user", "--net", "--pid", "--fork",
                    "--mount-proc", "--kill-child", "--", sys.executable, str(script),
                    "--wire-worker", str(args.output / "config.json")]
-        report["stages"] = [run_stage(command, args.output, "wire-namespace", args.timeout + 20)]
+        try:
+            report["stages"] = [run_stage(command, args.output, "wire-namespace", args.timeout + 20,
+                                         pass_fds=(origin,))]
+        finally:
+            os.close(origin)
         if (args.output / "wire-result.json").is_file():
             report.update(json.loads((args.output / "wire-result.json").read_text()))
         stage = report["stages"][0]

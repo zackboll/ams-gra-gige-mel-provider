@@ -111,3 +111,45 @@ and unknown-command policy can require further producer-specific analysis, not
 automatic relaxation. Authenticated Euresys installation is the recommended next
 milestone: manually execute this same simulator qualification and independently
 review wire evidence. Physical discovery and GENTL-004 acquisition remain gated.
+
+## GIGE-MEL-GENTL-003A-R1 correction evidence
+
+Reviewed remote PR #45 at `440e782d6d1a65a8a81b408b322842c1b5875269`;
+remote branch and main matched the previously incorporated versions. Corrections
+are additive in this PR; no force-push or second PR. See the design's R1 section
+for original findings, root causes, trust boundaries and minimum evidence.
+
+* R1-1: independent C++ kernel/proc/netlink preflight before loading any producer;
+  inherited outer namespace descriptor checked as an actual nsfs object, not an
+  environment attestation. Native fixture tests run in controlled namespaces.
+  Host/extra-interface/default+external-route/unexpected-address/down-lo/missing
+  inspection/same-or-missing-descriptor cases must leave mock load/native log empty.
+* R1-2: both complete UDP endpoints in the correlation key; wrong endpoint,
+  transaction/command, duplicate/unmatched ACK, missing payload and malformed
+  memory echo cannot satisfy requests. Unexpected ACKs remain structured evidence.
+* R1-3: required read attempt/success/failure markers; exact native timeout -1011
+  and I/O -1010 preserved; no retry; one-attempt ordered close after failure.
+  Mandatory post-open marker interval must include corresponding complete native
+  camera READREG/READMEM traffic. Earlier successful optional XML reads do not
+  qualify the designated inspection. Native success alone still cannot pass.
+
+Development checks: 18 SDK-free wire unittest groups, native-probe fixture and
+supervisor focused tests passed. Manual live simulator matrix expanded from nine
+to **12/12 expected outcomes**, adding missing-read -> WIRE_OBSERVATION_UNAVAILABLE,
+failed-read -> REQUIRED_INSPECTION_FAILED, wrong-source ACK ->
+WIRE_OBSERVATION_UNAVAILABLE. Normal read remains HARNESS_SELF_TEST_PASS. No real
+producer or physical camera executed. Raw R1 evidence is outside Git at
+`/home/zboll/gentl-003a-r1-evidence/`.
+
+Additional development checks caught an attempted NS_GET_USERNS query on the
+outer namespace being denied from the child user namespace; this optional check
+was removed, not the mandatory current namespace ownership/type/identity checks.
+The verified outer nsfs descriptor remains pinned and compared against current
+network identity. A misplaced regression assertion was also corrected. These
+development failures were rerun successfully and are not qualification passes.
+
+The final corrected committed-source full compiler/sanitizer/default/build-off
+matrix, live matrix, source/tree identities and single exact-HEAD hosted-CI
+snapshot are reported in the PR R1 delivery comment. Historical pre-R1 results
+above do not establish that the reviewed findings were fixed. All new evidence
+must come from the corrected source; simulator results never qualify hardware.

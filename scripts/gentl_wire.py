@@ -169,34 +169,74 @@ def analyze(records, observation, markers, native, synthetic=False):
     # ACKs and failed ACKs explicit; never use producer success as a substitute.
     unmatched = []
     pending = {}
+    matched = []
     for record in records:
         if record.get("phase") != "producer":
             continue
         if record.get("direction") == "command" and "command" in record:
-            key = (tuple(record["source"]), record["transaction"], record["command"] + 1)
+            key = (tuple(record["source"]), tuple(record["destination"]),
+                   record["transaction"], record["command"] + 1)
             pending[key] = record
         elif record.get("direction") == "ack":
-            key = (tuple(record["destination"]), record.get("transaction"), record.get("ack_command"))
+            key = (tuple(record["destination"]), tuple(record["source"]),
+                   record.get("transaction"), record.get("ack_command"))
             request = pending.pop(key, None)
             if request is None or record.get("status") != 0:
                 unmatched.append(key)
-            elif "payload" in record:
-                ack = bytes.fromhex(record["payload"])
+            else:
+                ack = bytes.fromhex(record.get("payload", ""))
                 request_body = bytes.fromhex(request["payload"])[8:]
                 command = request["command"]
                 expected = {2: 256, 0x80: 8 + len(request_body), 0x82: 12,
                             0x84: 12 + request.get("size", 0), 0x86: 12}.get(command)
-                if len(ack) != expected:
+                if (len(ack) != expected or len(ack) < 8 or
+                        struct.unpack("!HHHH", ack[:8]) !=
+                        (0, key[3], len(ack) - 8, key[2])):
                     unmatched.append(key)
                 elif command in (0x84, 0x86) and ack[8:12] != request_body[:4]:
                     unmatched.append(key)
+                elif command == 0x82 and ack[8:12] != struct.pack("!I", 1):
+                    unmatched.append(key)
+                else:
+                    matched.append((request, record))
     evidence_incomplete = bool(pending or unmatched)
+    attempt = markers.get("required_read_attempt")
+    success = markers.get("required_read_success")
+    failed = markers.get("required_read_failed")
+    ordered = (attempt is not None and success is not None and failed is None and
+               markers.get("open_readonly", attempt) < markers.get("inspect", attempt) <= attempt < success <
+               markers.get("device_closed", success))
+    required_wire = []
+    if ordered:
+        for request, ack in matched:
+            if not (attempt <= request.get("timestamp_ns", 0) <= ack.get("timestamp_ns", 0) <= success):
+                continue
+            if request["destination"] != ["127.0.0.1", PORT]:
+                continue
+            if request["command"] == 0x80:
+                covers = 0x1f0 in request["addresses"]
+            elif request["command"] == 0x84:
+                covers = request["addresses"][0] <= 0x1f0 and request["addresses"][0] + request["size"] >= 0x1f4
+            else:
+                covers = False
+            if covers:
+                required_wire.append(request["transaction"])
+    required_state = ("FAILED" if failed is not None else "NOT_ATTEMPTED" if attempt is None else
+                      "SUCCESS_WITH_WIRE" if required_wire else
+                      "SUCCESS_WITHOUT_WIRE" if success is not None else "ATTEMPTED_NOT_COMPLETED")
     result = {"requested_access": "DEVICE_ACCESS_READONLY", "reasons": reasons,
               "command_counts": dict(collections.Counter(r.get("classification", "Unqualified") for r in commands)),
               "written_addresses": [a for r in commands if r.get("write") for a in r["addresses"]],
               "control_privilege_write": any(r.get("control_privilege") for r in commands),
               "markers": markers, "native": native, "synthetic": synthetic}
     result["unmatched_transactions"] = len(pending) + len(unmatched)
+    result["unexpected_acks"] = unmatched
+    result["pending_transactions"] = list(pending)
+    result["required_read"] = {"address": 0x1f0, "bytes": 4, "state": required_state,
+                               "attempted": attempt is not None, "native_success": success is not None and failed is None,
+                               "failed": failed is not None,
+                               "ordered_post_open": ordered, "wire_transactions": required_wire,
+                               "diagnostics": native.get("required_read_diagnostics", [])}
     if native.get("timed_out"):
         state = "PRODUCER_TIMEOUT"
     elif native.get("returncode") is not None and native["returncode"] < 0:
@@ -207,7 +247,7 @@ def analyze(records, observation, markers, native, synthetic=False):
           observation.get("drops", 1) != 0 or observation.get("records") != len(records) or
           not observation.get("calibrated") or not commands or evidence_incomplete):
         state = "WIRE_OBSERVATION_UNAVAILABLE"
-    elif (native.get("returncode") != 0 or not native.get("simulator_shutdown") or
+    elif (native.get("returncode") not in ((0, 1) if failed is not None else (0,)) or not native.get("simulator_shutdown") or
           not native.get("descendants_reaped") or
           not all(key in markers for key in ("open_readonly", "inspect", "device_closed", "native_closed", "quiet_complete")) or
           not markers["open_readonly"] < markers["inspect"] < markers["device_closed"] <=
@@ -215,6 +255,10 @@ def analyze(records, observation, markers, native, synthetic=False):
           markers["quiet_complete"] - markers["native_closed"] < native.get("quiet_ns", 100000000)):
         state = "NATIVE_CLEANUP_UNRESOLVED"
     elif not any(r.get("command") == 2 for r in commands) or not any(r.get("command") in (0x80, 0x84) for r in commands):
+        state = "WIRE_OBSERVATION_UNAVAILABLE"
+    elif failed is not None:
+        state = "REQUIRED_INSPECTION_FAILED"
+    elif not required_wire:
         state = "WIRE_OBSERVATION_UNAVAILABLE"
     else:
         state = "HARNESS_SELF_TEST_PASS" if synthetic else "READ_ONLY_WIRE_PASS"

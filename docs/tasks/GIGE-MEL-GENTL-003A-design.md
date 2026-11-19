@@ -22,7 +22,8 @@ Reuse, rather than a second transport:
 * `gentl_qualification.py` remains the entry point and bounded outer supervisor;
   its default offline load/interface mode retains GENTL-003 semantics.
 * `gentl_probe.cpp wire-readonly` reuses the existing consumer's exact-ID methods
-  and READONLY access. It requires a singleton discovered device on the explicit
+  and READONLY access. Its mandatory kernel preflight runs before loading any
+  producer (see R1 below). It requires a singleton discovered device on the explicit
   interface, refuses ambiguity, and never requests control or retries a failure.
 * The camera uses **the same pinned Aravis 0.8.36 ArvGvFakeCamera** as
   `tests/support/aravis_gv_loopback.*`, through public C functions loaded in a
@@ -129,7 +130,8 @@ bounded, nonwrapping address intervals. Full IP and GVCP bytes are retained.
 | Unknown ID, malformed header/flags/length/ID/payload | Unqualified |
 
 Commands and ACKs must correlate by client endpoint, transaction ID and command;
-ACK status, length and memory address echo must agree. Incomplete exchanges
+ACK source must equal the request destination and ACK destination must equal the
+request source, including both UDP ports. ACK status, length and memory address echo must agree. Incomplete exchanges
 cannot pass. Repeated transaction IDs from the same endpoint (including payload
 changes) are unqualified duplicate/retransmitted behavior, not silently retried
 safe reads. This deliberately conservative policy may reject legitimate producer
@@ -145,6 +147,11 @@ Local XML reads using the existing bounded XML-head diagnostic and a raw selecte
 TestRegister feature read. It does not introduce a GenApi XML loader or change
 feature conversion. Unsupported port/XML information is logged, not emulated;
 ZIP/File/http remain unsupported by existing semantics.
+
+The designated TestRegister read is mandatory: its failed native result is
+recorded exactly, closes still run once in order, and success requires both its
+post-open success marker and independent matching read/ACK traffic in that
+operation's timestamp interval. Earlier optional metadata reads cannot substitute.
 
 It then checks DevClose, IFClose, TLClose, GCCloseLib and producer destruction,
 in that order, with timestamped stage/close markers. The child remains alive
@@ -173,6 +180,9 @@ Terminal results:
 * `PRODUCER_CRASH`, `PRODUCER_TIMEOUT`: process status, never successful cleanup.
 * `NATIVE_CLEANUP_UNRESOLVED`: failed/missing close markers, failed shutdown,
   unexpected descendants or failed enclosing supervisor.
+* `REQUIRED_INSPECTION_FAILED`: designated native read failed, but checked native
+  cleanup completed. It is never a read-only pass. Cleanup uncertainty takes
+  precedence; the read failure evidence remains separately recorded.
 * `WIRE_OBSERVATION_UNAVAILABLE`: unavailable/uncalibrated/dropped/incomplete
   capture, unmatched exchanges, absent actual discovery/reads or isolation failure.
 * `PRODUCER_NOT_AVAILABLE`: explicit missing/no producer; nothing is loaded.
@@ -209,3 +219,93 @@ producers may not support loopback discovery; failure is an unqualified producer
 limitation, not justification to attach a physical network. Producer-specific
 virtual-Ethernet support would require a separately audited isolation extension.
 GENTL-004 acquisition remains separately gated and is not begun.
+
+## Independent-review corrections (GIGE-MEL-GENTL-003A-R1)
+
+### R1-1: enforce isolation at the producer boundary
+
+Root cause: the outer supervisor isolated its launches, but direct invocation of
+the new C++ `wire-readonly` command could load a producer on a normal host. The
+command now always calls `tools/gentl_wire_preflight.hpp` **before Producer::load,
+dlopen or any native API**. Any missing kernel evidence refuses execution without
+a fallback. No environment variable grants permission.
+
+The outer supervisor opens its actual `/proc/self/ns/net` before unshare, retains
+that namespace object and explicitly passes its FD to namespace init, then to the
+probe (`--origin-netns-fd`). The C++ probe verifies the FD with NS_GET_NSTYPE,
+compares actual fstat namespace identities, requires a different current netns,
+mapped-root direct-child-of-PID-1 execution, matching init/probe net+user namespaces,
+a single-user uid mapping, and current network/PID namespaces owned by its current
+user namespace (NS_GET_USERNS). The caller cannot replace these facts by setting a
+flag/string. The origin descriptor is closed before SDK loading.
+
+The C++ preflight independently enumerates interfaces and addresses with Linux
+if_nameindex/getifaddrs: exactly UP loopback, exactly 127.0.0.1/8, optional ::1/128,
+no extra address/interface. A bounded NETLINK_ROUTE RTM_GETROUTE dump inspects all
+IPv4/IPv6 tables: only local/broadcast 127/8 routes or local ::1/128 on lo; no
+external/default/gateway/multipath route. Checked memcpy/length boundaries are
+used, not unchecked packet casts. Interrupted, truncated, failed or unavailable
+inspection refuses before producer loading.
+
+This launch contract is provenance/containment for trusted binaries, **not
+authentication against an adversarial same-user launcher**: someone capable of
+creating the same safe kernel namespace arrangement can deliberately launch the
+probe there. That is safe; a manually edited environment flag on a host is not.
+The preflight does not claim to sandbox hostile SDK code or prevent privileged
+outside actors from reconfiguring a namespace after admission. Existing trusted
+producer/filesystem assumptions remain unchanged.
+
+Regression: real-kernel tests exercise direct host launch, extra dummy interface,
+default route, external route in table 123, unexpected 127.0.0.2 address, loopback
+DOWN, same-namespace descriptor, absent descriptor and unavailable proc namespace
+inspection. Every refusal leaves the mock log **empty**, including no dlopen
+constructor, GCInitLib, discovery or open. Safe tests use a fresh namespace-init
+launcher; no test-only preflight bypass exists. Optional native-probe fixture
+tests now require unprivileged namespaces; the ordinary default build remains
+SDK/namespace-privilege independent.
+
+### R1-2: complete transport correlation
+
+Root cause: the prior pending key omitted the camera endpoint. The key is now:
+`(request.source, request.destination, transaction, expected_ack_command)`.
+An ACK lookup uses `(ack.destination, ack.source, transaction, ack.command)`.
+Each endpoint is the complete `(IPv4, UDP port)` pair. Native ACK status, the
+actual header's declared size/ID/command, operation-specific response length,
+discovery response length and memory-address echo are checked before recording
+a completed pair. Missing payload is incomplete evidence, not an optional check.
+Unsolicited/duplicate/wrong-endpoint ACKs remain explicit `unexpected_acks`;
+unanswered requests remain `pending_transactions`; neither can pass.
+
+Regression: independently mutated source/destination IPs and ports, wrong ID,
+wrong ACK command/status, duplicate/unsolicited ACKs, two concurrent client ports
+using the same transaction ID, malformed payload and memory-address echo. The
+adversarial wrong-camera response cannot produce READ_ONLY_WIRE_PASS. Live
+wrong-source injection likewise fails while normal simulator traffic succeeds.
+
+### R1-3: mandatory inspection completion
+
+Root cause: TestRegister failure was printed but did not affect the native exit
+or analyzer's success criteria. The probe now emits `required_read_attempt`, then
+exactly `required_read_success` or `required_read_failed`. Failure keeps the exact
+GenTL native code/function/detail in `REQUIRED_READ_ERROR` and existing message
+format, fabricates no value, retries nothing, performs checked close in the usual
+order, waits quiet, and exits 1. Failed close still uses `_Exit` without retry.
+The worker retains error lines in native diagnostics and observes after native
+close even if the required read caused nonzero exit.
+
+The analyzer records attempted/native-success/failed state separately from wire
+completion. To pass, markers must order open < inspect <= attempt < success <
+device-close. A matched successful wire exchange must be entirely inside the
+attempt/success interval, to 127.0.0.1:3956, and cover all four TestRegister bytes
+at 0x1f0. Either batched READREG containing 0x1f0 or READMEM covering [0x1f0,0x1f4)
+is supported; no assumption about which request type a producer uses. A reported
+native success without corresponding wire remains SUCCESS_WITHOUT_WIRE and
+cannot pass. Optional unsupported metadata remains diagnostic only.
+
+The five trust boundaries remain distinct: outer supervisor holds the pre-unshare
+namespace FD and bounds init; namespace init checks/setup owns/reaps children;
+C++ probe independently admits native loading and reports native read/close
+results; AF_PACKET observer supplies independent bytes/kernel timestamps/drop
+evidence; Aravis responds as the simulated device. None substitutes its report
+for another's evidence. HARNESS_SELF_TEST_PASS remains synthetic-only, never
+actual vendor/hardware qualification. Evidence revision is `GENTL-003A-R1`.

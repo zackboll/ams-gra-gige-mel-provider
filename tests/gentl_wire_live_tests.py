@@ -29,7 +29,10 @@ def main():
                                ("unknown", "READ_ONLY_WIRE_VIOLATION"),
                                ("duplicate", "READ_ONLY_WIRE_VIOLATION"),
                                ("post-close", "READ_ONLY_WIRE_VIOLATION"),
-                               ("crash", "PRODUCER_CRASH"), ("timeout", "PRODUCER_TIMEOUT")):
+                               ("crash", "PRODUCER_CRASH"), ("timeout", "PRODUCER_TIMEOUT"),
+                               ("missing-read", "WIRE_OBSERVATION_UNAVAILABLE"),
+                               ("failed-read", "REQUIRED_INSPECTION_FAILED"),
+                               ("wrong-source-ack", "WIRE_OBSERVATION_UNAVAILABLE")):
         command = [sys.executable, str(ROOT / "scripts/gentl_qualification.py"), "--wire",
                    "--self-test", scenario, "--aravis-library", str(args.aravis_library),
                    "--timeout", "3", "--quiet", "0.2", "--output", str(args.output / scenario)]
@@ -42,7 +45,7 @@ def main():
         if result["result"] == "READ_ONLY_WIRE_PASS":
             raise RuntimeError("synthetic traffic must never qualify a producer")
     (args.output / "matrix.json").write_text(json.dumps(summary, indent=2) + "\n")
-    print("9/9 isolated simulator scenarios matched expected outcomes; no real producer qualified")
+    print(f"{len(summary)}/{len(summary)} isolated simulator scenarios matched expected outcomes; no real producer qualified")
 
 
 if __name__ == "__main__":

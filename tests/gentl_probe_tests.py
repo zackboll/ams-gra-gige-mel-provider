@@ -6,6 +6,7 @@ read-only inspection, repeated load/unload and exit-status propagation. It is
 not evidence for any real producer or camera.
 """
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -20,13 +21,28 @@ def read(path):
         return handle.read()
 
 
-def run(*args, env=None):
+def run(*args, env=None, isolation="safe"):
     environment = {k: v for k, v in os.environ.items() if not k.startswith("GENTL_MOCK")}
     environment.update(env or {})
-    return subprocess.run([PROBE, *args], capture_output=True, text=True, timeout=30, env=environment)
+    command = [PROBE, *args]
+    if len(args) >= 4 and args[1] == "wire-readonly" and isolation != "host":
+        command = [sys.executable, str(Path(__file__).parent / "support/gentl_isolated_probe.py"),
+                   isolation, PROBE, args[0], *args[2:]]
+    return subprocess.run(command, capture_output=True, text=True, timeout=30, env=environment)
 
 
 class ProbeTests(unittest.TestCase):
+    def test_wire_preflight_refuses_before_any_library_entry(self):
+        for scenario in ("host", "extra-interface", "default-route", "unexpected-address",
+                         "inspection-unavailable", "no-contract", "same-namespace", "loopback-down", "external-route"):
+            with self.subTest(scenario=scenario), tempfile.NamedTemporaryFile() as log:
+                result = run(MOCK, "wire-readonly", "mock-if-0", "100", isolation=scenario,
+                             env={"GENTL_MOCK_LOG": log.name, "GENTL_MOCK_SINGLE_DEVICE": "1"})
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("ISOLATION_REFUSED", result.stdout)
+                self.assertNotIn("WIRE load", result.stdout)
+                self.assertEqual(read(log.name), "")  # not even dlopen constructor, let alone GCInitLib/discovery
+
     def test_usage_and_gating(self):
         self.assertEqual(run("--help").returncode, 0)
         self.assertEqual(run().returncode, 2)
@@ -80,6 +96,8 @@ class ProbeTests(unittest.TestCase):
             self.assertIn("native_closed", result.stdout)
             self.assertIn("quiet_complete", result.stdout)
             self.assertIn("unloaded", read(log.name))
+            self.assertIn("isolation_verified", result.stdout)
+            self.assertIn("required_read_success", result.stdout)
         for operation in ("DevClose", "IFClose", "TLClose", "GCCloseLib"):
             with tempfile.NamedTemporaryFile() as log:
                 result = run(MOCK, "wire-readonly", "mock-if-0", "100", env={
@@ -89,6 +107,25 @@ class ProbeTests(unittest.TestCase):
                 self.assertEqual(read(log.name).splitlines().count("fail " + operation), 1)
                 self.assertNotIn("unloaded", read(log.name))
                 self.assertNotIn("native_closed", result.stdout)
+
+    def test_required_read_native_failure_cleanup(self):
+        for code in (-1011, -1010):
+            for close_failure in (False, True):
+                with self.subTest(code=code, close_failure=close_failure), tempfile.NamedTemporaryFile() as log:
+                    result = run(MOCK, "wire-readonly", "mock-if-0", "100", env={
+                        "GENTL_MOCK_LOG": log.name, "GENTL_MOCK_SINGLE_DEVICE": "1",
+                        "GENTL_MOCK_REQUIRED_READ_ERROR": str(code),
+                        "GENTL_MOCK_FAIL": "DevClose=-1011" if close_failure else ""})
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(f"REQUIRED_READ_ERROR native={code} function=GCReadPort", result.stdout)
+                    self.assertIn("injected required TestRegister read failure", result.stdout)
+                    self.assertIn("required_read_failed", result.stdout)
+                    self.assertNotIn("required_read_success", result.stdout)
+                    self.assertEqual(read(log.name).count("required TestRegister failure"), 1)
+                    self.assertEqual(read(log.name).count("attempt DevClose"), 1)
+                    self.assertEqual("native_closed" in result.stdout, not close_failure)
+                    self.assertEqual("unloaded" in read(log.name), not close_failure)
+                    self.assertIn("xml head: <?xml", result.stdout)  # earlier optional read succeeded
 
     def test_offline_close_failure_never_retried(self):
         for operation, command, preceding in (("TLClose", "interfaces", ""),

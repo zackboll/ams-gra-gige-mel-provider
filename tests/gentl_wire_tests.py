@@ -27,15 +27,24 @@ def record(data, stamp=3):
                 source=["127.0.0.1", 10000], destination=["127.0.0.1", 3956], payload=data.hex())
 
 
+def response(request, stamp=4):
+    code = request["command"] + 1
+    body = (bytes(248) if code == 3 else struct.pack("!I", 123) if code == 0x81 else
+            struct.pack("!I", request["addresses"][0]) + bytes(request["size"]))
+    return dict(phase="producer", direction="ack", source=request["destination"][:],
+                destination=request["source"][:], transaction=request["transaction"], ack_command=code,
+                status=0, timestamp_ns=stamp,
+                payload=(struct.pack("!HHHH", 0, code, len(body), request["transaction"]) + body).hex())
+
+
 class WireTests(unittest.TestCase):
     def setUp(self):
         self.records = [record(command(2, b"", 1)), record(command())]
-        self.records += [dict(phase="producer", direction="ack", destination=["127.0.0.1", 10000],
-                              transaction=transaction, ack_command=ack, status=0)
-                         for transaction, ack in ((1, 3), (2, 0x81))]
+        self.records += [response(r) for r in self.records]
         self.observation = {"active": True, "complete": True, "drops": 0, "calibrated": True, "records": 2}
-        self.markers = {"open_readonly": 1, "inspect": 2, "device_closed": 4,
-                        "native_closed": 5, "quiet_complete": 500000005}
+        self.markers = {"open_readonly": 1, "inspect": 2, "required_read_attempt": 2,
+                        "required_read_success": 5, "device_closed": 6,
+                        "native_closed": 7, "quiet_complete": 500000007}
         self.native = {"returncode": 0, "timed_out": False, "simulator_shutdown": True,
                        "descendants_reaped": True, "quiet_ns": 500000000}
 
@@ -108,17 +117,17 @@ class WireTests(unittest.TestCase):
             self.native[key] = False
             self.assertEqual(self.result()["result"], "NATIVE_CLEANUP_UNRESOLVED")
             self.native[key] = True
-        for key in list(self.markers):
+        for key in ("open_readonly", "inspect", "device_closed", "native_closed", "quiet_complete"):
             saved = self.markers.pop(key)
             self.assertEqual(self.result()["result"], "NATIVE_CLEANUP_UNRESOLVED")
             self.markers[key] = saved
-        self.markers["quiet_complete"] = 6
+        self.markers["quiet_complete"] = 8
         self.assertEqual(self.result()["result"], "NATIVE_CLEANUP_UNRESOLVED")
 
     def test_post_close_heartbeat_and_configuration(self):
         for packet in (command(0x80, struct.pack("!I", 0xa00), 3),
                        command(0x82, struct.pack("!II", 0xa00, 0), 3)):
-            self.records = self.records[:2] + [record(packet, 5)]
+            self.records = self.records[:2] + [record(packet, 8)]
             result = self.result()
             self.assertEqual(result["result"], "READ_ONLY_WIRE_VIOLATION")
             self.assertIn("command after successful device close", result["reasons"])
@@ -158,6 +167,86 @@ class WireTests(unittest.TestCase):
             malformed[offset] = value
             with self.assertRaises(ValueError):
                 W.decode_ip(malformed)
+
+    def test_full_endpoint_ack_correlation_adversarial(self):
+        for field, value in (("source", ["127.0.0.2", 3956]), ("source", ["127.0.0.1", 3957]),
+                             ("destination", ["127.0.0.2", 10000]), ("destination", ["127.0.0.1", 10001]),
+                             ("transaction", 7), ("ack_command", 0x85), ("status", 0x8001)):
+            with self.subTest(field=field, value=value):
+                saved = copy.deepcopy(self.records)
+                self.records[-1][field] = value
+                result = self.result(False)
+                self.assertNotEqual(result["result"], "READ_ONLY_WIRE_PASS")
+                self.assertGreater(result["unmatched_transactions"], 0)
+                self.assertTrue(result["unexpected_acks"])
+                self.records = saved
+        self.records.append(copy.deepcopy(self.records[-1]))
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+        self.records = self.records[2:4]
+        self.assertGreater(self.result()["unmatched_transactions"], 0)
+
+    def test_parallel_client_ports_and_memory_echo(self):
+        request = record(command(0x84, struct.pack("!IHH", 0x1ec, 0, 8)))
+        request["source"][1] = 10001  # same ID as another client, independent transport identity
+        ack = response(request)
+        self.records += [request, ack]
+        self.assertEqual(self.result()["result"], "HARNESS_SELF_TEST_PASS")
+        self.records[-1]["payload"] = ack["payload"][:16] + struct.pack("!I", 0x200).hex() + ack["payload"][24:]
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+
+    def test_required_read_minimum_evidence(self):
+        for key in ("required_read_attempt", "required_read_success"):
+            saved = self.markers.pop(key)
+            self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+            self.markers[key] = saved
+        self.markers["required_read_attempt"] = 0
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+        self.markers["required_read_attempt"] = 2
+        # Earlier optional metadata reads can succeed without satisfying TestRegister.
+        self.records[1] = record(command(0x80, struct.pack("!I", 0x200)))
+        self.records[3] = response(self.records[1])
+        self.assertEqual(self.result()["required_read"]["state"], "SUCCESS_WITHOUT_WIRE")
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+        self.markers.pop("required_read_success")
+        self.markers["required_read_failed"] = 5
+        self.native["returncode"] = 1
+        self.native["required_read_diagnostics"] = ["native=-1011 function=GCReadPort diagnostic=timeout"]
+        self.assertEqual(self.result()["result"], "REQUIRED_INSPECTION_FAILED")
+        self.assertEqual(self.result()["required_read"]["state"], "FAILED")
+        self.native["descendants_reaped"] = False
+        self.assertEqual(self.result()["result"], "NATIVE_CLEANUP_UNRESOLVED")
+
+    def test_required_memory_read_and_missing_or_forged_ack(self):
+        request = record(command(0x84, struct.pack("!IHH", 0x1ec, 0, 8)))
+        self.records[1], self.records[3] = request, response(request)
+        self.assertEqual(self.result()["result"], "HARNESS_SELF_TEST_PASS")
+        self.records[3]["source"] = ["127.0.0.2", 3956]
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+        self.records.pop()
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+        self.records = self.records[:1] + self.records[2:]
+        self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+
+    def test_success_marker_with_only_earlier_optional_wire_is_not_inspection(self):
+        # Wire read completed before post-open inspection; even a native success
+        # marker cannot repurpose it as evidence of the designated read operation.
+        self.records[1]["timestamp_ns"] = 0
+        self.records[3]["timestamp_ns"] = 1
+        self.assertEqual(self.result()["required_read"]["state"], "SUCCESS_WITHOUT_WIRE")
+        self.assertEqual(self.result(False)["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+
+    def test_ack_payload_constraints_and_unsolicited_ack(self):
+        saved = copy.deepcopy(self.records)
+        for payload in ("", self.records[3]["payload"][:-2], self.records[3]["payload"] + "00",
+                        "0000008100080002" + "0000007b"):
+            self.records = copy.deepcopy(saved)
+            self.records[3]["payload"] = payload
+            self.assertEqual(self.result()["result"], "WIRE_OBSERVATION_UNAVAILABLE")
+        self.records = copy.deepcopy(saved)
+        unsolicited = record(command(transaction=99))
+        self.records.append(response(unsolicited))
+        self.assertTrue(self.result()["unexpected_acks"])
+        self.assertNotEqual(self.result(False)["result"], "READ_ONLY_WIRE_PASS")
 
     def test_fresh_namespace_only_no_physical_nic_or_routes(self):
         safe = {"namespace": "net:[new]", "links": [{"ifname": "lo", "flags": []}],

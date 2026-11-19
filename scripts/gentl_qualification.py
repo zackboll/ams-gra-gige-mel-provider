@@ -42,7 +42,7 @@ def bounded_seconds(value):
     return seconds
 
 
-def run_stage(command, output, name, timeout):
+def run_stage(command, output, name, timeout, pass_fds=()):
     """One subprocess; preserve native status, kill its process group on timeout.
 
     Logs go directly to disk: no pipe deadlock, no unbounded in-memory capture.
@@ -55,7 +55,8 @@ def run_stage(command, output, name, timeout):
             (output / (name + ".stderr.log")).open("xb") as stderr:
         try:
             process = subprocess.Popen(command, stdout=stdout, stderr=stderr,
-                                       start_new_session=True, stdin=subprocess.DEVNULL, cwd=output)
+                                       start_new_session=True, stdin=subprocess.DEVNULL, cwd=output,
+                                       pass_fds=pass_fds)
         except OSError as error:
             record.update(outcome="launch_error", error=str(error), returncode=None, signal=None)
         else:
@@ -138,7 +139,8 @@ def main():
     parser.add_argument("--interface", help="exact producer interface ID inside the isolated network")
     parser.add_argument("--quiet", type=bounded_seconds, default=0.5)
     parser.add_argument("--self-test", choices=("read", "control-write", "register-write", "memory-write",
-                        "unknown", "duplicate", "crash", "timeout", "post-close"),
+                        "unknown", "duplicate", "crash", "timeout", "post-close",
+                        "missing-read", "failed-read", "wrong-source-ack"),
                         help="SDK-free injected traffic; never qualifies a producer")
     parser.add_argument("--output", type=Path, required=True,
                         help="new absolute directory outside the repository; logs may be sensitive")
