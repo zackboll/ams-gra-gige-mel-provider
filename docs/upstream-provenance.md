@@ -38,10 +38,11 @@ The root headers are:
 - `irmel/library/stacked-image/StackedImageChannel.h`
 - `irmel/library/stacked-image/StackedImageListener.h`
 - `irmel/library/stacked-image/StackFrameHeader.h`
+- `irmel/library/scheduling/SchedulingChannel.h`
 
-The transitive published include graph contains **94 headers**: 64 IR MEL,
+Before GIGE-MEL-045, the transitive published include graph contained 94 headers: 64 IR MEL,
 28 Common MEL, and two AMS Math headers (`Quaternion.h` and `RangeAzEl.h`).
-Including the two retained notices per source family gives **100 locked files**.
+Including the two retained notices per source family gave 100 locked files.
 GIGE-MEL-044 adds only the three stacked-image headers at the unchanged pinned
 revision; their includes are already in the closure. Their bytes and blob IDs
 were checked against an independent upstream Git checkout at that revision.

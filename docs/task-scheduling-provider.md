@@ -76,8 +76,10 @@ Scheduling disable/detach and Control destruction force bounded retirement even
 after source failure; the fixture records failed, not successful cancellation,
 if cancellation fails during forced retirement.
 
-Calls receive 100 ms steady-clock deadlines; retirement/destruction must finish
-within 100 ms. These are cooperative source qualification requirements, **not**
+Execution calls receive 100 ms steady-clock deadlines; immutable declaration
+reads are required to be nonblocking, and retirement/destruction must finish
+within 100 ms. Source execution exceptions become explicit error futures; init
+contains declaration-read exceptions. These are cooperative source qualification requirements, **not**
 forced interruption of arbitrary C++ code. No detached timeout worker exists.
 Consumer callbacks may block detach until return, as on existing channels;
 source shutdown and callback drain are separate contracts.
