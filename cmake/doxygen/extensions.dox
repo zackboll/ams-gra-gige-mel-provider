@@ -1,8 +1,11 @@
 /** @page api_extensions Camera extension interfaces (internal, uninstalled)
 
 These are **internal, uninstalled extension interfaces**. They are for authors
-working with the provider source tree, not for installed MEL consumers. See the
-@ref md_docs_2camera-profile-authoring "camera-profile authoring guide" and
+working with the provider source tree, not for installed MEL consumers. Follow
+@ref md_docs_2camera-profile-tutorial "Create a Camera Profile" from admission
+to qualification, then compare the @ref md_docs_2camera-profile-examples
+"Camera Profile Examples" (reference implementations with source browsers).
+See the @ref md_docs_2camera-profile-authoring "camera-profile authoring contract" and
 @ref md_docs_2backend-authoring "backend authoring guide" for ownership and
 qualification requirements.
 
@@ -15,6 +18,13 @@ Area | Entry points
 @ref src/profiles/frame_policy.hpp "Common frame facts and policy" | @ref gige_mel::backend::profiles::NativeFrameFacts and @ref gige_mel::backend::profiles::plan_pool
 @ref src/profiles/mono_free_running.hpp "Monochrome free-running policy" | @ref gige_mel::backend::profiles::mono_free_running::validate_frame and @ref gige_mel::backend::profiles::mono_free_running::plan_writes
 @ref src/profiles/mono_free_running_device.hpp "Device configuration transactions" | @ref gige_mel::backend::profiles::mono_free_running::read_configuration and @ref gige_mel::backend::profiles::mono_free_running::apply_configuration
+
+The profile checks model compatibility on explicit device open. It creates
+independently owned per-device state for configuration and frame admission.
+The feature service is a borrowed, typed bridge to the adapter; policy never
+retains native handles. The backend still owns native acquisition and leases,
+and the provider owns MEL publication. A catalog binds compatible factories
+without camera I/O; it does not replace open-time admission.
 
 ## Matched-C++ modules only
 

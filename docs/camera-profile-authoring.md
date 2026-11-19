@@ -1,10 +1,10 @@
 # Camera-profile authoring (GIGE-MEL-034/035)
 
-**Start here for a new camera model on an existing SDK adapter.** Implement the
-profile and owned-state operations below; use the
-[independent module example](../examples/profile_module/README.md) for a separate
-matched-build project. A new SDK/transport belongs in
-[backend authoring](backend-authoring.md) instead. See the
+This is the **interface contract**. For the implementation sequence, standalone
+build and qualification checklist, start with [Create a Camera Profile](camera-profile-tutorial.md).
+Use the [C++ interface reference](index.md#camera-profile-c-interface) and the
+[Camera Profile Examples](camera-profile-examples.md) alongside this contract.
+A new SDK/transport belongs in [backend authoring](backend-authoring.md) instead. See the
 [documentation index](index.md) for navigation and the
 [complete MEL surface inventory](mel-surface-roadmap.md) plus pinned upstream
 headers for the full MEL requirements; a camera profile does not itself

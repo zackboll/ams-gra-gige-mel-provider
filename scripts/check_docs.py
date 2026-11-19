@@ -3,7 +3,7 @@
 
 import argparse
 from html.parser import HTMLParser
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import posixpath
 import re
 import subprocess
@@ -17,6 +17,19 @@ from check_proprietary import violation
 REPOSITORY = "https://github.com/zackboll/ams-gra-gige-mel-provider"
 PAGES = "https://zackboll.github.io/ams-gra-gige-mel-provider/"
 CONSUMER_GUIDE = "md_docs_2consumer-integration.html"
+PROFILE_TUTORIAL = "md_docs_2camera-profile-tutorial.html"
+PROFILE_EXAMPLES = "md_docs_2camera-profile-examples.html"
+EXAMPLE_SOURCES = {
+    "Cognex profile implementation": "camera_profiles/cognex_cic_5000r/profile.cpp",
+    "Cognex profile declaration": "camera_profiles/cognex_cic_5000r/profile.hpp",
+    "Cognex module entry point": "camera_profiles/cognex_cic_5000r/module.cpp",
+    "Rate-limited profile implementation": "examples/profile_module/rate_limited_policy.hpp",
+    "Rate-limited module descriptor": "examples/profile_module/module.cpp",
+}
+EXAMPLE_BUILDS = {
+    "Cognex CMakeLists.txt": "camera_profiles/cognex_cic_5000r/CMakeLists.txt",
+    "Rate-limited CMakeLists.txt": "examples/profile_module/CMakeLists.txt",
+}
 SECTIONS = {
     "api_installed.html": ("Installed C++ interfaces", (
         "make_api_manager", "ProviderSettings", "ProviderStatistics", "ICameraBackend",
@@ -32,20 +45,31 @@ SECTIONS = {
         "provider.cpp", "factories.cpp", "synthetic.cpp", "aravis_backend.cpp",
         "pleora_backend.cpp", "gentl_backend.cpp", "config_parser.cpp", "gvcp_control_owner.cpp",
     )),
+    PROFILE_EXAMPLES: ("internal development references", tuple(EXAMPLE_SOURCES)),
 }
 SEARCH = ("search/search.js", "search/searchdata.js")
-ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, *SECTIONS)
+ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, *SECTIONS)
 ENTRY_LINKS = {
-    "index.html": (CONSUMER_GUIDE, *SECTIONS),
+    "index.html": (CONSUMER_GUIDE, PROFILE_TUTORIAL, "api_installed.html", "api_extensions.html",
+                   "api_core.html"),
     CONSUMER_GUIDE: ("api_installed.html", "provider_8hpp.html", "backend_8hpp.html",
                      "navigation_8hpp.html", "line__of__sight_8hpp.html"),
     "api_installed.html": (CONSUMER_GUIDE,),
+    PROFILE_TUTORIAL: ("api_extensions.html", PROFILE_EXAMPLES, "md_docs_2camera-profile-authoring.html"),
+    "api_extensions.html": (PROFILE_TUTORIAL, PROFILE_EXAMPLES),
+    PROFILE_EXAMPLES: ("api_extensions.html", PROFILE_TUTORIAL, "camera__profile_8hpp.html",
+                       "device__features_8hpp.html", "frame__policy_8hpp.html", "profile__module_8hpp.html",
+                       "profile__loader_8hpp.html"),
 }
 
 
 def project_sources(paths):
-    return {p for p in paths if p.startswith(("include/gige_mel/", "src/"))
-            and p.endswith((".hpp", ".cpp"))}
+    tracked = set(paths)
+    missing = set(EXAMPLE_SOURCES.values()) - tracked
+    if missing:
+        raise ValueError(f"Missing tracked profile example sources: {', '.join(sorted(missing))}")
+    return {p for p in tracked if p.startswith(("include/gige_mel/", "src/"))
+            and p.endswith((".hpp", ".cpp"))} | set(EXAMPLE_SOURCES.values())
 
 
 class Page(HTMLParser):
@@ -54,6 +78,8 @@ class Page(HTMLParser):
         self.anchors = set()
         self.links = []
         self.assets = []
+        self.breadcrumb = []
+        self.in_breadcrumb_item = False
         self.current_link = None
         self.link_text = []
         self.feed(text)
@@ -66,6 +92,8 @@ class Page(HTMLParser):
         if tag == "a" and "href" in attrs:
             self.current_link = attrs["href"]
             self.link_text = []
+        elif tag == "li" and "navelem" in attrs.get("class", "").split():
+            self.in_breadcrumb_item = True
         elif tag in {"img", "script", "iframe", "link", "object"}:
             key = "href" if tag == "link" else "data" if tag == "object" else "src"
             if key in attrs:
@@ -76,8 +104,13 @@ class Page(HTMLParser):
             self.link_text.append(data)
 
     def handle_endtag(self, tag):
+        if tag == "li":
+            self.in_breadcrumb_item = False
         if tag == "a" and self.current_link is not None:
-            self.links.append((self.current_link, " ".join("".join(self.link_text).split())))
+            link = (self.current_link, " ".join("".join(self.link_text).split()))
+            self.links.append(link)
+            if self.in_breadcrumb_item:
+                self.breadcrumb.append(link)
             self.current_link = None
 
 
@@ -109,6 +142,10 @@ def verify_entry(page, parsed, text, sha):
     for target in ENTRY_LINKS.get(page, ()):
         if (target, "") not in linked:
             raise ValueError(f"{page}: no navigation to {target}")
+    if page == PROFILE_EXAMPLES:
+        for label, source in EXAMPLE_BUILDS.items():
+            if (f"{REPOSITORY}/blob/{sha}/{source}", label) not in parsed.links:
+                raise ValueError(f"{page}: missing revision-pinned link for {source}")
     if page in SECTIONS:
         title, symbols = SECTIONS[page]
         if title.casefold() not in text.casefold():
@@ -171,17 +208,33 @@ def validate_site(root, sha, sources):
             if f"'{search_url}'" not in search_index:
                 errors.append(f"{symbol}: API target is not in Doxygen search: {search_url}")
 
-    # File names come from project inputs only. Doxygen escapes each underscore
-    # and encodes the extension; directory prefixes may disambiguate basenames.
-    source_pages = {p for p in pages if p.endswith("_source.html")}
-    for source in sorted(sources):
-        name = PurePosixPath(source).name.replace("_", "__").replace(".", "_8") + "_source.html"
-        matches = {name} & source_pages or {p for p in source_pages if p.endswith("_2" + name)}
-        if len(matches) != 1 or "l00001" not in pages[next(iter(matches))].anchors:
-            errors.append(f"Missing unique line-numbered browser for {source}")
-        source_pages -= matches
-    if source_pages:
-        errors.append(f"Unexpected source browsers: {', '.join(sorted(source_pages))}")
+    # Resolve the full repository path from Doxygen's source breadcrumbs, not
+    # HTML basename/suffix matches (both example modules are named module.cpp).
+    source_by_path = {}
+    for page, parsed in pages.items():
+        if not page.endswith("_source.html"):
+            continue
+        source = "/".join(label for _, label in parsed.breadcrumb)
+        if source not in sources or source in source_by_path:
+            errors.append(f"Unexpected or duplicate source browser: {page} ({source})")
+            continue
+        source_by_path[source] = page
+        if "l00001" not in parsed.anchors:
+            errors.append(f"Missing line-numbered browser for {source}")
+    for source in sorted(sources - source_by_path.keys()):
+        errors.append(f"Missing source browser for {source}")
+
+    if PROFILE_EXAMPLES in pages:
+        targets = section_targets(PROFILE_EXAMPLES, pages[PROFILE_EXAMPLES])
+        for label, source in EXAMPLE_SOURCES.items():
+            target, _ = targets[label]
+            browser = source_by_path.get(source)
+            if not browser or target not in pages:
+                continue  # The missing page/browser was already reported above.
+            forward_links = {local_target(target, href) for href, _ in pages[target].links}
+            back_link = local_target(browser, pages[browser].breadcrumb[-1][0])
+            if (browser, "") not in forward_links or back_link != (target, ""):
+                errors.append(f"{label}: file and source links must resolve to {source}")
 
     if errors:
         raise ValueError("Documentation validation failed:\n" + "\n".join(sorted(set(errors))))
@@ -206,7 +259,7 @@ def verify_live(sha):
                 verify_entry(target, parsed, "", sha)
                 if fragment and fragment not in parsed.anchors:
                     raise ValueError(f"{target}: missing published API anchor {fragment}")
-                if target.endswith("_8cpp.html"):
+                if target.endswith(("_8cpp.html", "_8hpp.html")):
                     source = target.removesuffix(".html") + "_source.html"
                     if (source, "") not in {local_target(target, url) for url, _ in parsed.links}:
                         raise ValueError(f"{target}: missing published source link")
@@ -237,5 +290,5 @@ if __name__ == "__main__":
     if args.live:
         verify_live(sha)
     else:
-        sources = subprocess.check_output(["git", "ls-files", "-z", "include/gige_mel", "src"], text=True)
+        sources = subprocess.check_output(["git", "ls-files", "-z"], text=True)
         validate_site(args.site, sha, project_sources(sources.split("\0")))
