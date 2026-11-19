@@ -4,6 +4,7 @@
 // writes and remote-device AcquisitionStart are not implemented at all.
 // No image is published through MEL. Exit: 0 ok, 1 failure, 2 usage.
 #include "gentl/gentl_consumer.hpp"
+#include "gentl_wire_preflight.hpp"
 
 #include <charconv>
 #include <chrono>
@@ -25,6 +26,9 @@ constexpr const char* usage_text =
     "  PRODUCER.cti must be an explicit absolute path. Commands:\n"
     "  load                        dlopen, validate symbols, GCInitLib, GCGetInfo, close, unload\n"
     "  interfaces                  + TLOpen and list host interfaces (no device discovery)\n"
+    "  wire-readonly IFACE QUIET_MS isolated simulator qualification only; exact singleton\n"
+    "                                discovery, READONLY open, reads, checked close, quiet wait\n"
+    "                                requires supervisor-inherited --origin-netns-fd FD and kernel preflight\n"
     "  discover IFACE              + IFUpdateDeviceList on exactly IFACE (network discovery)\n"
     "  inspect IFACE DEVICE [--access readonly|control]\n"
     "                              + discover, open exactly DEVICE (default readonly), read-only\n"
@@ -57,6 +61,7 @@ bool parse(std::string_view text, unsigned& value) {
 struct Request {
     std::string producer, command, interface_id, device_id;
     unsigned frames{0}, reopen{1}, repeat{1};
+    int origin_fd{-1};
     bool interface_info{true};
     bool offline_qualification{false};
     gentl::Access access{gentl::Access::read_only};
@@ -234,6 +239,85 @@ int session(const Request& request) {
     std::cout << "closed in order: device, interface, system, library\n";
     return status;
 }
+
+// Subprocess-only qualification path. Never unwind an uncertain native operation:
+// the supervisor records failure and the OS retires this process, not native cleanup.
+void wire_marker(std::string_view stage) {
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::cout << "WIRE " << ns << ' ' << stage << '\n';
+}
+template<class T> T wire_take(gentl::Result<T> result) {
+    if (!result) std::_Exit(fail(result.error()));
+    return std::move(result).value();
+}
+void wire_check(gentl::Status status) {
+    if (!status) std::_Exit(fail(status.error()));
+}
+int wire_session(const Request& request) {
+    try { wire_preflight::check(request.origin_fd); }
+    catch (const std::exception& error) {
+        std::cout << "ISOLATION_REFUSED: " << error.what() << '\n';
+        return 1;
+    }
+    ::close(request.origin_fd);
+    wire_marker("isolation_verified");
+    wire_marker("load");
+    auto producer = wire_take(gentl::Producer::load(request.producer));
+    print("producer ", producer->info());
+    wire_marker("system");
+    auto system = wire_take(producer->open_system());
+    wire_check(system->update_interfaces(1000ms));
+    auto interfaces = wire_take(system->interfaces());
+    bool listed = false;
+    for (const auto& item : interfaces) if (item.id == request.interface_id) listed = true;
+    if (!listed) { std::cout << "FAILED: exact interface not listed\n"; std::_Exit(1); }
+    wire_marker("discovery");
+    auto interface = wire_take(system->open_interface(request.interface_id));
+    wire_check(interface->update_devices(2000ms));
+    auto devices = wire_take(interface->devices());
+    if (devices.size() != 1) { std::cout << "FAILED: expected exactly one simulated device\n"; std::_Exit(1); }
+    std::cout << "exact discovered device " << devices.front().id << '\n';
+    wire_marker("open_readonly");
+    auto device = wire_take(interface->open_device(devices.front().id, gentl::Access::read_only));
+    wire_marker("inspect");
+    print("module ", device->info());
+    print("port ", device->port_info());
+    auto locations = device->xml_locations();
+    if (locations) print_xml_head(*device, locations.value());
+    else std::cout << "XML unsupported: " << locations.error().message() << '\n';
+    // Selected simulator feature: TestRegister in the pinned fake-camera XML.
+    // No GenApi conversion or feature semantics are introduced by this diagnostic.
+    std::vector<std::byte> value(4);
+    wire_marker("required_read_attempt");
+    auto read = device->read_port(0x1f0, value);
+    std::cout << "TestRegister raw read: " << (read ? "success" : read.error().message()) << '\n';
+    if (!read) {
+        std::cout << "REQUIRED_READ_ERROR native=" << read.error().native << " function=" << read.error().function
+                  << " diagnostic=" << read.error().detail << '\n';
+    }
+    wire_marker(read ? "required_read_success" : "required_read_failed");
+    wire_marker("close_device");
+    wire_check(device->close());
+    wire_marker("device_closed");
+    device.reset();
+    wire_marker("close_interface");
+    wire_check(interface->close());
+    wire_marker("interface_closed");
+    interface.reset();
+    wire_marker("close_system");
+    wire_check(system->close());
+    wire_marker("system_closed");
+    system.reset();
+    wire_marker("close_producer");
+    wire_check(producer->close());
+    producer.reset(); // dlclose is inside the bounded subprocess, before quietness
+    if (gentl::retained_producers()) { std::cout << "FAILED: retained producer\n"; std::_Exit(1); }
+    wire_marker("native_closed");
+    std::this_thread::sleep_for(std::chrono::milliseconds(request.frames));
+    wire_marker("quiet_complete");
+    return read ? 0 : 1;
+}
 int parse_request(const std::vector<std::string_view>& args, Request& request) {
     if (args.size() < 2) return 2;
     request.producer = std::string(args[0]);
@@ -259,6 +343,18 @@ int parse_request(const std::vector<std::string_view>& args, Request& request) {
         out = std::string(args[at++]);
         return true;
     };
+    if (request.command == "wire-readonly") {
+        if (!take(request.interface_id) || at >= args.size() || !parse(args[at++], request.frames) ||
+            request.frames < 100 || request.frames > 10000 || request.repeat != 1 ||
+            !request.interface_info) return 2;
+        if (at < args.size()) {
+            unsigned fd{};
+            if (args[at++] != "--origin-netns-fd" || at >= args.size() || !parse(args[at++], fd) || fd > 1024 ||
+                at != args.size()) return 2;
+            request.origin_fd = static_cast<int>(fd);
+        }
+        return 0;
+    }
     if (request.command == "load" || request.command == "interfaces") return args.size() == at ? 0 : 2;
     if (request.command != "discover" && request.command != "inspect" && request.command != "acquire") return 2;
     if (!take(request.interface_id)) return 2;
@@ -303,6 +399,7 @@ int main(int argc, char** argv) {
     if (args.size() == 1 && args[0] == "--help") { std::cout << usage_text; return 0; }
     Request request;
     if (parse_request(args, request)) { std::cerr << usage_text; return 2; }
+    if (request.command == "wire-readonly") return wire_session(request);
     int result = 0;
     for (unsigned cycle = 1; cycle <= request.repeat; ++cycle) {
         if (request.repeat > 1) std::cout << "=== cycle " << cycle << " of " << request.repeat << " ===\n";

@@ -34,6 +34,12 @@ isolated interface update; Euresys 26.10 needs authenticated SDK access. Neither
 producer's read-only camera behavior is qualified. No physical Cognex contact
 was performed in GENTL-003; see the [actual results](docs/tasks/GIGE-MEL-GENTL-003-validation.md).
 
+Its explicit [GENTL-003A wire mode](docs/tasks/GIGE-MEL-GENTL-003A-design.md)
+adds an isolated Aravis simulated camera and independent Linux packet observer.
+SDK-free injected writes, unknown/repeated commands, crashes, timeouts and
+post-close traffic fail qualification. A harness self-test is **not** a real
+producer pass; Euresys is unavailable and Balluff's earlier crash is unresolved.
+
 The optional [Pleora stream-only traffic audit](docs/pleora-stream-only-audit.md)
 observed native GVCP discovery during isolated unicast Open, which then failed to
 establish a loopback receiver. Passive reception remains **incomplete**, not a
