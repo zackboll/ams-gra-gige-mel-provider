@@ -147,6 +147,14 @@ if(BUILD_TESTING)
   add_test(NAME provider_contract COMMAND provider_tests)
 
   add_executable(provider_los_tests tests/provider_los_tests.cpp tests/join_observer.cpp)
+  add_executable(provider_task_tests tests/provider_task_tests.cpp)
+  target_link_libraries(provider_task_tests PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads)
+  add_test(NAME provider_task_scheduling COMMAND provider_task_tests)
+  set_tests_properties(provider_task_scheduling PROPERTIES TIMEOUT 30)
+  add_executable(public_task_consumer tests/install_task_consumer/main.cpp tests/install_task_consumer/fixture.cpp)
+  target_link_libraries(public_task_consumer PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads)
+  add_test(NAME provider_public_task_consumer COMMAND public_task_consumer)
+  set_tests_properties(provider_public_task_consumer PROPERTIES TIMEOUT 30)
   add_executable(provider_stack_tests tests/provider_stack_tests.cpp tests/join_observer.cpp)
   target_link_libraries(provider_stack_tests PRIVATE gige_mel_provider gige_mel_backend
     gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
@@ -172,6 +180,11 @@ if(BUILD_TESTING)
     PRIVATE GIGE_MEL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} GIGE_MEL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     GIGE_MEL_VERSION_PATCH=${PROJECT_VERSION_PATCH})
   add_dependencies(gige_mel_provider_test_seams verify_upstream)
+  add_executable(provider_task_admission_tests tests/provider_task_tests.cpp)
+  target_link_libraries(provider_task_admission_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME provider_task_admission COMMAND provider_task_admission_tests)
+  set_tests_properties(provider_task_admission PROPERTIES TIMEOUT 30)
   add_executable(provider_status_admission_tests tests/provider_status_admission_tests.cpp)
   target_link_libraries(provider_status_admission_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
     gige_mel_build_options Threads::Threads)

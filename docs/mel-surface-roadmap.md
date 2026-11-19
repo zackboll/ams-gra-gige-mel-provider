@@ -337,6 +337,15 @@ A temperature sample is not a complete Health implementation. The implemented in
 
 ## P1 profile decision / P5 implementation: SchedulingChannel
 
+GIGE-MEL-045 implements a conditional recording-qualified virtual-stare subset:
+owned TaskSched session, Immediate-only no-queue replacement, current abort and
+ExecuteTaskAck. The other required/conditional surfaces below remain gaps.
+TaskExecutingRep stays unsupported because Task lacks an unambiguous stare
+mapping. AbortTask has no public TaskInfo accessor, so targeted abort cannot be
+claimed. See the [profile](task-scheduling-provider.md) for exact time, coordinates,
+capacity-zero and lifecycle contracts. Default and production backends remain
+unsupported; this is not complete scheduling conformance.
+
 [SchedulingChannel][scheduling] is class-annotated `RequiredIfIRSTTrackTasking`. Individual members have more specific conditions:
 
 | Operation or callback | Upstream annotation | Work required before support is advertised |

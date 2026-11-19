@@ -33,4 +33,8 @@ using StackHook = void (*)(StackPoint, void*) noexcept;
 // Set before enable, clear after disable/detach. Invoked only on stack worker.
 void set_stack_hook(StackHook hook, void* context) noexcept;
 
+// Calling submission thread, after task ack reservation, before delivery.
+using TaskHook = void (*)(void*) noexcept;
+void set_task_hook(TaskHook hook, void* context) noexcept;
+
 } // namespace gige_mel::test_seams
