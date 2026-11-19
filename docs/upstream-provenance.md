@@ -28,10 +28,16 @@ The root headers are:
 - `irmel/library/c2/C2Channel.h`
 - `irmel/library/image/ImageChannel.h`
 - `irmel/library/health-status/HealthStatusChannel.h`
+- `irmel/library/stacked-image/StackedImageChannel.h`
+- `irmel/library/stacked-image/StackedImageListener.h`
+- `irmel/library/stacked-image/StackFrameHeader.h`
 
-The transitive published include graph contains **91 headers**: 61 IR MEL,
+The transitive published include graph contains **94 headers**: 64 IR MEL,
 28 Common MEL, and two AMS Math headers (`Quaternion.h` and `RangeAzEl.h`).
-Including the two retained notices per source family gives **97 locked files**.
+Including the two retained notices per source family gives **100 locked files**.
+GIGE-MEL-044 adds only the three stacked-image headers at the unchanged pinned
+revision; their includes are already in the closure. Their bytes and blob IDs
+were checked against an independent upstream Git checkout at that revision.
 Every file was compared to the Git blob identity returned by the corresponding
 immutable upstream Git tree before the SHA-256 manifest was written. Files are
 copied byte-for-byte, including whitespace and line endings. There are no
@@ -100,7 +106,7 @@ can use `--source-dir` as described in `third_party/README.md`.
 
 The separate private parser lock is `third_party/json-manifest.json`:
 nlohmann/json 3.12.0 at `55f93686c01528224f448c19128836e7df245f72`, MIT.
-It does not modify or enlarge the 97-file MEL declaration lock. Its offline
+It does not modify or enlarge the MEL declaration lock. Its offline
 verification, immutable source identity and implementation-only integration are
 described in [configuration](configuration.md#private-parser-and-offline-verification).
 

@@ -147,6 +147,12 @@ if(BUILD_TESTING)
   add_test(NAME provider_contract COMMAND provider_tests)
 
   add_executable(provider_los_tests tests/provider_los_tests.cpp tests/join_observer.cpp)
+  add_executable(provider_stack_tests tests/provider_stack_tests.cpp tests/join_observer.cpp)
+  target_link_libraries(provider_stack_tests PRIVATE gige_mel_provider gige_mel_backend
+    gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
+  target_link_options(provider_stack_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach)
+  add_test(NAME provider_stacked_image COMMAND provider_stack_tests)
+  set_tests_properties(provider_stacked_image PROPERTIES TIMEOUT 45)
   target_link_libraries(provider_los_tests PRIVATE gige_mel_provider gige_mel_backend
     gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
   target_link_options(provider_los_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach)
@@ -170,6 +176,12 @@ if(BUILD_TESTING)
   target_link_libraries(provider_status_admission_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
     gige_mel_build_options Threads::Threads)
   add_test(NAME provider_status_admission COMMAND provider_status_admission_tests)
+  add_executable(provider_stack_admission_tests tests/provider_stack_tests.cpp tests/join_observer.cpp)
+  target_link_libraries(provider_stack_admission_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
+    gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
+  target_link_options(provider_stack_admission_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach)
+  add_test(NAME provider_stack_admission COMMAND provider_stack_admission_tests)
+  set_tests_properties(provider_stack_admission PROPERTIES TIMEOUT 45)
 
   # Backend portability: the same MEL-facing scenarios against the synthetic
   # backend and an independent test-only fixture backend. The fixture source is

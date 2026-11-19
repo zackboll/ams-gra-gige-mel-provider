@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(gige_mel_installed_stack_consumer LANGUAGES CXX)
+find_package(GigeMelProvider 0.1 CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+add_executable(installed_stack_consumer main.cpp fixture.cpp)
+target_compile_features(installed_stack_consumer PRIVATE cxx_std_20)
+target_compile_options(installed_stack_consumer PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(installed_stack_consumer PRIVATE gige_mel::provider gige_mel::backend Threads::Threads)

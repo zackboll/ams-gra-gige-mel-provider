@@ -10,6 +10,8 @@
 #include <irmel/library/health-status/HealthStatusChannel.h>
 #include <irmel/library/irmel-types/FrameHeader.h>
 #include <irmel/library/irmel-types/ImageListener.h>
+#include <irmel/library/stacked-image/StackedImageChannel.h>
+#include <irmel/library/stacked-image/StackedImageListener.h>
 
 #include <algorithm>
 #include <atomic>
@@ -65,6 +67,10 @@ static_assert(next_counter(0) == 1 && next_counter(std::numeric_limits<std::uint
 #if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
 thread_local test_seams::UnsupportedStatusHook unsupported_status_hook = nullptr;
 thread_local void* unsupported_status_hook_context = nullptr;
+std::atomic<test_seams::StackHook> stack_hook{nullptr};
+std::atomic<void*> stack_hook_context{nullptr};
+#define GIGE_MEL_STACK_SEAM(point) \
+    do { if (auto hook = stack_hook.load()) hook(test_seams::StackPoint::point, stack_hook_context.load()); } while (false)
 #define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) \
     do { \
         if (unsupported_status_hook) \
@@ -72,6 +78,7 @@ thread_local void* unsupported_status_hook_context = nullptr;
     } while (false)
 #else
 #define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) do {} while (false)
+#define GIGE_MEL_STACK_SEAM(point) do {} while (false)
 #endif
 
 template <class T> mel::RequestFor<T> ready(T value) {
@@ -166,6 +173,7 @@ bool unset_scan(const ir::ScanParam& scan) {
 class ChannelCore;
 class ControlImpl;
 class C2ChannelImpl;
+class HostBuffer;
 struct StreamState;
 
 struct Runtime {
@@ -181,6 +189,8 @@ struct Runtime {
     backend::CameraConfiguration configuration;
     backend::CameraCapabilities camera_capabilities;
     backend::LosSupport los_support; // immutable after init, before discovery
+    backend::StackSupport stack_support;
+    std::vector<std::weak_ptr<HostBuffer>> registered_memory; // operations
     std::uint64_t los_subscription{0}; // operations; never reused across attachments
     bool initialized{false};
     bool configuration_valid{false};
@@ -189,6 +199,7 @@ struct Runtime {
     std::uint64_t configuration_generation{1};
     std::atomic<std::weak_ptr<ControlImpl>> control;
     std::weak_ptr<ChannelCore> image_channel; // guarded by operations
+    std::weak_ptr<ChannelCore> acquisition_channel; // operations, Image OR Stack
     std::atomic<std::uint64_t> delivered{0}, dropped{0}, rejected{0}, callback_failures{0}, stream_failures{0};
     std::string last_error;
     // Manager lifetime; bounded latest completion and two category observations.
@@ -256,7 +267,17 @@ ir::ChannelCapability capability(const Runtime& runtime, ir::ChannelType type,
     const auto& c = runtime.configuration;
     ir::ChannelCapability cap;
     cap.setChanID(id);
-    if (type != ir::ChannelType::HealthAndStatus) {
+    if (type == ir::ChannelType::StackedImage) {
+        const auto& s = runtime.stack_support;
+        cap.setWidth(s.width);
+        cap.setHeight(s.height);
+        cap.setBitDepth(s.logical_bits);
+        cap.setRowPitch(s.width);
+        cap.setBufferSize(static_cast<std::uint32_t>(s.packed_bytes));
+        cap.setImageSize(static_cast<std::uint32_t>(s.packed_bytes));
+        cap.setNumberOfBands(1);
+        cap.setFormat(ir::PixelFormat::Mono);
+    } else if (type != ir::ChannelType::HealthAndStatus) {
         cap.setWidth(c.width);
         cap.setHeight(c.height);
         const auto layout = backend::image_layout(runtime.camera_capabilities.pixel_format, c.width, c.height);
@@ -353,6 +374,13 @@ public:
     }
     void unbind() { std::lock_guard lock(mutex_); owner_ = nullptr; }
     bool outstanding() const { std::lock_guard lock(mutex_); return state_ != State::available; }
+    bool reserved() const { std::lock_guard lock(mutex_); return owner_ || state_ != State::available; }
+    bool overlaps_reserved(std::uintptr_t start, std::uintptr_t end) const {
+        std::lock_guard lock(mutex_);
+        if (!owner_ && state_ == State::available) return false;
+        const auto other = reinterpret_cast<std::uintptr_t>(address_);
+        return start < other + size_ && other < end;
+    }
     bool acquire(std::size_t minimum_size) {
         std::lock_guard lock(mutex_);
         if (!owner_ || state_ != State::available || size_ < minimum_size) return false;
@@ -377,6 +405,7 @@ private:
 struct StreamState {
     std::shared_ptr<Runtime> runtime;
     std::unique_ptr<backend::IFrameStream> stream;
+    std::unique_ptr<backend::IStackedImageStream> stack_stream;
     std::shared_ptr<ir::ImageListener> listener;
     std::vector<std::shared_ptr<HostBuffer>> buffers;
     backend::CameraConfiguration configuration;
@@ -396,7 +425,7 @@ constexpr const char* bit_items[] = {"gige_mel.configuration_known_valid",
     "gige_mel.owned_acquisition_without_terminal_failure"};
 constexpr const char* fault_codes[] = {"gige_mel.configuration_invalid", "gige_mel.acquisition_failed"};
 constexpr const char* fault_descriptions[] = {"Initialized provider configuration is not known valid",
-    "Logically owned Image acquisition has an observed terminal failure; explicitly disable for cleanup"};
+    "Logically owned Image/Stack acquisition has an observed terminal failure; explicitly disable for cleanup"};
 
 mel::BIT_Configuration bit_catalogue() {
     mel::BIT_Type test;
@@ -586,7 +615,7 @@ public:
         if (is_detached()) return ir::Return::Fail;
         if (type() == ir::ChannelType::HealthAndStatus) return ir::Return::NotSupported;
         if (enabled_) return ir::Return::Fail;
-        if (type() != ir::ChannelType::IRSTImage) return ir::Return::NotSupported;
+        if (type() != ir::ChannelType::IRSTImage && type() != ir::ChannelType::StackedImage) return ir::Return::NotSupported;
         auto host = std::dynamic_pointer_cast<HostBuffer>(buffer);
         if (!host) return ir::Return::BadPointer;
         if (buffers_.size() >= runtime_->settings.maximum_registered_buffers) return ir::Return::Fail;
@@ -595,12 +624,17 @@ public:
         if (status != ir::Return::Success) return status;
         const auto start = reinterpret_cast<std::uintptr_t>(host->getBufferAddress());
         const auto end = start + static_cast<std::size_t>(host->getSize());
-        for (const auto& registered : buffers_) {
-            const auto other = reinterpret_cast<std::uintptr_t>(registered->getBufferAddress());
-            const auto other_end = other + static_cast<std::size_t>(registered->getSize());
-            if (start < other_end && other < end) { host->unbind(); return ir::Return::Fail; }
+        std::erase_if(runtime_->registered_memory, [&](const auto& entry) {
+            const auto registered = entry.lock();
+            return !registered || registered == host || !registered->reserved();
+        });
+        for (const auto& entry : runtime_->registered_memory) {
+            const auto registered = entry.lock();
+            if (registered && registered != host && registered->overlaps_reserved(start, end)) {
+                host->unbind(); return ir::Return::Fail;
+            }
         }
-        try { buffers_.push_back(host); }
+        try { runtime_->registered_memory.push_back(host); buffers_.push_back(host); }
         catch (...) { host->unbind(); throw; }
         return ir::Return::Success;
     }
@@ -626,7 +660,7 @@ public:
         std::lock_guard operation(runtime_->operations);
         if (is_detached()) return ir::Return::Fail;
         if (enabled_) return stream_state_ && stream_state_->failed ? ir::Return::Fail : ir::Return::Success;
-        if (type() != ir::ChannelType::IRSTImage) { enabled_ = true; return ir::Return::Success; }
+        if (type() != ir::ChannelType::IRSTImage && type() != ir::ChannelType::StackedImage) { enabled_ = true; return ir::Return::Success; }
         if (buffers_.empty() || !config_.getImgLstnr()) return ir::Return::Fail;
 
         auto state = std::make_shared<StreamState>();
@@ -643,30 +677,44 @@ public:
         const auto layout = backend::image_layout(runtime_->camera_capabilities.pixel_format,
                                                   state->configuration.width, state->configuration.height);
         if (!layout || layout->image_bytes > std::numeric_limits<std::uint32_t>::max()) return ir::Return::Fail;
-        const auto bytes = layout->image_bytes;
+        const auto bytes = type() == ir::ChannelType::StackedImage ?
+            static_cast<std::size_t>(runtime_->stack_support.packed_bytes) : layout->image_bytes;
         for (const auto& buffer : buffers_) {
             if (buffer->outstanding() || static_cast<std::size_t>(buffer->getSize()) < bytes) return ir::Return::Fail;
         }
         try {
-            auto created = runtime_->device->create_stream();
-            if (!created) { runtime_->report(created.error().message); return ir::Return::Fail; }
-            state->stream = std::move(created).value();
-            auto started = state->stream->start(state->generation);
-            if (!started) { runtime_->report(started.error().message); return ir::Return::Fail; }
+            if (type() == ir::ChannelType::StackedImage) {
+                auto* source = dynamic_cast<backend::IStackedImageSource*>(runtime_->device.get());
+                if (!source || source->stacked_image_support() != runtime_->stack_support) return ir::Return::Fail;
+                auto opened = source->open_stacked_images(state->generation);
+                if (!opened) { runtime_->report(opened.error().message); return ir::Return::Fail; }
+                state->stack_stream = std::move(opened).value();
+                if (!state->stack_stream) return ir::Return::Fail;
+            } else {
+                auto created = runtime_->device->create_stream();
+                if (!created) { runtime_->report(created.error().message); return ir::Return::Fail; }
+                state->stream = std::move(created).value();
+                auto started = state->stream->start(state->generation);
+                if (!started) { runtime_->report(started.error().message); return ir::Return::Fail; }
+            }
             {
                 std::lock_guard lock(runtime_->state_mutex);
                 runtime_->image_active = true;
                 runtime_->acquisition = state;
             }
             stream_state_ = state;
+            runtime_->acquisition_channel = shared_from_this();
             enabled_ = true;
-            if (!start_auxiliary_locked()) throw std::runtime_error("LOS source subscription failed");
-            worker_ = std::thread([state, weak = weak_from_this()] { run(state, weak); });
+            if (!start_auxiliary_locked()) throw std::runtime_error("auxiliary source subscription failed");
+            worker_ = std::thread([state, weak = weak_from_this()] {
+                if (state->stack_stream) run_stacks(state, weak); else run(state, weak);
+            });
             return ir::Return::Success;
         } catch (const std::exception& error) {
             stop_auxiliary_locked();
             state->stopping = true;
             if (state->stream) state->stream->stop();
+            if (state->stack_stream) state->stack_stream->request_stop();
             {
                 // Unpublish while the local state still owns the acquisition,
                 // including thread-construction failure after publication.
@@ -675,6 +723,7 @@ public:
                 runtime_->acquisition.reset();
             }
             stream_state_.reset();
+            runtime_->acquisition_channel.reset();
             enabled_ = false;
             runtime_->report(error.what());
             return ir::Return::Fail;
@@ -700,7 +749,7 @@ public:
     }
 
     void detach_locked() {
-        detached_ = true;
+        { std::lock_guard lock(callback_mutex_); detached_ = true; }
         stop_auxiliary_locked();
         stop_locked();
         // Only defensive destruction involving this runtime may skip its own
@@ -864,21 +913,22 @@ protected:
     std::mutex callback_mutex_;
 
 private:
-    // C2 Standby is the only command allowed to stop the attached Image.
-    // The caller pins Control, C2 and Image, rejects callback reentry, validates
+    // C2 Standby is the only command allowed to stop the attached acquisition.
+    // The caller pins Control, C2 and Image/Stack, rejects callback reentry, validates
     // the request, and holds Runtime::operations (never state/callback mutexes).
     friend class C2ChannelImpl;
     void stop_locked() {
         const bool owned_stream = static_cast<bool>(stream_state_);
         if (stream_state_) {
             stream_state_->stopping = true;
-            stream_state_->stream->request_stop();
+            if (stream_state_->stream) stream_state_->stream->request_stop();
+            if (stream_state_->stack_stream) stream_state_->stack_stream->request_stop();
         }
         if (worker_.joinable()) {
             if (worker_.get_id() == std::this_thread::get_id()) worker_.detach();
             else worker_.join();
         }
-        if (stream_state_) stream_state_->stream->stop();
+        if (stream_state_ && stream_state_->stream) stream_state_->stream->stop();
         if (owned_stream) {
             // Retain the strong stream owner until no snapshot can promote the
             // weak publication. Earlier snapshots release their temporary owner
@@ -886,9 +936,100 @@ private:
             std::lock_guard lock(runtime_->state_mutex);
             runtime_->image_active = false;
             runtime_->acquisition.reset();
+            runtime_->acquisition_channel.reset();
         }
         stream_state_.reset();
         enabled_ = false;
+    }
+
+    static void run_stacks(const std::shared_ptr<StreamState>& state,
+                           const std::weak_ptr<ChannelCore>& weak) noexcept {
+        const auto fail = [&](const char* message, bool callback) {
+            state->failed = true;
+            if (callback) ++state->runtime->callback_failures;
+            else ++state->runtime->stream_failures;
+            state->runtime->report(message);
+        };
+        try {
+            const auto listener = std::dynamic_pointer_cast<ir::StackedImageListener>(state->listener);
+            while (!state->stopping) {
+                auto received = state->stack_stream->receive(50ms);
+                if (state->stopping) break;
+                if (!received) {
+                    if (received.error().code == backend::ErrorCode::timeout) continue;
+                    fail(received.error().message.c_str(), false);
+                    break;
+                }
+                auto lease = std::move(received).value();
+                const auto& d = lease.descriptor();
+                const auto& s = d.product;
+                if (!backend::valid_stack_support(s) || s != state->runtime->stack_support ||
+                    d.configuration_generation != state->generation || !lease.owns_pixels() ||
+                    lease.pixels().size() != s.packed_bytes || !lease.pixels().data()) {
+                    ++state->runtime->rejected;
+                    fail("inconsistent stack descriptor, generation or payload; acquisition stopped", false);
+                    break;
+                }
+                const auto bytes = static_cast<std::size_t>(s.packed_bytes);
+                std::shared_ptr<HostBuffer> target;
+                for (const auto& buffer : state->buffers) if (buffer->acquire(bytes)) { target = buffer; break; }
+                if (!target) { ++state->runtime->dropped; continue; }
+                struct FillGuard {
+                    std::shared_ptr<HostBuffer> buffer;
+                    ~FillGuard() { buffer->cancel_fill(); }
+                } fill{target};
+                ir::StackFrameHeader header(static_cast<std::uint16_t>(s.platform_id),
+                    static_cast<std::uint8_t>(s.txa_fom), static_cast<std::uint16_t>(s.depth),
+                    mel::UCI_ID(s.capability.uuid, s.capability.label),
+                    mel::UCI_ID(s.activity.uuid, s.activity.label), d.stack_id,
+                    static_cast<std::uint32_t>(bytes), static_cast<std::uint16_t>(s.height),
+                    static_cast<std::uint16_t>(s.width), static_cast<std::uint8_t>(s.storage_bits),
+                    static_cast<std::uint8_t>(s.logical_bits), 0);
+                std::memcpy(target->getImageAddress(), lease.pixels().data(), bytes);
+                const auto control_pin = state->runtime->control.load().lock();
+                const auto channel = weak.lock();
+                if (!control_pin || !channel) break;
+                GIGE_MEL_STACK_SEAM(before_admission);
+                {
+                    std::lock_guard lock(channel->callback_mutex_);
+                    if (channel->is_detached() || state->stopping) break;
+                    ++channel->active_metadata_callbacks_;
+                }
+                struct Admission {
+                    ChannelCore& channel;
+                    ~Admission() {
+                        { std::lock_guard lock(channel.callback_mutex_); --channel.active_metadata_callbacks_; }
+                        channel.callback_cv_.notify_all();
+                    }
+                } admission{*channel};
+                GIGE_MEL_STACK_SEAM(after_reservation);
+                // Admission is serialized against detach closure. Join drains
+                // this delivery even when detach begins before user entry.
+                target->publish();
+                ++state->runtime->delivered;
+                CallbackGuard guard(state->runtime.get());
+                try {
+                    const auto result = listener->onImageStack(*channel, header, target);
+                    if (result != ir::Return::Success) {
+                        fail(result == ir::Return::NotSupported ?
+                            "stack callback returned NotSupported; delivered buffer still requires release" :
+                            "stack callback returned failure; delivered buffer still requires release", true);
+                        break;
+                    }
+                } catch (...) {
+                    fail("stack callback threw; delivered buffer still requires release", true);
+                    break;
+                }
+            }
+        } catch (const std::exception& error) {
+            state->failed = true;
+            ++state->runtime->stream_failures;
+            try { state->runtime->report(error.what()); } catch (...) {}
+        } catch (...) {
+            state->failed = true;
+            ++state->runtime->stream_failures;
+        }
+        state->stack_stream->request_stop();
     }
 
     static void run(const std::shared_ptr<StreamState>& state, const std::weak_ptr<ChannelCore>& weak) noexcept {
@@ -1112,6 +1253,15 @@ backend::NavigationReport backend_navigation(const mel::NavigationReport& report
         covariance.getVelocityVelocityVeVe(), covariance.getVelocityVelocityVeVd(), covariance.getVelocityVelocityVdVd()};
     return value;
 }
+
+class StackedImageChannelImpl final : public ChannelCore, public ir::StackedImageChannel {
+public:
+    using ChannelCore::ChannelCore;
+    using ChannelCore::registerMetadataCallback;
+    ir::Return registerMetadataCallback(const Callback<ir::LOS3D_KinematicsType>&) override {
+        return ir::Return::NotSupported;
+    }
+};
 
 class ImageChannelImpl final : public ChannelCore, public ir::ImageChannel {
     struct LosPublisher {
@@ -1463,9 +1613,9 @@ public:
                 if (!valid)
                     reject(backend::ErrorCode::invalid_state, "Standby requires initialized provider and known-valid configuration");
                 else if (active) {
-                    const auto image_pin = runtime_->image_channel.lock();
+                    const auto image_pin = runtime_->acquisition_channel.lock();
                     if (!image_pin || image_pin->is_detached())
-                        reject(backend::ErrorCode::invalid_state, "owned Image acquisition is unavailable for shutdown");
+                        reject(backend::ErrorCode::invalid_state, "owned acquisition is unavailable for shutdown");
                     else {
                         // Reuse disable's Image implementation, not disable()
                         // itself: operations is already held. No buffer release,
@@ -1677,9 +1827,9 @@ private:
             s.active ? mel::MFA_State::Operate : mel::MFA_State::Standby;
         const auto description = !s.initialized ? "Provider not initialized" :
             !s.configuration_valid ? "Actual camera configuration is not known valid" :
-            s.active && s.failed ? "Owned Image acquisition has observed a terminal failure; explicitly disable before recovery" :
-            s.active ? "Image acquisition is logically owned without an observed terminal failure" :
-            "Idle with known valid configuration; explicit Image enable may be attempted (not a physical connection probe)";
+            s.active && s.failed ? "Owned Image/Stack acquisition has observed a terminal failure; explicitly disable before recovery" :
+            s.active ? "Image/Stack acquisition is logically owned without an observed terminal failure" :
+            "Idle with known valid configuration; explicit Image/Stack enable may be attempted (not a physical connection probe)";
         mel::MFA_Status status(state, description,
             "Experimental Mono8 image-stream profile with provider-software BIT and bounded Standby ModeCmd; no task scheduling, scanning, hardware BIT or calibration",
             mel::StateTransitionStatus::NotTransitioning,
@@ -1768,6 +1918,11 @@ public:
                 auto actual = device->configuration();
                 const auto caps = device->capabilities();
                 backend::LosSupport los;
+                backend::StackSupport stacks;
+                if (auto* source = dynamic_cast<backend::IStackedImageSource*>(device.get())) {
+                    stacks = source->stacked_image_support();
+                    if (!backend::valid_stack_support(stacks)) stacks = {};
+                }
                 if (auto* source = dynamic_cast<backend::ILineOfSightSource*>(device.get()))
                     los = source->line_of_sight_support();
                 if (los.frame != backend::LosFrame::sensor_frd_intrinsic_zyx ||
@@ -1788,6 +1943,7 @@ public:
                     runtime_->configuration = actual.value();
                     runtime_->camera_capabilities = caps;
                     runtime_->los_support = std::move(los);
+                    runtime_->stack_support = std::move(stacks);
                     runtime_->configuration_valid = true;
                     runtime_->initialized = true;
                 }
@@ -1808,6 +1964,12 @@ public:
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::IRSTImage, image_id));
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::CommandAndControl, c2_id));
                 capabilities_.push_back(capability(*runtime_, ir::ChannelType::HealthAndStatus, health_id));
+                if (runtime_->stack_support.supported) {
+                    auto uuid = health_uuid;
+                    uuid.back() = 4;
+                    capabilities_.push_back(capability(*runtime_, ir::ChannelType::StackedImage,
+                        mel::UCI_ID(uuid, runtime_->settings.instance + "/stacked-image")));
+                }
             }
             return ir::Return::Success;
         } catch (const std::exception& error) {
@@ -1828,15 +1990,19 @@ public:
         if (!runtime_->initialized) return {};
         const auto type = config.getChannelType();
         if (type != ir::ChannelType::IRSTImage && type != ir::ChannelType::CommandAndControl &&
-            type != ir::ChannelType::HealthAndStatus) return {};
+            type != ir::ChannelType::HealthAndStatus && type != ir::ChannelType::StackedImage) return {};
         const auto found = std::find_if(capabilities_.begin(), capabilities_.end(), [&](const auto& cap) {
-            return cap.getChanID().getUUID() == config.getChanID().getUUID() && cap.getChannelTypes().front() == type;
+            return cap.getChanID().getUUID() == config.getChanID().getUUID() && cap.getChannelTypes().front() == type &&
+                (type != ir::ChannelType::StackedImage || cap.getChanID() == config.getChanID());
         });
         if (found == capabilities_.end()) return {};
         if (std::any_of(channels_.begin(), channels_.end(), [type](const auto& channel) { return channel->type() == type; })) return {};
         if (type == ir::ChannelType::IRSTImage && !config.getImgLstnr()) return {};
+        if (type == ir::ChannelType::StackedImage &&
+            !std::dynamic_pointer_cast<ir::StackedImageListener>(config.getImgLstnr())) return {};
         std::shared_ptr<ChannelCore> channel;
         if (type == ir::ChannelType::IRSTImage) channel = std::make_shared<ImageChannelImpl>(runtime_, config);
+        else if (type == ir::ChannelType::StackedImage) channel = std::make_shared<StackedImageChannelImpl>(runtime_, config);
         else if (type == ir::ChannelType::CommandAndControl) channel = std::make_shared<C2ChannelImpl>(runtime_, config);
         else channel = std::make_shared<HealthChannelImpl>(runtime_, config);
         channels_.push_back(channel);
@@ -1876,6 +2042,10 @@ namespace test_seams {
 void set_unsupported_status_hook(UnsupportedStatusHook hook, void* context) noexcept {
     unsupported_status_hook = hook;
     unsupported_status_hook_context = context;
+}
+void set_stack_hook(StackHook hook, void* context) noexcept {
+    stack_hook_context = context;
+    stack_hook = hook;
 }
 } // namespace test_seams
 #endif

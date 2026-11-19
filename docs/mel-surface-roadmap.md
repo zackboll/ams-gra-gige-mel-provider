@@ -380,7 +380,10 @@ The pinned `InstrumentationReport` carries command ID, size, timestamp, and inst
 
 [StackedImageChannel][stacked] is class-annotated **Required**, while [StackedImageListener][stacked-listener] and its `onImageStack` operation are conditional on image-stack support. The channel's additional `LOS3D_KinematicsType` callback is optional. Record and resolve that distinction for the target profile; do not describe the whole channel as unconditionally optional.
 
-The bootstrap does not expose this channel. Supporting it requires the inherited Channel surface, the appropriate listener in the consumer configuration, `StackFrameHeader`, and delivery through:
+GIGE-MEL-044 implements this channel through the existing Control pathway only
+for explicitly qualified stack sources. The [stack profile](stacked-image-provider.md)
+defines the inherited Channel surface, dynamic listener admission, immutable
+capabilities, header mapping and owned buffer delivery through:
 
 ```cpp
 Return StackedImageListener::onImageStack(
@@ -390,6 +393,14 @@ Return StackedImageListener::onImageStack(
 ```
 
 A set of consecutive frames or a GigE multipart payload is not automatically a valid MEL image stack. Define the stack's spatial/temporal/band semantics, source association, layout, and lifetime before mapping it.
+
+The implemented test-only recording supplies pre-formed Mono8 two-layer test
+volumes, not camera frame concatenation or qualified production TSI. Ordinary
+synthetic and all production SDK adapters remain unsupported/unadvertised.
+Callback non-success stops acquisition without releasing delivered memory.
+Physical TSI meaning, sensor and timing qualification remain open; see
+[validation](tasks/GIGE-MEL-044-validation.md). LOS3D and alternative registry
+factories remain unsupported. Class presence alone is not full conformance.
 
 ## Cross-cutting obligations
 

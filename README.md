@@ -406,9 +406,9 @@ for the working payload, limits, results, callback ordering and detach policy.
 | AMS Math | `00be45190f0e47d268cece8b8c2f8fb58b5418d2` |
 | nlohmann/json 3.12.0 (private, MIT) | `55f93686c01528224f448c19128836e7df245f72` |
 
-The checked-in closure is 91 unchanged headers plus six original license/intent
+The checked-in closure is 94 unchanged headers plus six original license/intent
 files. It requires no Boost, RF MEL, VITA implementation, or upstream shared
-library. Every normal build verifies the 97 source files against the checked-in
+library. Every normal build verifies the 100 source files against the checked-in
 manifest. Details and source links are in
 [upstream provenance](docs/upstream-provenance.md).
 

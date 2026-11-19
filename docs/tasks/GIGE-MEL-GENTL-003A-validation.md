@@ -153,3 +153,33 @@ matrix, live matrix, source/tree identities and single exact-HEAD hosted-CI
 snapshot are reported in the PR R1 delivery comment. Historical pre-R1 results
 above do not establish that the reviewed findings were fixed. All new evidence
 must come from the corrected source; simulator results never qualify hardware.
+
+## Final main integration after PR #46
+
+Incoming main: `1ba4f6dc00e391d2749224d8333269f6c52e1a26`, the ordinary merge
+of PR #46 (StackedImageChannel), including implementation `67d0bce`, validation
+`9471c2a` and final qualification `dbc7877`. Main is incorporated with an ordinary
+merge commit, not a rebase or replacement of the accepted R1 correction.
+
+The **only actual content conflict** was `docs/implementation-profile.md`: both
+branches inserted a section at the top. Resolution retains both the isolated
+GenTL wire-tooling section and the source-backed stacked-image section unchanged.
+`CMakeLists.txt`, README and surface roadmap merged automatically; reviewed output
+retains wire regression registrations, default-OFF optional GenTL options and both
+stack provider/admission targets, along with installed-consumer CI. No pinned
+header/manifest was regenerated: incoming upstream files are byte-identical to
+main. Shared backend additions define a separate optional stack-source interface;
+existing camera-device/backend virtual contracts are unchanged, so the
+GenTL backend needs no override or source change. No GenTL streaming/Stack bridge
+was introduced. The R1 preflight, full endpoint ACK key and mandatory inspection
+paths are byte-identical to accepted R1 HEAD `19e2ba3`.
+
+Exact integrated commit/tree, ordinary merge identity, compiler/sanitizer CTest
+counts, installed-consumer results, 12-scenario simulator results and the single
+post-push exact-HEAD hosted snapshot are recorded in the PR integration delivery
+comment. Qualification is executed against the committed integrated source; this
+section does not reinterpret earlier test results as integration evidence.
+External evidence root: `/home/zboll/gentl-003a-main-integration-evidence/`.
+Physical cameras and proprietary producers remain untested and unauthorized;
+fixture/simulator tests do not establish hardware qualification. Euresys remains
+unavailable, Balluff's prior offline crash unresolved; GENTL-004 remains gated.
