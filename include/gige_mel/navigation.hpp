@@ -33,8 +33,8 @@ struct PositionVelocityCovariance {
     bool operator==(const PositionVelocityCovariance&) const = default;
 };
 
-// Values and units are preserved from the navigation source, without clock or
-// coordinate conversion. Timestamps retain their source's unspecified epoch.
+/// Values and units are preserved from the navigation source, without clock or
+/// coordinate conversion. Timestamps retain their source's unspecified epoch.
 struct NavigationReport {
     std::chrono::nanoseconds system_time{};
     NavigationSolutionState state{NavigationSolutionState::aligning};

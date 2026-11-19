@@ -12,6 +12,7 @@ namespace gige_mel::selection {
 // This binding name does not replace the profile's historical diagnostic ID.
 inline constexpr auto mono_free_running_v1 = backend::profiles::mono_free_running_v1;
 
+/// Internal catalog of explicitly registered backend and camera-profile factories.
 class BackendCatalog {
 public:
     using BackendResult = backend::Result<std::shared_ptr<backend::ICameraBackend>>;

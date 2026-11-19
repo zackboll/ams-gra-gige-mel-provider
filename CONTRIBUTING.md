@@ -28,6 +28,31 @@ before pushing also run it with `--history origin/main`. CI repeats the Git-blob
 checks. See [Pleora integration](docs/pleora-integration.md) for licensing and
 qualification restrictions. A successful download does not grant vendor rights.
 
+## Documentation
+
+Follow [the local Doxygen build instructions](README.md#build-the-documentation)
+and open the generated landing page in `build/documentation/docs/html/`. Review
+the installed (`include/gige_mel/`), camera extension (internal, uninstalled), and
+core implementation (internal) sections. The target checks local links and API
+entry points and writes warnings to `build/documentation/docs/doxygen-warnings.log`.
+See the [warning baseline](docs/documentation-warnings.md) for known limitations.
+Do not commit generated pages or treat extracted internals as stable API.
+
+For a new camera profile, update [camera-profile authoring](docs/camera-profile-authoring.md)
+or a linked model guide with feature/readback requirements, ownership, module
+compatibility and qualification limits. For backend changes, keep the
+[backend authoring contract](docs/backend-authoring.md) current and document
+ownership, cancellation, error and thread semantics on the relevant C++
+declarations. Put API comment improvements next to project declarations and
+maintainer notes next to the relevant implementation; do not edit pinned upstream
+headers. Use the [documentation index](docs/index.md) for new guide navigation.
+
+The [documentation workflow](.github/workflows/documentation.yml) builds the exact
+PR head and validates without deploying. A successful `main` push build uploads
+the same-run Pages artifact, then separate jobs deploy and verify the live source
+commit and critical entry points. A repository administrator must set **Settings →
+Pages → Build and deployment → Source → GitHub Actions** before the first deploy.
+
 ## Dependency maintenance
 
 Ordinary builds verify checked-in upstream bytes and perform no downloads.

@@ -1,0 +1,31 @@
+/** @page api_installed Installed C++ interfaces
+
+The four project headers under `include/gige_mel/` are installed by
+`GigeMelProvider`. Start with the @ref md_docs_2architecture "architecture",
+the @ref md_docs_2implementation-profile "MEL implementation profile", and the
+installation and capture examples linked from the @ref md_docs_2index "landing page".
+
+Ordinary native MEL consumers use the pinned upstream factory declarations and
+channels; this reference does not regenerate the upstream MEL API. The installed
+project C++ backend contract is a **source-level integration contract, not a
+stable cross-toolchain plugin ABI**. The upstream factory lookup symbols have C
+linkage but use C++ types and are not a C API.
+
+Header | Entry points
+------ | ------------
+@ref include/gige_mel/provider.hpp "provider.hpp" | @ref gige_mel::make_api_manager, @ref gige_mel::ProviderSettings, @ref gige_mel::ProviderStatistics and @ref gige_mel::provider_statistics
+@ref include/gige_mel/backend.hpp "backend.hpp" | @ref gige_mel::backend::ICameraBackend, @ref gige_mel::backend::ICameraDevice, @ref gige_mel::backend::IFrameStream, @ref gige_mel::backend::FrameLease, @ref gige_mel::backend::FrameDescriptor, @ref gige_mel::backend::CameraConfiguration and @ref gige_mel::backend::CameraCapabilities
+@ref include/gige_mel/navigation.hpp "navigation.hpp" | @ref gige_mel::backend::NavigationReport and optional @ref gige_mel::backend::INavigationSink
+@ref include/gige_mel/line_of_sight.hpp "line_of_sight.hpp" | @ref gige_mel::backend::LosSupport and @ref gige_mel::backend::LosObservation
+
+## Optional source capabilities
+
+- LOS: @ref gige_mel::backend::ILineOfSightSource and
+  @ref gige_mel::backend::ILineOfSightStream.
+- Stacked images: @ref gige_mel::backend::IStackedImageSource,
+  @ref gige_mel::backend::IStackedImageStream, @ref gige_mel::backend::StackSupport,
+  and @ref gige_mel::backend::StackLease.
+
+The presence of a C++ interface is not a guarantee that a source supports the
+capability; see @ref md_docs_2status "current capability and evidence status".
+*/

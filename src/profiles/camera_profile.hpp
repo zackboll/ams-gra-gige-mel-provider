@@ -12,12 +12,12 @@ inline constexpr std::string_view mono_free_running_v1 = "mono_free_running_v1";
 using ConnectionCheck = std::function<Status()>;
 using BeforeWrite = std::function<Status(std::string_view)>;
 
-// Each implementation owns its distinct, immutable open-time native snapshot.
-// No native handles or borrowed feature services may be retained. Native methods
-// run under the adapter's existing device lock; validate_frame must also support
-// concurrent receive. Callbacks are synchronous, borrowed and must not reenter.
-// A state must own everything its destructor and methods need independently of
-// its parent profile (which need not outlive a retained native-buffer lease).
+/// Internal per-device policy with its own immutable open-time native snapshot.
+/// No native handles or borrowed feature services may be retained. Native methods
+/// run under the adapter's existing device lock; validate_frame must also support
+/// concurrent receive. Callbacks are synchronous, borrowed and must not reenter.
+/// A state must own everything its destructor and methods need independently of
+/// its parent profile (which need not outlive a retained native-buffer lease).
 class ICameraProfileState {
 public:
     virtual ~ICameraProfileState() = default;
@@ -36,6 +36,7 @@ public:
     virtual FrameDecision validate_frame(const NativeFrameFacts&, const CameraConfiguration&, PixelFormat) const = 0;
 };
 
+/// Internal, uninstalled camera-model policy that creates per-device state.
 class ICameraProfile {
 public:
     virtual ~ICameraProfile() = default;

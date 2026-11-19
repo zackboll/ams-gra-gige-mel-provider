@@ -31,9 +31,10 @@ struct FloatFeature {
 // them has no side effect. Availability and access are checked on each call.
 enum class ReadAccess { readable, read_write };
 
-// Callers retain the native device and serialize the ENTIRE profile operation
-// (snapshot, plan, ordered writes and readback). Implementations do not retain
-// names or return borrowed SDK data. No native node or handle crosses this seam.
+/// Internal typed feature service; no native node or handle crosses this seam.
+/// Callers retain the device and serialize the entire profile operation
+/// (snapshot, plan, ordered writes and readback). Implementations do not retain
+/// names or return borrowed SDK data.
 class IDeviceFeatures {
 public:
     virtual ~IDeviceFeatures() = default;

@@ -1,0 +1,91 @@
+name: C++ documentation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DOC_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+concurrency:
+  group: documentation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ env.DOC_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Install the pinned documentation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends graphviz=2.42.2-9build1
+          sh scripts/install_doxygen.sh
+      - name: Generate and validate the SDK-free site
+        run: |
+          test "$(git rev-parse HEAD)" = "$DOC_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          git show -s --format='Source commit: %H%nSource tree: %T'
+          python3 scripts/check_proprietary.py
+          python3 scripts/vendor_upstream.py --verify
+          python3 scripts/verify_json.py
+          cmake -S . -B build/documentation -G Ninja -DBUILD_TESTING=OFF \
+            -DGIGE_MEL_BUILD_DOCS=ON \
+            -DGIGE_MEL_BUILD_ARAVIS=OFF -DGIGE_MEL_BUILD_PLEORA=OFF \
+            -DGIGE_MEL_BUILD_GENTL_PROBE=OFF -DGIGE_MEL_BUILD_GENTL_BACKEND=OFF \
+            -DDOXYGEN_EXECUTABLE="$PWD/build/doc-tools/doxygen-1.14.0/bin/doxygen"
+          cmake --build build/documentation --target docs
+      - name: Retain Doxygen warnings for review
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: doxygen-warnings-${{ github.run_attempt }}-${{ env.DOC_SOURCE_SHA }}
+          path: build/documentation/docs/doxygen-warnings.log
+          if-no-files-found: warn
+      - name: Upload the verified main-only Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: build/documentation/docs/html
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy the verified same-run artifact
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+
+  verify-live:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify the published revision and critical entry points
+        run: python3 -B scripts/check_docs.py --live --commit "$DOC_SOURCE_SHA"

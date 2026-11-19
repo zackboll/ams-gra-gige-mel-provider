@@ -1,16 +1,18 @@
-# Documentation
+# GigE MEL Provider documentation
 
 This is the canonical navigation entry point for the native C++20 AMS-GRA IR
 MEL **provider**. Start with the [README](../README.md) for the SDK-free build
 and the [current capability and evidence status](status.md) for scope and limits.
 MEL means MFA Encapsulation Layer, not Matrox MIL.
 
+<!-- generated-api-navigation -->
+
 ## Use and integrate
 
 | Need | Start here |
 | --- | --- |
 | Build and capture without a camera SDK | [README quick start](../README.md#sdk-free-quick-start), [native capture example](../examples/capture.cpp) |
-| Understand supported operations and lifecycle | [Implementation profile](implementation-profile.md), [configuration](configuration.md) |
+| Integrate a MEL consumer and understand supported operations | [Implementation profile](implementation-profile.md), [configuration](configuration.md) |
 | Understand loading, installation and interface boundaries | [Architecture](architecture.md), [installed consumer example](../tests/install_consumer/) |
 | Integrate Aravis | [Aravis integration and timing gates](aravis-integration.md) |
 | Integrate Pleora | [Pleora integration, licensing and evaluation limits](pleora-integration.md), [consolidation disposition](pleora-consolidation.md) |
@@ -81,6 +83,20 @@ milestone snapshots; a design proposal is not proof of implementation.
   [copy-first memory decision](adr/0002-copy-first-memory.md),
   [upstream provenance](upstream-provenance.md).
 
+## Build and browse the reference
+
+Enable `GIGE_MEL_BUILD_DOCS` in a separate build directory and build the `docs`
+target. See [README: build the documentation](../README.md#build-the-documentation)
+for commands and tool versions, and [contributor guidance](../CONTRIBUTING.md#documentation)
+for validation and deployment. Browse `build/documentation/docs/html/index.html`
+for the three reference sections and search; use the local HTTP server for search.
+The four project headers under `include/gige_mel/` are installed. The camera
+extension and core sections describe uninstalled source and are not public API.
+
+The [planned GitHub Pages site](https://zackboll.github.io/ams-gra-gige-mel-provider/)
+will be deployed only from validated `main` pushes. Historical engineering records
+are linked to GitHub from the generated site, not copied as test evidence.
+
 ## Documentation follow-up
 
 The following are remaining gaps, not implemented features or claims about the
@@ -89,8 +105,9 @@ DOC-GIGE-006:
 
 | Campaign item | Remaining documentation work |
 | --- | --- |
-| DOC-GIGE-002 | Doxygen/GitHub Pages generation, publication and source-link/navigation validation; separate public headers from internal developer references. No pipeline or generated site is included here. |
+| DOC-GIGE-002 | Doxygen generation, navigation and source checks are available; production publication and live verification are separate `main`-only gates. |
 | DOC-GIGE-003 | Consolidated installed-consumer integration guide: loading, CMake package, callback/release/teardown examples and error handling. |
 | DOC-GIGE-004 | End-to-end camera-profile tutorial with minimal implementation, independent matched-build module and qualification checklist. |
 | DOC-GIGE-005 | MEL requirements-to-implementation/test cross-reference; distinguish required gaps, conditional support and pinned annotation/enum blockers. |
 | DOC-GIGE-006 | Evidence index by SDK/camera/firmware and environment, reproducible validation commands, plus a broader stale-text/link audit of milestone-heavy references. |
+| Core API comments | Expand declaration-level ownership, lifetime and error documentation in the project headers and implementation sources. Source extraction is not complete contract documentation. |

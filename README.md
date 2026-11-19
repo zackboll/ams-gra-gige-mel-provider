@@ -60,6 +60,7 @@ authoritative. `dev`, `release`, `asan` (Address/UndefinedBehaviorSanitizer) and
 | --- | --- | --- |
 | `BUILD_TESTING` | `ON` | CTest contracts and fixture builds |
 | `GIGE_MEL_BUILD_EXAMPLES` | `ON` | Native capture and internal selection examples |
+| `GIGE_MEL_BUILD_DOCS` | `OFF` | Opt-in Doxygen reference; no effect on normal builds, CTest, or the installed package |
 | `GIGE_MEL_WARNINGS_AS_ERRORS` | `ON` | Treat project compiler warnings as errors |
 | `GIGE_MEL_SANITIZERS` | empty | GCC/Clang sanitizer list; set by sanitizer presets |
 | `GIGE_MEL_BUILD_ARAVIS` | `OFF` | Internal adapter; requires exactly Aravis 0.8.36. [Setup and tests](docs/aravis-integration.md) |
@@ -141,8 +142,30 @@ tracks required, conditional and optional work; channel stubs are not conformanc
 - **Design and evidence:** [documentation index](docs/index.md#evidence-and-design-history),
   [historical validation record](docs/validation.md), [repository instructions](AGENTS.md).
 
-Generated API documentation and GitHub Pages publication are follow-up work
-(DOC-GIGE-002), not part of this repository's current documentation pipeline.
+## Build the documentation
+
+The opt-in `docs` target uses **Doxygen 1.14.0** and Graphviz (`dot`). No
+optional camera SDK, producer, or hardware is needed. From the repository root
+on Linux x86-64, with Graphviz installed:
+
+```sh
+sh scripts/install_doxygen.sh  # official release, checked against a pinned SHA-256
+cmake -S . -B build/documentation -G Ninja -DBUILD_TESTING=OFF \
+  -DGIGE_MEL_BUILD_DOCS=ON \
+  -DDOXYGEN_EXECUTABLE="$PWD/build/doc-tools/doxygen-1.14.0/bin/doxygen"
+cmake --build build/documentation --target docs
+python3 -m http.server 8000 --bind 127.0.0.1 --directory build/documentation/docs/html
+```
+
+Open [the local site](http://127.0.0.1:8000/) while the server is running. The
+landing page separates the installed `include/gige_mel/` contract, uninstalled
+camera extension interfaces, and internal runtime source reference. The installed
+backend headers are a C++ source contract, not a stable cross-toolchain plugin ABI.
+
+The [planned Pages URL](https://zackboll.github.io/ams-gra-gige-mel-provider/)
+is not yet verified. Pull requests build and validate the site without publishing;
+only validated `main` pushes can deploy. For profile/backend documentation and API
+comment guidance, see [Contributing: documentation](CONTRIBUTING.md#documentation).
 
 ## Dependencies and licensing
 
