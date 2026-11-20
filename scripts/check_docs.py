@@ -109,6 +109,27 @@ DESIGN = guide("design-decisions")
 REFERENCE_INDEXES = ("namespaces.html", "namespacemembers.html", "annotated.html", "classes.html",
                      "hierarchy.html", "functions.html", "files.html", "globals.html")
 API_PAGES = ("api_installed.html", "api_extensions.html", "api_core.html")
+EXTENSIONS = API_PAGES[1]
+EXTENSION_SECTIONS = ("extension_profile", "extension_modules", "extension_registers", "extension_navigation")
+EXTENSION_TYPES = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
+    "backend::profiles": ("ICameraProfile", "ICameraProfileState", "NativeFrameFacts"),
+    "backend::device_features": ("IDeviceFeatures",),
+    "backend::profiles::module": ("Descriptor",),
+    "selection": ("BackendCatalog", "LoadedProfile"),
+    "backend::device_registers": ("IRegisterDevice", "IDeviceRegisters"),
+    "controlled_gvcp": ("IControlledRegisters", "Client", "ControlOwner"),
+}.items() for name in names)
+EXTENSION_METHODS = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
+    "backend::profiles::ICameraProfile": ("open",),
+    "backend::profiles::ICameraProfileState": ("configuration", "apply", "preflight", "validate_frame"),
+    "backend::device_features::IDeviceFeatures": ("read_integer_feature", "write_integer"),
+    "selection::BackendCatalog": ("register_backend", "create"),
+    "selection": ("select_session", "load_profile_module"),
+    "backend::device_registers::IRegisterDevice": ("with_registers",),
+    "backend::device_registers::IDeviceRegisters": ("write_memory",),
+    "controlled_gvcp::Client": ("create",),
+    "controlled_gvcp::ControlOwner": ("acquire", "shutdown"),
+}.items() for name in names)
 HIERARCHY = {
     HOME: (GETTING_STARTED, CAMERA, MEL, API, ENGINEERING),
     GETTING_STARTED: (QUICK_START[0], CONSUMER_GUIDE, STATUS),
@@ -154,7 +175,9 @@ ENTRY_LINKS = {
                      "navigation_8hpp.html", "line__of__sight_8hpp.html"),
     "api_installed.html": (CONSUMER_GUIDE, BACKEND_AUTHORING),
     PROFILE_TUTORIAL: (*HIERARCHY[PROFILE_TUTORIAL], "api_extensions.html"),
-    "api_extensions.html": (PROFILE_TUTORIAL, PROFILE_EXAMPLES),
+    EXTENSIONS: (PROFILE_TUTORIAL, PROFILE_EXAMPLES, guide("camera-profile-authoring"), BACKEND_AUTHORING,
+                 guide("runtime-selection"), guide("device-register-transport"), EXPERIMENTS,
+                 guide("navigation-backend-forwarding"), QUALIFICATION),
     PROFILE_EXAMPLES: ("api_extensions.html", PROFILE_TUTORIAL, "camera__profile_8hpp.html",
                        "device__features_8hpp.html", "frame__policy_8hpp.html", "profile__module_8hpp.html",
                        "profile__loader_8hpp.html"),
@@ -414,21 +437,89 @@ def section_targets(page, parsed):
     return targets
 
 
+def member_detail(text, anchor):
+    # Doxygen emits an anchor and heading before each detailed memdoc.
+    start = re.search(rf'<a id="{re.escape(anchor)}"[^>]*></a>\s*<h2 class="memtitle">', text)
+    return text[start.end():].split('<h2 class="memtitle">', 1)[0] if start else ""
+
+
+MEMBER_PROSE = re.compile(r'<div class="memdoc">\s*<p>(.*?)</p>', re.S)
+
+
+def has_member_description(detail):
+    member = MEMBER_PROSE.search(detail)
+    prose = re.sub(r"<[^>]+>", "", member[1]).strip() if member else ""
+    return bool(prose) and not prose.startswith(("Implemented in ", "Reimplemented "))
+
+
 def check_installed_methods(root, targets):
     for symbol in INSTALLED_METHODS:
         target, anchor = targets.get(symbol, ("", ""))
         if not anchor or target.endswith("_source.html"):
             raise ValueError(f"Installed API: no member documentation link for {symbol}")
         text = (root / target).read_text(encoding="utf-8")
-        # Doxygen emits an anchor and heading before each detailed memdoc. Check
-        # its leading prose paragraph, not the later automatic source/inheritance text.
-        start = re.search(rf'<a id="{re.escape(anchor)}"[^>]*></a>\s*<h2 class="memtitle">', text)
-        detail = text[start.end():].split('<h2 class="memtitle">', 1)[0] if start else ""
-        member = re.search(r'<div class="memdoc">\s*<p>(.*?)</p>', detail, re.S)
-        prose = re.sub(r"<[^>]+>", "", member[1]).strip() if member else ""
-        if not prose or prose.startswith(("Implemented in ", "Reimplemented ")):
+        if not has_member_description(member_detail(text, anchor)):
             raise ValueError(f"Installed API: no generated description for {symbol} ({target}#{anchor})")
     print(f"Verified {len(INSTALLED_METHODS)} installed API method descriptions")
+
+
+def check_extension_member(symbol, detail):
+    signature, _, _ = detail.partition('<div class="memdoc">')
+    name = re.search(r'<td class="memname">(.*?)</td>', signature, re.S)
+    if (not name or re.sub(r"<[^>]+>", "", name[1]).split()[-1:] != [symbol]
+            or (symbol.endswith("::register_backend") and "ProfileBackendConstructor" not in signature)):
+        raise ValueError(f"{EXTENSIONS}: wrong member declaration for {symbol}")
+    if not has_member_description(detail):
+        raise ValueError(f"{EXTENSIONS}: no generated description for {symbol}")
+
+
+def check_internal_extensions(root, pages, search_index):
+    extension = pages[EXTENSIONS]
+    targets = {label: local_target(EXTENSIONS, href) for href, label in extension.body_links}
+    indexed = {local_target("annotated.html", href) for href, _ in pages["annotated.html"].body_links}
+    installed = {local_target("api_installed.html", href) for href, _ in pages["api_installed.html"].body_links}
+    for symbol in (*EXTENSION_TYPES, *EXTENSION_METHODS):
+        target, anchor = targets.get(symbol) or ("", "")
+        member = symbol in EXTENSION_METHODS
+        owner = symbol.rsplit("::", 1)[0] if member else symbol
+        if (target not in pages or bool(anchor) != member
+                or "::".join(label for _, label in pages[target].breadcrumb) != owner):
+            raise ValueError(f"{EXTENSIONS}: no link to the declaration of {symbol}")
+        if not member and (target, "") not in indexed:
+            raise ValueError(f"{EXTENSIONS}: type missing from generated index: {symbol}")
+        if (target, anchor) in installed:
+            raise ValueError(f"Installed Interfaces must not list internal declaration {symbol}")
+        search_url = f"../{target}" + (f"#{anchor}" if anchor else "")
+        if f"'{search_url}'" not in search_index:
+            raise ValueError(f"{EXTENSIONS}: declaration missing from search: {symbol}")
+        if member:
+            check_extension_member(symbol, member_detail((root / target).read_text(encoding="utf-8"), anchor))
+
+    for section in EXTENSION_SECTIONS:
+        if section not in extension.anchors or f"'../{EXTENSIONS}#{section}'" not in search_index:
+            raise ValueError(f"{EXTENSIONS}: missing section or search entry: {section}")
+
+    # Test against the generated detail for a real link, then substitute a
+    # different valid anchor on the same class page (existence alone is insufficient).
+    symbol = "gige_mel::backend::profiles::ICameraProfileState::configuration"
+    target, anchor = targets[symbol]
+    text = (root / target).read_text(encoding="utf-8")
+    detail = member_detail(text, anchor)
+    no_description, removed = MEMBER_PROSE.subn('<div class="memdoc">', detail, count=1)
+    if removed != 1:
+        raise ValueError(f"{EXTENSIONS}: could not remove description for negative control")
+    wrong_anchor = targets[symbol.rsplit("::", 1)[0] + "::apply"][1]
+    for invalid_detail, reason in ((no_description, "no generated description"),
+                                   (member_detail(text, wrong_anchor), "wrong member declaration")):
+        try:
+            check_extension_member(symbol, invalid_detail)
+        except ValueError as error:
+            if reason not in str(error):
+                raise
+        else:
+            raise ValueError(f"{EXTENSIONS}: negative control accepted {reason}")
+    print(f"Verified {len(EXTENSION_TYPES)} internal types, {len(EXTENSION_METHODS)} member descriptions, "
+          "section search and 2 negative controls (missing description, wrong member anchor)")
 
 
 def check_entry_links(page, body_links):
@@ -581,6 +672,7 @@ def validate_site(root, sha, sources, evidence_ids=None):
 
     if errors:
         raise ValueError("Documentation validation failed:\n" + "\n".join(sorted(set(errors))))
+    check_internal_extensions(root, pages, search_index)
     check_navigation(root, pages, search_index)
     print(f"Verified {len(pages)} HTML pages, {len(sources)} source browsers, search, "
           f"navigation and publication boundary at {sha}")

@@ -9,29 +9,100 @@ See the @ref md_docs_2camera-profile-authoring "camera-profile authoring contrac
 @ref md_docs_2backend-authoring "backend authoring guide" for ownership and
 qualification requirements.
 
-Area | Entry points
----- | ------------
-@ref src/profiles/camera_profile.hpp "Camera model policy" | @ref gige_mel::backend::profiles::ICameraProfile and its per-device @ref gige_mel::backend::profiles::ICameraProfileState
-@ref src/device_features.hpp "Typed feature service" | @ref gige_mel::backend::device_features::IDeviceFeatures
-@ref src/profiles/profile_module.hpp "Module contract" | @ref gige_mel::backend::profiles::module::Descriptor; @ref gige_mel::selection::load_profile_module in @ref src/selection/profile_loader.hpp "profile_loader.hpp"
-@ref src/selection/backend_catalog.hpp "Catalog" and @ref src/selection/session_selection.hpp "session selection" | @ref gige_mel::selection::BackendCatalog and @ref gige_mel::selection::select_session
-@ref src/profiles/frame_policy.hpp "Common frame facts and policy" | @ref gige_mel::backend::profiles::NativeFrameFacts and @ref gige_mel::backend::profiles::plan_pool
-@ref src/profiles/mono_free_running.hpp "Monochrome free-running policy" | @ref gige_mel::backend::profiles::mono_free_running::validate_frame and @ref gige_mel::backend::profiles::mono_free_running::plan_writes
-@ref src/profiles/mono_free_running_device.hpp "Device configuration transactions" | @ref gige_mel::backend::profiles::mono_free_running::read_configuration and @ref gige_mel::backend::profiles::mono_free_running::apply_configuration
+@section extension_profile Profile lifecycle and feature services
 
-The profile checks model compatibility on explicit device open. It creates
-independently owned per-device state for configuration and frame admission.
-The feature service is a borrowed, typed bridge to the adapter; policy never
-retains native handles. The backend still owns native acquisition and leases,
-and the provider owns MEL publication. A catalog binds compatible factories
-without camera I/O; it does not replace open-time admission.
+Register factories and select a binding without camera I/O. On explicit device
+open, the adapter invokes @ref gige_mel::backend::profiles::ICameraProfile::open
+on its chosen @ref gige_mel::backend::profiles::ICameraProfile. The returned
+@ref gige_mel::backend::profiles::ICameraProfileState owns admission facts and
+capabilities. It applies and reads back configuration, checks preflight before
+acquisition, and admits frames using the frozen run settings. State can retire
+independently of its parent profile; the backend still owns native acquisition
+and leases, and the provider owns MEL publication.
 
-## Matched-C++ modules only
+Use @ref gige_mel::backend::profiles::ICameraProfileState::configuration for
+fresh readback, @ref gige_mel::backend::profiles::ICameraProfileState::apply for
+ordered writes, and @ref gige_mel::backend::profiles::ICameraProfileState::preflight
+to check whether the device is ready for a run. See the shared
+@ref gige_mel::backend::profiles::mono_free_running::apply_configuration for a
+concrete implementation of partial failure and no rollback.
+@ref gige_mel::backend::device_features::IDeviceFeatures is borrowed and
+serialized by the adapter; policy must not retain it or SDK handles. Compare
+@ref gige_mel::backend::device_features::IDeviceFeatures::read_integer_feature
+with @ref gige_mel::backend::device_features::IDeviceFeatures::write_integer
+because native constraints can change between planning and each setter.
 
-The discovery symbol has C linkage, but profile objects, types and ownership
-cross a C++ boundary. Build trusted modules against the same locked source and
-generated build identity, with the matched compiler, standard library/ABI and
-compatible build settings. Descriptor versions alone do not confer compatibility.
-See @ref md_docs_2runtime-selection "runtime selection and explicit module loading"
-for admission checks and lifetime rules. This is not an SDK plugin ABI.
+For acquisition, @ref gige_mel::backend::profiles::plan_pool checks capacity
+separately from @ref gige_mel::backend::profiles::ICameraProfileState::validate_frame,
+which admits @ref gige_mel::backend::profiles::NativeFrameFacts with a checked
+source span. Neither a pool size nor a retained owner proves arbitrary pointer
+provenance. See @ref src/profiles/frame_policy.hpp "frame facts and layout source".
+
+@section extension_modules Module loading and selection
+
+@ref gige_mel::selection::BackendCatalog owns the factories. Use
+@ref gige_mel::selection::BackendCatalog::register_backend(std::string,std::vector<std::string>,gige_mel::selection::BackendCatalog::ProfileBackendConstructor) "gige_mel::selection::BackendCatalog::register_backend"
+to declare compatibility and @ref gige_mel::selection::BackendCatalog::create
+to construct the exact pair. @ref gige_mel::selection::select_session binds a
+specific device ID without inspecting it. None of these operations certify a
+camera model or grant control authority.
+
+Use @ref gige_mel::selection::load_profile_module only for a trusted library at
+an explicit path; validation is not a sandbox. @ref gige_mel::backend::profiles::module::Descriptor
+and @ref gige_mel::selection::LoadedProfile describe validation, creation and
+lifetime pins. Discovery uses C linkage, but virtual objects, STL types and
+shared ownership cross a matched-C++ boundary. Versions and build identity do
+not prove toolchain/ABI parity or hardware compatibility. The existing identity
+hashes header bytes, so even comment-only edits in that closure require a host
+and module rebuild from matching inputs. See
+@ref md_docs_2runtime-selection "runtime selection and explicit module loading".
+
+@section extension_registers Register and transport boundaries
+
+An explicitly opened adapter may expose @ref gige_mel::backend::device_registers::IRegisterDevice.
+@ref gige_mel::backend::device_registers::IRegisterDevice::with_registers lends
+an @ref gige_mel::backend::device_registers::IDeviceRegisters under the device
+operation lock. @ref gige_mel::backend::device_registers::IDeviceRegisters::write_memory
+can change device state outside GenApi policy. This 4096-byte native SDK
+service is not part of profile module v1, does not bound in-flight SDK calls,
+and does not guarantee the number of SDK or wire transactions.
+
+The separate 508-byte @ref gige_mel::controlled_gvcp::IControlledRegisters
+experiment's @ref gige_mel::controlled_gvcp::Client uses
+@ref gige_mel::controlled_gvcp::Client::create for an explicit loopback endpoint.
+The fixture-only @ref gige_mel::controlled_gvcp::ControlOwner
+adds explicit @ref gige_mel::controlled_gvcp::ControlOwner::acquire and
+@ref gige_mel::controlled_gvcp::ControlOwner::shutdown. Neither is a production
+acquisition transport; SDK coexistence and cross-session stale ACK fencing are
+unqualified. See @ref md_docs_2device-register-transport "device register/memory access" and
+@ref md_docs_2backend-transport-experiments "transport experiments and original validation records".
+
+@subsection extension_navigation Future sensor-specific MEL operations
+
+@verbatim
+MEL ImageChannel::send(NavigationReport)
+    ↓
+Common MEL validation
+    ↓
+Optional INavigationSink
+    ↓
+Future sensor-specific navigation handler
+    ↓
+Qualified device-control / register transport
+    ↓
+Detector-defined staging and acceptance protocol
+@endverbatim
+
+Today the common provider validates navigation and can submit it through the
+optional backend-independent @ref gige_mel::backend::INavigationSink. Aravis and
+Pleora expose internal register/memory access; controlled GVCP is an experimental
+loopback foundation. These pieces are not wired together: there is no
+profile-provided navigation handler, sensor-specific wire serializer or physical
+GVCP navigation transfer through the common provider. Detector acknowledgement
+and processing, navigation-to-image correlation, and transfer alignment are
+unqualified. A future handler should compose with the backend-owned device and
+its control authority, not put vendor addresses into `src/provider.cpp`. A
+transport ACK is not proof of detector processing. See
+@ref md_docs_2navigation-backend-forwarding "navigation forwarding" and
+@ref md_docs_2qualification-evidence "qualification evidence".
 */
