@@ -1,5 +1,12 @@
 # Optional Aravis adapter: camera control (GIGE-MEL-008), source acquisition (GIGE-MEL-009) and timestamp provenance (GIGE-MEL-010)
 
+Start with [Current Status](status.md) for merged availability and
+[Qualification Evidence](qualification-evidence.md#aravis-fake-and-simulated-gige)
+to distinguish Fake, simulated network and [physical Cognex runs](qualification-evidence.md#cognex-cic-5000r-physical-observations).
+This guide retains the GIGE-MEL-008 through GIGE-MEL-022 milestone records.
+The optional adapter now acquires native source frames; production timestamps
+remain invalid. Positive MEL delivery in the recorded tests used virtual time.
+
 ## Unpacked Mono12 (GIGE-MEL-022)
 
 The current device format may be Mono8 or PFNC **0x01100005 Mono12**, never

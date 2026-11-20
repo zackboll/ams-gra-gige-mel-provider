@@ -2,7 +2,8 @@
 
 Start with the [documentation index](index.md) and [current capability/evidence
 status](status.md). This document describes the native provider boundaries and
-lifecycle contracts; linked task records retain their historical conclusions.
+lifecycle contracts; the [qualification index](qualification-evidence.md)
+links the original experiments and their historical conclusions.
 For a new camera model, start with [camera-profile authoring](camera-profile-authoring.md).
 For complete MEL implementation requirements, use the
 [requirements traceability](mel-traceability.md) and pinned upstream declarations.
@@ -293,11 +294,11 @@ precise schema/status contract are documented in [configuration](configuration.m
 
 `CameraCommand` is a complete camera request, not a patch object: it has no partial-update mask. Its width, height, offsets, integration time, frame rate, image type, and stage/direction fields must receive an explicit profile interpretation. An unsupported scanning request must not be accepted as if it were a staring request. See [CameraCommand][camera-command].
 
-For the initial profile, controls cover ROI, nanosecond integration time, and integer hertz frame rate for one staring Mono8 stream. Configuration is validated before mutation. Reconfiguration while enabled is rejected; the caller disables, submits a complete request, checks the result and current Image channel capabilities, makes its registered buffers large enough, and enables again.
+Controls cover ROI, nanosecond integration time and integer-hertz frame rate for a one-band staring stream. Mono8 and explicitly admitted unpacked Mono12 share the controls; configuration does not switch pixel format. Configuration is validated before mutation. Reconfiguration while enabled is rejected; the caller disables, submits a complete request, checks the result and current Image channel capabilities, makes its registered buffers large enough, and enables again.
 
 `CameraCommandResp::commandSuccess` describes whether all requested parameters are satisfiable. It contains neither a per-field readback nor a detailed failure reason. Detailed backend diagnostics therefore remain in internal errors/logs; do not invent fields in the upstream response. A failed backend request maps to an upstream error result where appropriate. See [CameraCommandResp][camera-response].
 
-Every frame uses the configuration snapshot associated with its acquisition generation. A queued image from generation N cannot be relabeled with generation N+1's ROI or integration time. Once source layouts include row padding, chunk trailers, or packed pixels, the runtime must validate sizes with overflow checks and copy only valid image data.
+Every frame uses the configuration snapshot associated with its acquisition generation. A queued image from generation N cannot be relabeled with generation N+1's ROI or integration time. The bounded copy path validates row stride/span with overflow checks and strips row padding; packed formats and chunk trailers are not part of the admitted image layouts.
 
 `ChannelCapability::bitDepth` is the signal dynamic range; `FrameHeader::bitsPerPixel` is the storage representation. They happen to agree at eight in Mono8. They need not agree for a 12-bit sensor stored in 16-bit words. `rowPitch` is bytes, not pixels. The initial published rows are tightly packed, so the image byte count is `width * height` after checked arithmetic. See [ChannelCapability][capability] and [FrameHeader][frame-header].
 

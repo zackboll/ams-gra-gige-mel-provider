@@ -2,7 +2,11 @@
 
 ## Starting point
 
-Use this guide when adding a **new SDK/transport adapter**. For a new camera
+Use this guide when adding a **new SDK/transport adapter** to the existing
+optional Aravis and Pleora paths. See [Aravis experiments](qualification-evidence.md#aravis-fake-and-simulated-gige),
+[Pleora experiments](qualification-evidence.md#pleora-ebus), and the separate
+[read-only GenTL foundation](qualification-evidence.md#gentl-producers-and-consumer).
+For a new camera
 model on Aravis or Pleora, start instead with
 [camera-profile authoring](camera-profile-authoring.md), implement
 [`ICameraProfile` and its owned state](../src/profiles/camera_profile.hpp), and
@@ -312,7 +316,7 @@ Before an adapter is called supported:
 - Load the real MEL provider using the same native client used for synthetic, receive registered-buffer images, issue both C2 and Image camera commands, and stop/restart.
 - Record actual hardware results separately from synthetic/unit test results. Do not infer network throughput, packet-loss recovery, PTP accuracy, or latency from a fake camera.
 
-When the second adapter requires a backend-specific condition in the MEL facade, first ask whether the missing distinction belongs in a typed capability, a normalized frame field, or the camera profile. A vendor `if` in the facade is usually evidence that the boundary needs work.
+When an adapter appears to require a backend-specific condition in the MEL facade, first ask whether the missing distinction belongs in a typed capability, a normalized frame field, or the camera profile. A vendor `if` in the facade is usually evidence that the boundary needs work.
 
 [aravis-camera]: https://aravisproject.github.io/docs/aravis-0.8/ArvCamera.html
 [aravis-thread]: https://aravisproject.github.io/docs/aravis-0.8/thread-safety.html

@@ -2,7 +2,9 @@
 
 For method-by-method obligations, implementation and evidence, start at
 [Requirements Traceability](mel-traceability.md). This profile describes
-behavior and limits, not a conformance determination.
+behavior and limits alongside the milestone notes below, not a conformance
+determination. Use [Current Status](status.md) for the audited merged snapshot
+and [Qualification Evidence](qualification-evidence.md) for executed results.
 
 ## Isolated GenTL wire qualification tooling (GIGE-MEL-GENTL-003A)
 
@@ -34,7 +36,7 @@ The uninstalled offline supervisor adds no backend or MEL capability. It runs
 only producer load/interface diagnostics in bounded network-isolated children.
 Balluff Impact Acquire 3.7.2.4495 (GenTL 1.6) initialized/closed in three children,
 then crashed in `TLUpdateInterfaceList` in the isolated no-camera environment.
-Euresys Gigelink 26.10 was not obtained (authenticated download required).
+Euresys Gigelink 26.10 was not obtained in GENTL-003 (authenticated download required).
 No real-producer GenApi, read-only wire behavior or physical-camera operation is
 qualified. Existing backend/profile qualification remains fixture-only; all
 ownership, XML limits and admission policies are unchanged. See

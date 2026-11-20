@@ -47,7 +47,9 @@ separated from source review; historical acquisition is not final-HEAD testing.
 GIGE-MEL-028 independently isolates the native GenApi TSan inversion to the
 external log4cpp runtime's initialization/global-cleanup lock order. See the
 [reproducer, exact lock stacks and blocked disposition](genapi-tsan-lock-order.md).
-No suppression is approved or added; combined TSan qualification remains blocked.
+At that milestone no suppression was approved or added, and combined TSan was
+blocked. The later [scoped development exception](pleora-tsan-exception.md) does
+not change the original unsuppressed result or cover other native tests.
 
 No backend interface, MEL declaration, factory signature, shared profile source,
 production stream implementation or published history is replaced. Native GenApi

@@ -20,9 +20,11 @@ both register byte orders:
 * fresh, unclamped readback;
 * propagated native read failures.
 
-The physical Cognex has not been contacted through GenTL. "The same profile
-across Aravis, Pleora and GenTL" is therefore demonstrated at the source and
-fixture level only; hardware qualification is GENTL-003. See the
+Profile execution across Aravis, Pleora and GenTL is demonstrated at the source
+and fixture level only. The earlier Aravis GenTL producer reached physical
+Cognex **discovery only** (GENTL-001); there was no physical open, GenApi profile
+execution or acquisition. GENTL-003 did not contact the camera. See the
+[producer evidence matrix](qualification-evidence.md#gentl-producers-and-consumer) and the
 [design](tasks/GIGE-MEL-GENTL-002-design.md#9-simulated-fixture-and-camera-profile-execution).
 
 ## Experimental ownership feasibility (GIGE-MEL-039)

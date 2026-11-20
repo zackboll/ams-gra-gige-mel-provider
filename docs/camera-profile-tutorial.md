@@ -5,7 +5,9 @@ camera-specific branches to the MEL facade. Use the [Cognex CIC-5000R module](..
 as the real-camera reference and the [rate-limited module](../examples/profile_module/README.md)
 to learn the module and state lifetimes without requiring a camera. Keep the
 [camera-profile authoring contract](camera-profile-authoring.md) open for the
-detailed interface requirements.
+detailed interface requirements. Compare [Cognex module fixture evidence](qualification-evidence.md#sdk-free-provider-and-profiles)
+with the [earlier physical camera experiments](qualification-evidence.md#cognex-cic-5000r-physical-observations);
+the measurements informed policy but did not qualify the module on hardware.
 
 ## Contents
 
