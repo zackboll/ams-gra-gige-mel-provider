@@ -40,8 +40,8 @@ No suppression was added or used. The external profile modules are rebuilt by
 | GCC Debug | 50/50 passed | 20 each, all passed |
 | GCC Release | 50/50 passed | in suite |
 | Clang Debug | 50/50 passed | in suite |
-| GCC ASan/UBSan | ASAN_RESULT | ASAN_REPEAT |
-| GCC TSan | TSAN_RESULT | TSAN_REPEAT |
+| GCC ASan/UBSan | 50/50 passed | 20 each, all passed; no ASan, UBSan or leak report |
+| GCC TSan | 50/50 passed | 20 each, all passed; no ThreadSanitizer report |
 
 The suite grows from 40 to 50 tests: nine `profile_navigation_*` scenarios and
 `profile_identity_closure`. The focused set is those ten plus the unchanged
