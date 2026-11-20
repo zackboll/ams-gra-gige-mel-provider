@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from urllib.parse import quote, unquote, urlsplit
 
-from check_docs import REPOSITORY, project_sources, validate_site
+from check_docs import REPOSITORY, check_status_source, project_sources, validate_site
 import check_mel_traceability as traceability
 import check_qualification_evidence as evidence
 
@@ -121,6 +121,7 @@ def build(args):
         source = ROOT / path
         if not source.is_file() or source.is_symlink() or source.resolve() != source:
             raise ValueError(f"Not a regular in-tree documentation input: {path}")
+    check_status_source((ROOT / "docs/status.md").read_text(encoding="utf-8"))
 
     out = args.output.resolve()
     stage, html = out / "inputs", out / "html"
