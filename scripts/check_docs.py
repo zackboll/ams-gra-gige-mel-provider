@@ -64,7 +64,7 @@ EXAMPLE_BUILDS = {
 }
 SECTIONS = {
     "api_installed.html": ("Installed C++ interfaces", (
-        "make_api_manager", "ProviderSettings", "ProviderStatistics", "ICameraBackend",
+        "ProviderSettings", "ProviderStatistics", "ICameraBackend",
         "ICameraDevice", "IFrameStream", "FrameLease", "FrameDescriptor", "CameraConfiguration",
         "CameraCapabilities", "NavigationReport", "INavigationSink", "ILineOfSightSource",
         "ILineOfSightStream", "IStackedImageSource", "IStackedImageStream", "StackLease",
@@ -79,6 +79,12 @@ SECTIONS = {
     )),
     PROFILE_EXAMPLES: ("internal development references", tuple(EXAMPLE_SOURCES)),
 }
+# Critical installed entry points must link to member documentation, not just
+# the declaration or an automatically generated source/implementation link.
+INSTALLED_METHODS = (
+    "make_api_manager", "provider_statistics", "open", "apply", "receive", "request_stop",
+    "submit_navigation", "open_line_of_sight", "open_stacked_images",
+)
 SEARCH = ("search/search.js", "search/searchdata.js")
 ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, MEL_PROFILE, TRACEABILITY,
                TRACE_EVIDENCE, QUALIFICATION, STATUS, BACKEND_AUTHORING, *SECTIONS)
@@ -93,7 +99,7 @@ ENTRY_LINKS = {
     STATUS: (QUALIFICATION,),
     CONSUMER_GUIDE: ("api_installed.html", "provider_8hpp.html", "backend_8hpp.html",
                      "navigation_8hpp.html", "line__of__sight_8hpp.html"),
-    "api_installed.html": (CONSUMER_GUIDE,),
+    "api_installed.html": (CONSUMER_GUIDE, BACKEND_AUTHORING),
     PROFILE_TUTORIAL: ("api_extensions.html", PROFILE_EXAMPLES, "md_docs_2camera-profile-authoring.html"),
     "api_extensions.html": (PROFILE_TUTORIAL, PROFILE_EXAMPLES),
     PROFILE_EXAMPLES: ("api_extensions.html", PROFILE_TUTORIAL, "camera__profile_8hpp.html",
@@ -234,6 +240,23 @@ def section_targets(page, parsed):
     return targets
 
 
+def check_installed_methods(root, targets):
+    for symbol in INSTALLED_METHODS:
+        target, anchor = targets.get(symbol, ("", ""))
+        if not anchor or target.endswith("_source.html"):
+            raise ValueError(f"Installed API: no member documentation link for {symbol}")
+        text = (root / target).read_text(encoding="utf-8")
+        # Doxygen emits an anchor and heading before each detailed memdoc. Check
+        # its leading prose paragraph, not the later automatic source/inheritance text.
+        start = re.search(rf'<a id="{re.escape(anchor)}"[^>]*></a>\s*<h2 class="memtitle">', text)
+        detail = text[start.end():].split('<h2 class="memtitle">', 1)[0] if start else ""
+        member = re.search(r'<div class="memdoc">\s*<p>(.*?)</p>', detail, re.S)
+        prose = re.sub(r"<[^>]+>", "", member[1]).strip() if member else ""
+        if not prose or prose.startswith(("Implemented in ", "Reimplemented ")):
+            raise ValueError(f"Installed API: no generated description for {symbol} ({target}#{anchor})")
+    print(f"Verified {len(INSTALLED_METHODS)} installed API method descriptions")
+
+
 def verify_entry(page, parsed, text, sha):
     if (f"{REPOSITORY}/commit/{sha}", f"Source commit: {sha}") not in parsed.links:
         raise ValueError(f"{page}: missing source provenance for {sha}")
@@ -270,11 +293,13 @@ def verify_entry(page, parsed, text, sha):
         if title.casefold() not in text.casefold():
             raise ValueError(f"{page}: missing audience label: {title}")
         targets = section_targets(page, parsed)
+        if page == "api_installed.html":
+            symbols = (*symbols, *INSTALLED_METHODS)
         for symbol in symbols:
             if symbol not in targets:
                 raise ValueError(f"{page}: no API link for {symbol}")
-            if symbol == "make_api_manager" and not targets[symbol][1]:
-                raise ValueError("make_api_manager must link to its generated definition anchor")
+            if symbol in INSTALLED_METHODS and not targets[symbol][1]:
+                raise ValueError(f"{symbol} must link to its generated definition anchor")
         return {symbol: targets[symbol] for symbol in symbols}
     return {}
 
@@ -328,6 +353,8 @@ def validate_site(root, sha, sources, evidence_ids=None):
         if path not in pages:
             continue
         targets = verify_entry(path, pages[path], (root / path).read_text(encoding="utf-8"), sha)
+        if path == "api_installed.html":
+            check_installed_methods(root, targets)
         for symbol, (target, fragment) in targets.items():
             if target not in pages:
                 errors.append(f"{symbol}: missing API page: {target}")
