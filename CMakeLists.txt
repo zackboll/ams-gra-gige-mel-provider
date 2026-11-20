@@ -118,6 +118,13 @@ target_include_directories(gige_mel_camera_profiles PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(gige_mel_camera_profiles PRIVATE gige_mel_build_options)
 
+# GIGE-MEL-047 host-side bridge from INavigationSink to an optional profile
+# navigation handler. Uninstalled and linked by no production adapter or the
+# MEL provider; only explicit compositions (currently tests) use it.
+add_library(gige_mel_profile_navigation STATIC src/profiles/navigation_bridge.cpp)
+target_link_libraries(gige_mel_profile_navigation PUBLIC gige_mel_camera_profiles Threads::Threads
+  PRIVATE gige_mel_build_options)
+
 add_library(gige_mel_provider SHARED src/provider.cpp src/factories.cpp src/config_parser.cpp)
 target_include_directories(gige_mel_provider SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
 add_library(gige_mel::provider ALIAS gige_mel_provider)
@@ -341,6 +348,28 @@ if(BUILD_TESTING)
     GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
     GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile")
   add_dependencies(device_feature_tests gige_mel_external_test_profile)
+  # GIGE-MEL-047: optional profile navigation handler through the bridge, the
+  # unchanged MEL entry point and separately built modules. SDK-free.
+  add_executable(profile_navigation_tests tests/profile_navigation_tests.cpp)
+  target_include_directories(profile_navigation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples/profile_module)
+  target_compile_definitions(profile_navigation_tests PRIVATE
+    GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
+    GIGE_MEL_TEST_NAVIGATION_MODULE="${CMAKE_CURRENT_BINARY_DIR}/external-profile/libnavigation_record_profile.so"
+    GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile")
+  target_link_libraries(profile_navigation_tests PRIVATE gige_mel_profile_navigation gige_mel_selection
+    gige_mel_provider gige_mel_build_options Threads::Threads)
+  add_dependencies(profile_navigation_tests gige_mel_external_test_profile)
+  foreach(scenario bridge_capability_discovery bridge_preparation_and_mapping bridge_uncertainty_and_control_loss
+      bridge_concurrency_and_teardown mel_profile_a_receipt_only mel_profile_b_dispatch mel_profile_b_uncertainty
+      mel_profile_b_lifecycle dynamic_module_navigation)
+    add_test(NAME profile_navigation_${scenario} COMMAND profile_navigation_tests ${scenario})
+    set_tests_properties(profile_navigation_${scenario} PROPERTIES TIMEOUT 60)
+  endforeach()
+  add_test(NAME profile_identity_closure COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/identity-closure-check -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/profile_identity_closure.cmake)
+  set_tests_properties(profile_identity_closure PROPERTIES TIMEOUT 30)
   add_test(NAME dynamic_profile_module_contract COMMAND device_feature_tests --dynamic-module-only)
   add_test(NAME cognex_profile_contract COMMAND device_feature_tests --cognex-only)
   set_tests_properties(cognex_profile_contract PROPERTIES TIMEOUT 30)

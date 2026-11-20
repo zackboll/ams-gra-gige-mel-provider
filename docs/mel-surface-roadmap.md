@@ -54,6 +54,14 @@ event source). Both remain NotSupported and unadvertised, under executable
 classification tests. `HealthStatusChannel` remains partial. See the
 [design](tasks/GIGE-MEL-041-design.md).
 
+GIGE-MEL-047 adds an internal, optional camera-profile
+[navigation handler](navigation-backend-forwarding.md#optional-camera-profile-navigation-handler-gige-mel-047)
+and a reusable bridge to the existing navigation sink, preserved through module
+loading. The MEL surface, advertisement and provider dispatch are unchanged.
+Only an SDK-free recording backend is wired. There is no production adapter,
+transport, detector protocol or authority grant
+(`PROFILE_NAVIGATION_FIXTURE_QUALIFIED`; [design](tasks/GIGE-MEL-047-design.md)).
+
 GIGE-MEL-039 adds a [loopback-only single-owner authority](gvcp-single-owner.md),
 not a MEL capability. Shared control/heartbeat and retirement evidence does not
 qualify physical ownership, SDK integration, stale-session fencing or navigation.

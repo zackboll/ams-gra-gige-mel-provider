@@ -58,6 +58,8 @@ EXAMPLE_SOURCES = {
     "Cognex module entry point": "camera_profiles/cognex_cic_5000r/module.cpp",
     "Rate-limited profile implementation": "examples/profile_module/rate_limited_policy.hpp",
     "Rate-limited module descriptor": "examples/profile_module/module.cpp",
+    "Navigation record profile implementation": "examples/profile_module/navigation_record_policy.hpp",
+    "Navigation record module descriptor": "examples/profile_module/navigation_module.cpp",
 }
 EXAMPLE_BUILDS = {
     "Cognex CMakeLists.txt": "camera_profiles/cognex_cic_5000r/CMakeLists.txt",
@@ -73,6 +75,7 @@ SECTIONS = {
     "api_extensions.html": ("Internal, uninstalled extension interfaces", (
         "ICameraProfile", "ICameraProfileState", "IDeviceFeatures", "BackendCatalog",
         "Descriptor", "load_profile_module", "select_session", "validate_frame", "apply_configuration",
+        "IProfileNavigationHandler", "navigation_handler", "ProfileNavigationBridge",
     )),
     "api_core.html": ("Core implementation reference", (
         "provider.cpp", "factories.cpp", "synthetic.cpp", "aravis_backend.cpp",
@@ -112,7 +115,9 @@ API_PAGES = ("api_installed.html", "api_extensions.html", "api_core.html")
 EXTENSIONS = API_PAGES[1]
 EXTENSION_SECTIONS = ("extension_profile", "extension_modules", "extension_registers", "extension_navigation")
 EXTENSION_TYPES = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
-    "backend::profiles": ("ICameraProfile", "ICameraProfileState", "NativeFrameFacts"),
+    "backend::profiles": ("ICameraProfile", "ICameraProfileState", "NativeFrameFacts",
+                          "IProfileNavigationHandler", "NavigationOperation", "INavigationOperationPort",
+                          "ProfileNavigationBridge"),
     "backend::device_features": ("IDeviceFeatures",),
     "backend::profiles::module": ("Descriptor",),
     "selection": ("BackendCatalog", "LoadedProfile"),
@@ -122,6 +127,8 @@ EXTENSION_TYPES = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
 EXTENSION_METHODS = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
     "backend::profiles::ICameraProfile": ("open",),
     "backend::profiles::ICameraProfileState": ("configuration", "apply", "preflight", "validate_frame"),
+    "backend::profiles::IProfileNavigationHandler": ("prepare_navigation",),
+    "backend::profiles::ProfileNavigationBridge": ("create", "submit", "shutdown"),
     "backend::device_features::IDeviceFeatures": ("read_integer_feature", "write_integer"),
     "selection::BackendCatalog": ("register_backend", "create"),
     "selection": ("select_session", "load_profile_module"),

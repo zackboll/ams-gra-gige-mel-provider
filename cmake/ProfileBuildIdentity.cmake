@@ -2,9 +2,12 @@
 # complete C++ interface closure; no MEL or SDK headers enter this contract.
 function(gige_mel_profile_identity root output)
   set(closure "")
+  # GIGE-MEL-047 adds the optional navigation handler: module states may
+  # implement it and the host loader cross-casts to it, so it is part of the
+  # matched interface. Any byte change (including comments) needs a rebuild.
   foreach(header include/gige_mel/backend.hpp include/gige_mel/navigation.hpp
       src/device_features.hpp src/profiles/frame_policy.hpp src/profiles/camera_profile.hpp
-      src/profiles/profile_module.hpp)
+      src/profiles/profile_module.hpp src/profiles/navigation_handler.hpp)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${root}/${header}")
     file(SHA256 "${root}/${header}" digest)
     string(APPEND closure "${digest}")
