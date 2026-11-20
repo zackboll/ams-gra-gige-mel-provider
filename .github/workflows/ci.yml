@@ -39,7 +39,7 @@ jobs:
             python3 scripts/check_proprietary.py --history "$(git rev-list --max-parents=0 HEAD | head -1)"
           fi
       - name: Configure without SDKs or network downloads
-        run: cmake --preset "${{ matrix.preset }}"
+        run: cmake --preset "${{ matrix.preset }}" -DGIGE_MEL_TEST_CONTROL_AUTHORITY=ON
       - name: Build
         run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
       - name: Test contracts and native loading
@@ -112,7 +112,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
         with:
           persist-credentials: false
-      - run: cmake --preset "${{ matrix.preset }}"
+      - run: cmake --preset "${{ matrix.preset }}" -DGIGE_MEL_TEST_CONTROL_AUTHORITY=ON
       - run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
       - run: ctest --preset "${{ matrix.preset }}"
       # ---- Optional Aravis integration (sanitizers instrument the project's

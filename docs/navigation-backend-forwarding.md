@@ -12,6 +12,9 @@ The separate [register/memory foundation](device-register-transport.md) now exis
 on both optional SDK devices. It is not connected to this forwarding path and
 implements no navigation sink or wire protocol. Its SDK retry/deadline limitations
 must be resolved before production bounded submission can use it.
+The [SDK-free control-authority design](tasks/GIGE-MEL-046-design.md#future-navigation-boundary-not-implemented)
+shows the future boundary; no SDK or ordinary GVCP executor is admitted for
+physical navigation and existing forwarding behavior is unchanged.
 
 The existing MEL ImageChannel NavigationReport entry point optionally forwards
 validated navigation reports to a backend navigation sink. The MEL declarations,

@@ -4,6 +4,9 @@ GIGE-MEL-039 adds an independent [single-owner session](gvcp-single-owner.md)
 above this unchanged client: fixture-only explicit acquisition, shared-socket
 heartbeat, fenced uncertainty and joined shutdown. Physical SDK ownership and
 cross-session stale packets remain gates; see its SDK feasibility decision.
+[GIGE-MEL-046 loopback evidence](tasks/GIGE-MEL-046-validation.md#cross-session-loopback-result)
+demonstrates that same-port reuse plus an overlapping ID can admit a previous
+session's ACK. The parser and transaction policy have not changed.
 
 **Experimental loopback artifact, not a production device service.** The existing
 [GIGE-MEL-037 service](device-register-transport.md) remains unchanged. No SDK,

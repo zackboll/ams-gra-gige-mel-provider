@@ -97,6 +97,9 @@ atomic delivery, proof of no retransmission, or a hard wall-clock upper bound.
 This implementation adds no retries but cannot promise those properties. Do not
 compose into a production bounded INavigationSink until these gates are resolved.
 No global SDK communication/acquisition policy was changed to conceal this.
+The opt-in [control-authority experiment](tasks/GIGE-MEL-046-design.md) does not
+admit this service or wrap these calls in a timed future:
+`NATIVE_SDK_INTEGRATION_NOT_QUALIFIED`.
 
 ### Development-only merge scope versus production qualification
 
