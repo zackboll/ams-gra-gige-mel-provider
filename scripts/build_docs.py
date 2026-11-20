@@ -9,8 +9,9 @@ import shutil
 import subprocess
 from urllib.parse import quote, unquote, urlsplit
 
-from check_docs import REPOSITORY, project_sources, validate_site
+from check_docs import REPOSITORY, check_status_source, project_sources, validate_site
 import check_mel_traceability as traceability
+import check_qualification_evidence as evidence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GUIDES = {
     "README.md", "CONTRIBUTING.md",
     *(f"docs/{name}.md" for name in (
-        "index", "consumer-integration", "status", "architecture", "implementation-profile",
+        "index", "consumer-integration", "status", "qualification-evidence", "architecture", "implementation-profile",
         "configuration", "camera-profile-authoring", "camera-profile-tutorial",
         "camera-profile-examples", "backend-authoring",
         "camera-profile-portability", "backend-portability", "runtime-selection",
@@ -113,12 +114,14 @@ def build(args):
     sha = git("rev-parse", "HEAD").strip()
     dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
     tracked = set(git("ls-files", "-z").split("\0"))
+    evidence_ids = evidence.check(tracked, self_test=True)
     sources = project_sources(tracked)
     annotations = {p for p in tracked if p.startswith("cmake/doxygen/") and p.endswith(".dox")}
     for path in GUIDES | sources | annotations:
         source = ROOT / path
         if not source.is_file() or source.is_symlink() or source.resolve() != source:
             raise ValueError(f"Not a regular in-tree documentation input: {path}")
+    check_status_source((ROOT / "docs/status.md").read_text(encoding="utf-8"))
 
     out = args.output.resolve()
     stage, html = out / "inputs", out / "html"
@@ -177,7 +180,7 @@ PREDEFINED += {version_definitions} GenTLMajorVersion=1 GenTLMinorVersion=6 GC_G
             cache.unlink()
     warnings = out / "doxygen-warnings.log"
     print(f"Doxygen warnings: {warnings.read_text(encoding='utf-8').count('warning:')} ({warnings})", flush=True)
-    validate_site(html, sha, sources)
+    validate_site(html, sha, sources, evidence_ids)
 
 
 if __name__ == "__main__":

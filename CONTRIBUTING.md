@@ -17,8 +17,9 @@ Read [backend authoring](docs/backend-authoring.md). Begin with the normal copy
 path and reuse the common provider. Add an optional SDK-specific CMake target,
 an explicit device selector, and a reproducible SDK/camera test description.
 Do not put SDK headers in the common backend contract or require commercial
-software for the synthetic CI jobs. A second real adapter should exercise the
-same provider without editing MEL channel code.
+software for the synthetic CI jobs. Aravis and Pleora already exercise the same
+common provider boundary; new adapters should preserve it without editing MEL
+channel code to accommodate vendor policy.
 
 Proprietary SDKs must remain entirely outside the working tree. Never publish
 SDK headers, source, libraries, samples, installers, EULAs, keys or SDK-dependent
@@ -37,6 +38,18 @@ core implementation (internal) sections. The target checks local links and API
 entry points and writes warnings to `build/documentation/docs/doxygen-warnings.log`.
 See the [warning baseline](docs/documentation-warnings.md) for known limitations.
 Do not commit generated pages or treat extracted internals as stable API.
+
+For changes that affect behavior or qualification, reconcile the
+[current capability status](docs/status.md) and its audited as-of revision,
+[MEL requirements traceability](docs/mel-traceability.md), and
+[Qualification Evidence](docs/qualification-evidence.md). Update any affected
+SDK/camera and profile/firmware compatibility notes, plus the remaining hardware
+qualification and deployment gates. Check the evidence index with
+`python3 -B scripts/check_qualification_evidence.py --self-test` (also run by the
+documentation target). Keep stable evidence IDs and the original execution
+outcomes; implementation of a later capability does not rewrite a historical
+failure or prove an operation was run. Add a separate record when new evidence
+changes the conclusion, including the exact tested source and environment.
 
 For a new camera profile, follow [Create a Camera Profile](docs/camera-profile-tutorial.md)
 and use its qualification checklist. Keep the [authoring contract](docs/camera-profile-authoring.md)

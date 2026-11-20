@@ -1,8 +1,10 @@
 # Current capability and evidence status
 
-This summary describes merged `main` as audited for DOC-GIGE-001, starting at
-`15542919b45febb809bfd24d5469dcddb3b456b6` (through PR #45). It does not include
-features from open PRs. See the [documentation index](index.md), the detailed
+This summary describes merged `main` **as of** audited source revision
+`a31ec7e1eab514e82678028479dc4c2a0ac4ecdf` (PR #54 merge). It does not track
+later revisions automatically or include features from open PRs. See the
+[Qualification Evidence](qualification-evidence.md) index for historical runs,
+the [documentation index](index.md), the detailed
 [implementation profile](implementation-profile.md), and the
 [MEL requirements traceability inventory](mel-traceability.md).
 
@@ -14,11 +16,9 @@ unsupported stubs are not equivalent to functional, advertised capabilities.
 
 - **Implemented:** merged source provides the behavior under its stated admission
   and lifecycle contracts.
-- **Fixture-qualified:** deterministic SDK-free recordings, SDK Fake devices or
-  controlled native-buffer/GenApi tests exercised a contract. This is not
-  physical sensor, transport or clock qualification.
-- **Physical evidence:** observations for the recorded SDK/camera/firmware and
-  temporary setup only; not a general support or production-readiness claim.
+- **Evidence:** see the [classification and outcome definitions](qualification-evidence.md#how-to-read-the-index).
+  SDK-free, native fixture, simulated network and physical observations are
+  separate from production qualification.
 - **Unsupported / planned:** unavailable or gated work. No capability may be
   inferred from a class declaration, design record or successful fixture run.
 
@@ -26,11 +26,11 @@ unsupported stubs are not equivalent to functional, advertised capabilities.
 
 | Backend / profile | Implemented path and availability | Evidence and important limits |
 | --- | --- | --- |
-| Synthetic / default | SDK-free default; exported `getAPI_Manager("synthetic")`; deterministic Mono8, optional explicit Mono12, camera controls and registered-host-buffer MEL delivery | [Backend tests](../tests/backend_tests.cpp), [provider tests](../tests/provider_tests.cpp) and [shared portability tests](../tests/provider_backend_contract_tests.cpp). Virtual integration-start clock and virtual optics only; no hardware/UTC claim. |
-| Aravis / `mono_free_running_v1` | Default-OFF, internal/uninstalled Aravis **0.8.36** adapter: discovery, exact open, configuration/readback, bounded source acquisition, leases and terminal control-loss handling. Available in the internal catalog when compiled, not through exported MEL factory selection | Fake and loopback simulator contracts plus [physical Cognex evidence](cognex-cic-5000r.md). Production `FrameTimestamp{}` is invalid, so the provider rejects frames. Positive MEL pixel delivery uses a test-only virtual clock. [Integration and timing gates](aravis-integration.md). |
-| Pleora / `mono_free_running_v1` | Default-OFF, internal/uninstalled eBUS **Pv 6.5.3.7155** adapter (matching GenApi 3.4.1): exact MAC open, shared feature policy, bounded native reception and host-copy leases. Internal catalog when compiled; not an exported factory choice | Native GenApi/PvBuffer fixtures and recorded Cognex Mono8 watermarked receiver evaluation. Default policy does not enable that evaluation. SDK entitlement/production licensing unresolved; timestamps invalid, so production MEL frames are rejected. [Integration/evidence](pleora-integration.md), [consolidation](pleora-consolidation.md). |
-| Aravis or Pleora / `cognex_cic_5000r_v1` | Independently built matched-C++ module; exact COGNEX/CIC-5000R/V3.7-1 identity; Mono8 and conservative **1/2/4/5/8/10 Hz** admission | [Module guide](../camera_profiles/cognex_cic_5000r/README.md), [fixture qualification](tasks/GIGE-MEL-036-validation.md). Earlier physical capture evidence informed policy; the module itself has no new physical qualification. No Mono12 or clock qualification. |
-| GenTL / injected existing profiles | Default-OFF, internal/uninstalled **read-only** backend foundation using EMVA GenTL 1.6 and Aravis 0.8.36 GenApi. Enumerate, exact open/close, profile admission and readback; no `apply`, streaming or catalog registration | [Controlled simulated-register producer qualification](tasks/GIGE-MEL-GENTL-002-validation.md) only. Reuse of the Cognex module in this fixture does not change its Aravis/Pleora module compatibility declaration or qualify real-camera GenTL. |
+| Synthetic / default | SDK-free default; exported `getAPI_Manager("synthetic")`; deterministic Mono8, optional explicit Mono12, camera controls and registered-host-buffer MEL delivery | [SDK-free provider evidence](qualification-evidence.md#sdk-free-provider-and-profiles). Virtual integration-start clock and virtual optics only; no hardware/UTC claim. |
+| Aravis / `mono_free_running_v1` | Default-OFF, internal/uninstalled Aravis **0.8.36** adapter: discovery, exact open, configuration/readback, bounded source acquisition, leases and terminal control-loss handling. Available in the internal catalog when compiled, not through exported MEL factory selection | [Fake and loopback](qualification-evidence.md#aravis-fake-and-simulated-gige) plus [physical Cognex observations](qualification-evidence.md#cognex-cic-5000r-physical-observations). Production `FrameTimestamp{}` is invalid; positive MEL pixels use a test-only virtual clock. |
+| Pleora / `mono_free_running_v1` | Default-OFF, internal/uninstalled eBUS **Pv 6.5.3.7155** adapter with GenApi 3.4.1 runtime / 3.4.1.1 headers: exact MAC open, shared feature policy, bounded native reception and host-copy leases. Internal catalog when compiled; not an exported factory choice | [Native fixtures and watermarked evaluation](qualification-evidence.md#pleora-ebus). Default policy does not enable evaluation. SDK entitlement/production licensing unresolved; invalid timestamps preclude production MEL delivery. |
+| Aravis or Pleora / `cognex_cic_5000r_v1` | Independently built matched-C++ module; exact COGNEX/CIC-5000R/V3.7-1 identity; Mono8 and conservative **1/2/4/5/8/10 Hz** admission | [Module guide](../camera_profiles/cognex_cic_5000r/README.md), [QE-COGNEX-MODULE](qualification-evidence.md#sdk-free-provider-and-profiles). Earlier physical observations informed policy; no physical qualification of the module, Mono12 or clocks. |
+| GenTL / injected existing profiles | Default-OFF, internal/uninstalled **read-only** backend foundation using EMVA GenTL 1.6 and Aravis 0.8.36 GenApi. Enumerate, exact open/close, profile admission and readback; no `apply`, streaming or catalog registration | [QE-GENTL-BACKEND](qualification-evidence.md#gentl-producers-and-consumer) is controlled simulated-register fixture evidence only. Reuse of the Cognex module does not change its Aravis/Pleora compatibility metadata. |
 
 The internal catalog's canonical default profile is `mono_free_running_v1`;
 `aravis-mono8-free-running-v1` remains a historical diagnostic identifier.

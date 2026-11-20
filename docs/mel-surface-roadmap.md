@@ -2,14 +2,16 @@
 
 Use [Requirements Traceability](mel-traceability.md) for the authoritative
 operation-by-operation status and evidence. This roadmap keeps milestone history
-and sequencing; see [current status](status.md) for today’s backend boundaries.
+and sequencing; see [current status](status.md) for audited backend boundaries
+and [Qualification Evidence](qualification-evidence.md) for original runs.
 
 GIGE-MEL-GENTL-003A adds isolated simulated-camera wire qualification tooling,
 **no MEL surface** ([design](tasks/GIGE-MEL-GENTL-003A-design.md)). Independent
 observation now detects writes, privilege changes, unknown/repeated commands and
 post-close traffic; offline harness self-tests do not qualify a real producer.
-Authenticated Euresys evaluation remains next; Balluff's GENTL-003 crash is not
-resolved. Physical-camera authorization and GENTL-004 remain separate gates.
+At GENTL-003A, access to Euresys still required an authenticated download and
+Balluff's earlier crash remained unresolved. See the [producer evidence matrix](qualification-evidence.md#gentl-producers-and-consumer)
+for the audited records. Physical-camera authorization and GENTL-004 are separate gates.
 
 GIGE-MEL-GENTL-003 adds only bounded offline qualification tooling
 ([evidence](tasks/GIGE-MEL-GENTL-003-validation.md)), **no MEL surface**.
@@ -139,7 +141,7 @@ internal SDK-free typed feature interface. Aravis implements native access;
 recording-service tests cover orchestration without an SDK. Device locking,
 control loss, acquisition-command uncertainty and stream ownership remain
 adapter responsibilities. The optional Pleora implementation above consumes
-the same service and acquisition contracts but remains unqualified. See
+the same service and acquisition contracts; production use remains unqualified. See
 [camera-profile portability](camera-profile-portability.md).
 
 ## Shared camera-profile foundation (GIGE-MEL-024)
@@ -282,7 +284,9 @@ The tests and hardware evidence for each claimed milestone should cover these be
 | Real SDK | Device unavailable/busy/disconnected, interrupted receive, late callbacks, packet loss, timestamp reset/wrap, and reconnection policy |
 | Second backend | Same shared MEL-provider portability scenarios and MEL client; no new vendor types in common headers. The scenarios already pass for the synthetic backend and a test-only fixture backend ([backend portability](backend-portability.md)); that does not complete P2 or P3 |
 
-These are release criteria, not assertions that hardware qualification has occurred. The README's validation section records what was actually run for this bootstrap.
+These are release criteria, not assertions that hardware qualification has occurred.
+The [bootstrap validation record](validation.md) and [Qualification Evidence](qualification-evidence.md)
+distinguish original executions from later milestones.
 
 [stacked]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/stacked-image/StackedImageChannel.h
 [stacked-listener]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/stacked-image/StackedImageListener.h

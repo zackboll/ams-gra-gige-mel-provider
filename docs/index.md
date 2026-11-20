@@ -14,6 +14,8 @@ MEL means MFA Encapsulation Layer, not Matrox MIL.
 3. [C++ API Reference](#c-api-reference) — project interfaces and source, with
    installed and internal interfaces clearly separated.
 4. [Camera Integration](#camera-integration) — select an adapter or add a model.
+5. [Qualification Evidence](qualification-evidence.md) — find experiments by SDK,
+   camera and evidence class, then open the original record.
 
 ## C++ API Reference
 
@@ -129,9 +131,10 @@ for the three reference sections and search; use the local HTTP server for searc
 The four project headers under `include/gige_mel/` are installed. The camera
 extension and core sections describe uninstalled source and are not public API.
 
-The [planned GitHub Pages site](https://zackboll.github.io/ams-gra-gige-mel-provider/)
-will be deployed only from validated `main` pushes. Historical engineering records
-are linked to GitHub from the generated site, not copied as test evidence.
+The [live GitHub Pages site](https://zackboll.github.io/ams-gra-gige-mel-provider/)
+publishes only validated `main` pushes. The footer identifies the deployed source
+commit. Qualification Evidence links historical records at the generated site's
+exact source revision; the full archives are not copied into Pages.
 
 ## Documentation follow-up
 
@@ -140,6 +143,4 @@ scope of future tickets:
 
 | Campaign item | Remaining documentation work |
 | --- | --- |
-| DOC-GIGE-002 | Doxygen generation, navigation and source checks are available; production publication and live verification are separate `main`-only gates. |
-| DOC-GIGE-006 | Evidence index by SDK/camera/firmware and environment, reproducible validation commands, plus a broader stale-text/link audit of milestone-heavy references. |
 | Core API comments | Expand declaration-level ownership, lifetime and error documentation in the project headers and implementation sources. Source extraction is not complete contract documentation. |

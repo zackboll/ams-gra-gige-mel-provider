@@ -1,10 +1,13 @@
 # Optional Pleora eBUS backend — GIGE-MEL-025
 
-**State: watermarked receiver hardware evaluation (GIGE-MEL-025-R1).**
-Normal SDK Connect and real Mono8 image reception succeed with explicit
-evaluation selected. SDK development entitlement and production licensing remain
-unresolved. This is not production qualification. No new MEL capability, provider factory
-selection, public ABI, navigation transport or clock mapping is added.
+The optional internal backend uses native GenApi and bounded host-copy reception.
+See [Current Status](status.md) for availability and [Qualification Evidence](qualification-evidence.md#pleora-ebus)
+for fixture, network and hardware records. In the **historical GIGE-MEL-025-R1
+watermarked receiver evaluation**, ordinary SDK Connect and Mono8 reception
+succeeded with explicit evaluation selected. SDK development entitlement and
+production licensing remain unresolved. This is not production qualification.
+The adapter is not an exported MEL factory choice and does not qualify clock
+mapping or navigation transport.
 
 ## External SDK, provenance and license
 
@@ -404,11 +407,14 @@ private evidence folder belongs in this repository or its hosted artifacts.
 
 ## Consolidated native contracts (GIGE-MEL-027)
 
-**TSan gate blocked (GIGE-MEL-028):** the native feature contract exposes an
+**Historical unsuppressed TSan result (GIGE-MEL-028):** the native feature contract exposed an
 independently reproduced external GenApi/log4cpp initialization-versus-global-
 teardown lock inversion. [Investigation and SDK-only reproducer](genapi-tsan-lock-order.md)
 record exact library hashes, stacks, supported-ordering experiments and disposition.
-The test remains enabled and failing under TSan; no suppression has been added.
+At that milestone no suppression had been added and the test failed under TSan.
+The later [reviewed development exception](pleora-tsan-exception.md) remains
+scoped to the exact warning and one CTest. It is not an unsuppressed pass and
+does not cover the separate [stream stop investigation](pleora-native-tsan-investigation.md).
 
 [PR #26](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/26) is the
 single canonical implementation. [Comparison and identities](pleora-consolidation.md)

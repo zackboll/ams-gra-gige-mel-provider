@@ -117,9 +117,10 @@ and [matched-C++ profile authoring](docs/camera-profile-authoring.md).
 | Cognex `cognex_cic_5000r_v1` module / Aravis or Pleora | Exact model/firmware admission; Mono8 at conservative 1/2/4/5/8/10 Hz | Module fixture-qualified only; earlier physical evidence informs policy, not new module/hardware/time qualification |
 | GenTL / injected existing profiles | Optional read-only enumerate/open/readback foundation | Controlled producer fixture only; no apply, streaming, catalog selection or qualified real producer/camera |
 
-See [current status](docs/status.md) for evidence links and qualification
-boundaries. The provider also has bounded C2/Health software behavior,
-navigation receipt/optional forwarding, and source-conditional LOS and stacked
+See [current status](docs/status.md) for merged capabilities and
+[Qualification Evidence](docs/qualification-evidence.md) for the original
+experiments and their limits. The provider also has bounded C2/Health software
+behavior, navigation receipt/optional forwarding, and source-conditional LOS and stacked
 image foundations. LOS/stack positive sources are recording fixtures only;
 default synthetic and production adapters do not advertise them. Scheduling,
 tracking, calibration, protection and several required MEL surfaces remain
@@ -165,9 +166,9 @@ landing page separates the installed `include/gige_mel/` contract, uninstalled
 camera extension interfaces, and internal runtime source reference. The installed
 backend headers are a C++ source contract, not a stable cross-toolchain plugin ABI.
 
-The [planned Pages URL](https://zackboll.github.io/ams-gra-gige-mel-provider/)
-is not yet verified. Pull requests build and validate the site without publishing;
-only validated `main` pushes can deploy. For profile/backend documentation and API
+The [published documentation](https://zackboll.github.io/ams-gra-gige-mel-provider/)
+shows its exact source commit in the footer. Pull requests build and validate
+without publishing; only validated `main` pushes can deploy. For profile/backend documentation and API
 comment guidance, see [Contributing: documentation](CONTRIBUTING.md#documentation).
 
 ## Dependencies and licensing

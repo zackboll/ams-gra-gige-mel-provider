@@ -1,5 +1,10 @@
 # Bootstrap validation record
 
+This is the historical bootstrap and follow-up record, not a current test
+matrix. Each section keeps its original execution scope and conclusions. Start
+at [Qualification Evidence](qualification-evidence.md) to locate the experiments
+or [Current Status](status.md) for the audited merged implementation.
+
 ## Dynamic camera-profile modules (GIGE-MEL-035)
 
 The [module qualification record](tasks/GIGE-MEL-035-validation.md) documents

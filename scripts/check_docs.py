@@ -22,6 +22,32 @@ PROFILE_EXAMPLES = "md_docs_2camera-profile-examples.html"
 MEL_PROFILE = "md_docs_2implementation-profile.html"
 TRACEABILITY = "md_docs_2mel-traceability.html"
 TRACE_EVIDENCE = "md_docs_2mel-traceability-evidence.html"
+QUALIFICATION = "md_docs_2qualification-evidence.html"
+STATUS = "md_docs_2status.html"
+STATUS_MATRIX = "Backend and camera-profile matrix"
+STATUS_HEADERS = ("Backend / profile", "Implemented path and availability", "Evidence and important limits")
+GENTL_LABEL = "GenTL / injected existing profiles"
+GENTL_EVIDENCE = "gentl-producers-and-consumer"
+STATUS_BACKENDS = {
+    "Synthetic / default", "Aravis / mono_free_running_v1", "Pleora / mono_free_running_v1",
+    "Aravis or Pleora / cognex_cic_5000r_v1", GENTL_LABEL,
+}
+BACKEND_AUTHORING = "md_docs_2backend-authoring.html"
+QUALIFICATION_GROUPS = (
+    "sdk-free-provider-and-profiles", "aravis-fake-and-simulated-gige",
+    "cognex-cic-5000r-physical-observations", "pleora-ebus",
+    GENTL_EVIDENCE, "register-transport-and-navigation",
+    "sanitizers-lifetime-and-package-isolation", "open-gates-and-next-actions",
+)
+QUALIFICATION_RECORDS = (
+    "docs/validation.md#unpacked-mono12-gige-mel-022",
+    "docs/cognex-cic-5000r.md#physical-capture-and-stream-evidence",
+    "docs/gvsp-packet-spacing.md#10-hz-production-adapter",
+    "docs/pleora-integration.md#initial-images-and-extended-acquisition",
+    "docs/tasks/GIGE-MEL-GENTL-002-validation.md#b1-gige-mel-gentl-002-r1-final-source-qualification",
+    "docs/tasks/GIGE-MEL-039-validation.md#server-observed-contracts",
+    "docs/provider-thread-exit-tsan.md#qualification",
+)
 TRACE_LINKS = (
     "src/provider.cpp", "tests/provider_standby_tests.inc", "tests/install_consumer/main.cpp",
 )
@@ -54,14 +80,17 @@ SECTIONS = {
     PROFILE_EXAMPLES: ("internal development references", tuple(EXAMPLE_SOURCES)),
 }
 SEARCH = ("search/search.js", "search/searchdata.js")
-ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, MEL_PROFILE, TRACEABILITY, TRACE_EVIDENCE, *SECTIONS)
+ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, MEL_PROFILE, TRACEABILITY,
+               TRACE_EVIDENCE, QUALIFICATION, STATUS, BACKEND_AUTHORING, *SECTIONS)
 ENTRY_LINKS = {
     "index.html": (CONSUMER_GUIDE, PROFILE_TUTORIAL, "api_installed.html", "api_extensions.html",
-                   "api_core.html", MEL_PROFILE, TRACEABILITY),
+                   "api_core.html", MEL_PROFILE, TRACEABILITY, QUALIFICATION),
     MEL_PROFILE: (TRACEABILITY,),
     TRACEABILITY: (MEL_PROFILE, "api_core.html", TRACE_EVIDENCE),
     "api_core.html": (TRACEABILITY, TRACE_EVIDENCE),
-    TRACE_EVIDENCE: (TRACEABILITY, "api_core.html", "md_docs_2status.html"),
+    TRACE_EVIDENCE: (TRACEABILITY, "api_core.html", STATUS),
+    QUALIFICATION: (STATUS, TRACEABILITY),
+    STATUS: (QUALIFICATION,),
     CONSUMER_GUIDE: ("api_installed.html", "provider_8hpp.html", "backend_8hpp.html",
                      "navigation_8hpp.html", "line__of__sight_8hpp.html"),
     "api_installed.html": (CONSUMER_GUIDE,),
@@ -133,6 +162,66 @@ def local_target(page, href):
     return target, unquote(url.fragment)
 
 
+def check_status_source(text):
+    """Check this one simple pipe table, not arbitrary Markdown."""
+    _, heading, section = text.partition(f"\n## {STATUS_MATRIX}\n\n")
+    if not heading:
+        raise ValueError("docs/status.md: missing backend matrix heading")
+    lines = section.split("\n\n", 1)[0].splitlines()
+
+    def validate(lines):
+        def cells(line):
+            match = re.fullmatch(r"\|([^|]*)\|([^|]*)\|([^|]*)\|", line.strip())
+            if not match:
+                raise ValueError("docs/status.md: expected three backend matrix columns")
+            return tuple(cell.strip() for cell in match.groups())
+
+        if not lines or cells(lines[0]) != STATUS_HEADERS:
+            raise ValueError("docs/status.md: invalid backend matrix header")
+        if len(lines) < 2 or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells(lines[1])):
+            raise ValueError("docs/status.md: missing backend matrix separator after header")
+        rows = [cells(line) for line in lines[2:]]
+        labels = [row[0].replace("`", "") for row in rows]
+        if len(labels) != len(STATUS_BACKENDS) or set(labels) != STATUS_BACKENDS:
+            raise ValueError("docs/status.md: expected exactly one row per backend/profile")
+        evidence = rows[labels.index(GENTL_LABEL)][2]
+        if not re.search(rf"\[[^\]]+\]\(qualification-evidence\.md#{GENTL_EVIDENCE}\)", evidence):
+            raise ValueError("docs/status.md: missing GenTL qualification-evidence link")
+
+    validate(lines)
+    gentl_row = next(line for line in lines[2:] if line.split("|")[1].strip() == GENTL_LABEL)
+    for invalid, expected in ((lines[:1] + lines[2:], "missing backend matrix separator"),
+                              (lines + [gentl_row], "exactly one row per backend/profile")):
+        try:
+            validate(invalid)
+        except ValueError as error:
+            if expected not in str(error):
+                raise
+        else:
+            raise ValueError(f"Backend matrix negative control did not fail: {expected}")
+    print("Verified status Markdown matrix and rejected both negative controls (separator, duplicate GenTL)")
+
+
+def verify_rendered_status_matrix(text):
+    # Match the table immediately after the specific Doxygen heading, not the
+    # separate MEL behavior table later on the same page.
+    matrix = re.search(r'id="backend-and-camera-profile-matrix"></a>[^<]*</h[1-6]>\s*'
+                       r'<table\b[^>]*>(.*?)</table>', text, re.S)
+    if not matrix:
+        raise ValueError(f"{STATUS}: backend matrix did not render as a table")
+    head, *rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", matrix[1], re.S) or ("",)
+    headers = tuple(cell.strip() for cell in re.findall(r"<th\b[^>]*>(.*?)</th>", head, re.S))
+    cells = [re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.S) for row in rows]
+    if headers != STATUS_HEADERS or any(len(row) != len(STATUS_HEADERS) for row in cells):
+        raise ValueError(f"{STATUS}: expected three backend matrix columns")
+    labels = [re.sub(r"<[^>]+>", "", row[0]).strip() for row in cells]
+    if len(labels) != len(STATUS_BACKENDS) or set(labels) != STATUS_BACKENDS:
+        raise ValueError(f"{STATUS}: expected exactly one rendered row per backend/profile")
+    evidence = Page(cells[labels.index(GENTL_LABEL)][2])
+    if (QUALIFICATION, GENTL_EVIDENCE) not in {local_target(STATUS, href) for href, _ in evidence.links}:
+        raise ValueError(f"{STATUS}: missing rendered GenTL qualification-evidence link")
+
+
 def section_targets(page, parsed):
     targets = {}
     for href, label in parsed.links:
@@ -152,6 +241,21 @@ def verify_entry(page, parsed, text, sha):
     for target in ENTRY_LINKS.get(page, ()):
         if (target, "") not in linked:
             raise ValueError(f"{page}: no navigation to {target}")
+    if page == STATUS:
+        verify_rendered_status_matrix(text)
+    for fragment in {PROFILE_TUTORIAL: (QUALIFICATION_GROUPS[0], QUALIFICATION_GROUPS[2]),
+                     BACKEND_AUTHORING: (QUALIFICATION_GROUPS[1], QUALIFICATION_GROUPS[3],
+                                         QUALIFICATION_GROUPS[4])}.get(page, ()):
+        if (QUALIFICATION, fragment) not in linked:
+            raise ValueError(f"{page}: no navigation to qualification evidence #{fragment}")
+    if page == QUALIFICATION:
+        for fragment in QUALIFICATION_GROUPS:
+            if fragment not in parsed.anchors or (page, fragment) not in linked:
+                raise ValueError(f"{page}: no evidence navigation to #{fragment}")
+        urls = {href for href, _ in parsed.links}
+        for source in QUALIFICATION_RECORDS:
+            if f"{REPOSITORY}/blob/{sha}/{source}" not in urls:
+                raise ValueError(f"{page}: missing revision-pinned original record: {source}")
     if page == PROFILE_EXAMPLES:
         for label, source in EXAMPLE_BUILDS.items():
             if (f"{REPOSITORY}/blob/{sha}/{source}", label) not in parsed.links:
@@ -175,7 +279,7 @@ def verify_entry(page, parsed, text, sha):
     return {}
 
 
-def validate_site(root, sha, sources):
+def validate_site(root, sha, sources, evidence_ids=None):
     allowed = {".html", ".css", ".js", ".svg", ".png"}
     files, pages, errors = set(), {}, []
     for item in sorted(root.rglob("*")):
@@ -199,6 +303,11 @@ def validate_site(root, sha, sources):
     for path in (*ENTRY_PAGES, "files.html", *SEARCH):
         if path not in files:
             errors.append(f"Missing required generated file: {path}")
+    if evidence_ids is not None and QUALIFICATION in pages:
+        text = (root / QUALIFICATION).read_text(encoding="utf-8")
+        rows = re.findall(r"<td[^>]*>\s*(QE-[A-Z0-9-]+) — <a\s", text)
+        if len(rows) != len(evidence_ids) or set(rows) != evidence_ids:
+            errors.append(f"{QUALIFICATION}: not all evidence rows rendered with original record links")
     search_index = "\n".join((root / path).read_text(encoding="utf-8") for path in sorted(files)
                              if re.fullmatch(r"search/all_[0-9a-f]+\.js", path))
 
