@@ -63,6 +63,7 @@ authoritative. `dev`, `release`, `asan` (Address/UndefinedBehaviorSanitizer) and
 | `BUILD_TESTING` | `ON` | CTest contracts and fixture builds |
 | `GIGE_MEL_BUILD_EXAMPLES` | `ON` | Native capture and internal selection examples |
 | `GIGE_MEL_BUILD_DOCS` | `OFF` | Opt-in Doxygen reference; no effect on normal builds, CTest, or the installed package |
+| `GIGE_MEL_TEST_CONTROL_AUTHORITY` | `OFF` | With `BUILD_TESTING`, adds SDK-free authority and stale-ACK loopback checks; no production path. [Evidence](docs/tasks/GIGE-MEL-046-validation.md) |
 | `GIGE_MEL_WARNINGS_AS_ERRORS` | `ON` | Treat project compiler warnings as errors |
 | `GIGE_MEL_SANITIZERS` | empty | GCC/Clang sanitizer list; set by sanitizer presets |
 | `GIGE_MEL_BUILD_ARAVIS` | `OFF` | Internal adapter; requires exactly Aravis 0.8.36. [Setup and tests](docs/aravis-integration.md) |

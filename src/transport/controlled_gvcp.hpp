@@ -63,6 +63,7 @@ private:
     std::uint32_t next_{1};
 };
 }
+namespace test { struct ClientBinding; }
 
 /// @brief Experimental loopback register/memory operations, not SDK access.
 /// The entire range must fit the 32-bit window; addresses and lengths are
@@ -109,6 +110,9 @@ public:
     Status read_memory(std::uint32_t, std::span<std::byte>, TransactionOptions) override;
     Status write_memory(std::uint32_t, std::span<const std::byte>, TransactionOptions) override;
 private:
+    friend struct test::ClientBinding;
+    static Result<std::unique_ptr<Client>> bind_loopback(const std::string&, std::uint16_t remote,
+                                                        std::uint16_t local);
     Client(int fd, std::uint32_t ip, std::uint16_t port) : fd_(fd), ip_(ip), port_(port) {}
     Result<std::vector<std::byte>> transact(std::uint16_t command, std::uint32_t address,
         std::size_t size, std::span<const std::byte> source, TransactionOptions);

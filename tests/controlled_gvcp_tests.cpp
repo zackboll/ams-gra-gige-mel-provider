@@ -19,6 +19,13 @@
 
 namespace gv = gige_mel::controlled_gvcp;
 namespace wire = gv::wire;
+namespace gige_mel::controlled_gvcp::test {
+struct ClientBinding {
+    static auto reuse(std::uint16_t remote, std::uint16_t local) {
+        return Client::bind_loopback("127.0.0.1", remote, local);
+    }
+};
+}
 using namespace std::chrono_literals;
 using Bytes = std::vector<std::byte>;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": " #x); } while (false)
@@ -46,7 +53,7 @@ gv::TransactionOptions budget(std::chrono::milliseconds limit = 500ms, std::stop
     return {gv::Clock::now() + limit, stop};
 }
 enum class Mode { success, drop, delay, pending, bad_id, bad_command, malformed, wrong_sender,
-                  device_error, partial, unavailable, hostile_then_good, duplicate };
+                  device_error, partial, unavailable, hostile_then_good, duplicate, withhold };
 struct Device {
     struct Scheduled { gv::Clock::time_point at; Bytes bytes; sockaddr_in peer; bool rogue{}; };
     int fd{-1}, rogue{-1};
@@ -58,6 +65,8 @@ struct Device {
     std::map<std::uint32_t, std::uint32_t> registers;
     std::map<std::uint32_t, Bytes> memory;
     std::vector<Scheduled> scheduled;
+    std::optional<Scheduled> withheld; // Under mutex; released only by the test barrier.
+    sockaddr_in last_peer{};
     std::exception_ptr error;
     std::jthread worker;
 
@@ -99,6 +108,7 @@ struct Device {
         auto a = get32(b, 8);
         Mode mode = commands.size() < modes.size() ? modes[commands.size()] : Mode::success;
         commands.push_back(b);
+        last_peer = peer;
         Bytes payload;
         if (cmd == 0x80) { CHECK(b.size() == 12); payload = word(registers[a]); }
         else if (cmd == 0x82) {
@@ -125,6 +135,7 @@ struct Device {
         };
         switch (mode) {
         case Mode::drop: case Mode::unavailable: return;
+        case Mode::withhold: withheld = Scheduled{now, std::move(response), peer}; return;
         case Mode::delay: queue(response, 140ms); return;
         case Mode::pending:
             for (int i = 0; i < 50; ++i) queue(ack(0x89, id, word(60000)), i * 5ms);
@@ -168,6 +179,44 @@ struct Device {
 };
 std::unique_ptr<gv::Client> client(Device& server) {
     auto result = gv::Client::create("127.0.0.1", server.port); CHECK(result); return std::move(result.value());
+}
+
+void stale_session_ack() {
+    Device server({Mode::withhold, Mode::unavailable});
+    auto a = client(server);
+    std::stop_source stop;
+    gv::Status first = gv::Failure{gv::ErrorCode::io};
+    std::jthread submit_a([&] { first = a->write_register(4, 11, budget(2s, stop.get_token())); });
+    server.wait_commands(1);
+    stop.request_stop();
+    submit_a.join();
+    CHECK(!first && first.error().code == gv::ErrorCode::cancelled);
+    CHECK(first.error().transmitted && first.error().write_completion == gv::WriteCompletion::uncertain);
+    a.reset(); // Fully retire the socket before forcing reuse (no SO_REUSEPORT).
+    std::uint16_t local;
+    {
+        std::lock_guard lock(server.mutex);
+        CHECK(server.withheld.has_value());
+        local = ntohs(server.withheld->peer.sin_port);
+        CHECK(local != 0 && get16(server.commands[0], 6) == 1);
+    }
+    auto b = gv::test::ClientBinding::reuse(server.port, local);
+    CHECK(b);
+    gv::Status second = gv::Failure{gv::ErrorCode::io};
+    std::jthread submit_b([&] { second = b.value()->write_register(4, 22, budget(2s)); });
+    server.wait_commands(2);
+    {
+        std::lock_guard lock(server.mutex);
+        CHECK(server.last_peer.sin_addr.s_addr == server.withheld->peer.sin_addr.s_addr);
+        CHECK(server.last_peer.sin_port == server.withheld->peer.sin_port);
+        CHECK(get16(server.commands[1], 6) == 1 && get32(server.commands[1], 12) == 22);
+        server.send(*server.withheld); // Only A's ACK is emitted; B was not applied.
+        server.withheld.reset();
+    }
+    submit_b.join();
+    CHECK(second && second.value().write_completion == gv::WriteCompletion::acknowledged);
+    CHECK(server.reg(4) == 11 && server.count() == 2);
+    std::cout << "Former session's ID-1 write ACK accepted on reused loopback endpoint; B not applied\n";
 }
 
 void parser() {
@@ -350,6 +399,7 @@ int main(int argc, char** argv) {
     try {
         CHECK(argc == 2);
         if (std::string(argv[1]) == "parser") parser();
+        else if (std::string(argv[1]) == "stale_session") stale_session_ack();
         else { success_and_validation(); deadlines(); cancellation_and_late(); concurrency_and_resources(); }
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

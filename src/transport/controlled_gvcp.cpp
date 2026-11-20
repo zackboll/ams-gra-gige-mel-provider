@@ -22,6 +22,10 @@ std::optional<ErrorCode> interrupted(TransactionOptions options) {
 }
 }
 Result<std::unique_ptr<Client>> Client::create(const std::string& ipv4, std::uint16_t port) {
+    return bind_loopback(ipv4, port, 0);
+}
+Result<std::unique_ptr<Client>> Client::bind_loopback(const std::string& ipv4, std::uint16_t port,
+                                                      std::uint16_t local_port) {
     in_addr ip{};
     if (inet_pton(AF_INET, ipv4.c_str(), &ip) != 1 || (ntohl(ip.s_addr) >> 24) != 127 ||
         port == 0 || port == 3956) return Failure{ErrorCode::invalid_argument};
@@ -30,6 +34,7 @@ Result<std::unique_ptr<Client>> Client::create(const std::string& ipv4, std::uin
     sockaddr_in local{};
     local.sin_family = AF_INET;
     local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    local.sin_port = htons(local_port);
     if (bind(fd, reinterpret_cast<const sockaddr*>(&local), sizeof(local)) != 0) {
         close(fd); return Failure{ErrorCode::io};
     }
