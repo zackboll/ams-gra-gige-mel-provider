@@ -166,6 +166,13 @@
           "result": "positive",
           "level": "SDK-free",
           "demonstrates": "Recording sink receives all validated fields and acceptance is required when the sink exists."
+        },
+        {
+          "path": "tests/profile_navigation_tests.cpp",
+          "scenario": "mel_profile_b_dispatch",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Selected camera-profile handler prepares an owned fictional test record from the unchanged report behind the existing sink; recording-port acceptance only."
         }
       ],
       "gap": "Define sensor wire/SDK protocol and acknowledgement contract; integrate INavigationSink; qualify image/time association separately.",
