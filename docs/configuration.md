@@ -9,6 +9,8 @@ Native SDK fixtures and limited physical Cognex Mono8 observations exist, but
 do not qualify production camera operation, MEL timing or other firmware. See
 [Qualification Evidence](qualification-evidence.md).
 
+See also: <!-- subpage --> [ModeCmd and commanded Standby](mode-command.md).
+
 ## Schema version 1
 
 A complete working payload is:

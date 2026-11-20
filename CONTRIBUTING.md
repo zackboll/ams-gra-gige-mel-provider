@@ -61,6 +61,11 @@ ownership, cancellation, error and thread semantics on the relevant C++
 declarations. Put API comment improvements next to project declarations and
 maintainer notes next to the relevant implementation; do not edit pinned upstream
 headers. Use the [documentation index](docs/index.md) for new guide navigation.
+For a published guide, mark one whole-page Markdown link from its section with
+`<!-- subpage -->` immediately before the link. Staging makes that link a
+Doxygen child; leave links from other topics unmarked. The five homepage hubs
+are Guides roots because Doxygen excludes main-page children from that index.
+Keep long historical reports source-backed rather than adding them to the site.
 
 For consumer-facing changes, check [Integrating a MEL Consumer](docs/consumer-integration.md)
 against the provider contracts and build the [standalone example](examples/installed_consumer/)

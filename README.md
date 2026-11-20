@@ -136,14 +136,14 @@ tracks required, conditional and optional work; channel stubs are not conformanc
   [Pleora](docs/pleora-integration.md), [runtime composition](docs/runtime-selection.md).
 - **New camera profile:** [Create a Camera Profile](docs/camera-profile-tutorial.md),
   [authoring contract](docs/camera-profile-authoring.md),
-  [C++ interface](docs/index.md#camera-profile-c-interface),
+  [C++ interface](docs/cpp-api-reference.md),
   [reference implementations](docs/camera-profile-examples.md).
 - **New backend:** [backend authoring](docs/backend-authoring.md),
   [portability contracts](docs/backend-portability.md).
 - **MEL interface obligations:** [requirements traceability](docs/mel-traceability.md),
   exact pinned [IR MEL](third_party/ir-mel/include/) and
   [Common MEL](third_party/common-mel/include/) declarations.
-- **Design and evidence:** [documentation index](docs/index.md#evidence-and-design-history),
+- **Design and evidence:** [Engineering & Qualification](docs/engineering-qualification.md),
   [historical validation record](docs/validation.md), [repository instructions](AGENTS.md).
 
 ## Build the documentation

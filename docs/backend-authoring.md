@@ -1,5 +1,7 @@
 # Adding a camera backend
 
+See also: <!-- subpage --> [Backend portability qualification](backend-portability.md).
+
 ## Starting point
 
 Use this guide when adding a **new SDK/transport adapter** to the existing

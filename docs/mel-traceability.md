@@ -4,7 +4,7 @@
 **Requirements Traceability** → [C++ Implementation](../src/provider.cpp) →
 [Tests/Evidence](mel-traceability-evidence.md).
 
-Start with the [operation inventory and actionable gap report](mel-traceability-evidence.md).
+Start with the <!-- subpage --> [operation inventory and actionable gap report](mel-traceability-evidence.md).
 The [reviewable JSON](traceability/README.md) is the status source of truth;
 the website report is generated from it. Use the [implementation profile](implementation-profile.md)
 for exact behavior, the [roadmap](mel-surface-roadmap.md) for sequencing and
