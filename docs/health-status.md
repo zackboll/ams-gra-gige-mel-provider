@@ -9,6 +9,9 @@ qualified or fabricated. The [provider-software BIT profile](software-bit.md)
 adds observed-state results/current software faults, with host UTC wall-clock
 estimate timestamps only; it is not physical-health certification.
 
+- <!-- subpage --> [Provider-software BIT](software-bit.md)
+- <!-- subpage --> [Software subsystem status](subsystem-status.md)
+
 ## Public MEL surface
 
 After successful Control initialization, discovery contains Image, C2, and

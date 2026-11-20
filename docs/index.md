@@ -1,146 +1,33 @@
-# GigE MEL Provider documentation
+# AMS-GRA GigE MEL Provider
 
-This is the canonical navigation entry point for the native C++20 AMS-GRA IR
-MEL **provider**. Start with the [README](../README.md) for the SDK-free build
-and the [current capability and evidence status](status.md) for scope and limits.
-MEL means MFA Encapsulation Layer, not Matrox MIL.
+The GigE MEL Provider is a native C++20 AMS-GRA infrared provider. It publishes
+camera images and metadata through the MFA Encapsulation Layer (MEL).
 
-## Getting Started
+**Start here:** [SDK-free Quick Start](../README.md#sdk-free-quick-start) ·
+[Integrating a MEL Consumer](consumer-integration.md) ·
+[Current Capabilities and Limitations](status.md)
 
-1. [Build and capture without a camera SDK](../README.md#sdk-free-quick-start).
-2. [Integrating a MEL Consumer](consumer-integration.md) — install the provider,
-   link or load it, then capture and release an image with the
-   [standalone installed consumer](../examples/installed_consumer/).
-3. [C++ API Reference](#c-api-reference) — project interfaces and source, with
-   installed and internal interfaces clearly separated.
-4. [Camera Integration](#camera-integration) — select an adapter or add a model.
-5. [Qualification Evidence](qualification-evidence.md) — find experiments by SDK,
-   camera and evidence class, then open the original record.
+<!-- Legacy landing-page fragments now point to the task list. -->
+<span id="getting-started"></span>
+<span id="use-and-integrate"></span>
+<span id="develop"></span>
+<span id="camera-integration"></span>
+<span id="mel-implementation"></span>
+<span id="behavior-references"></span>
+<span id="c-api-reference"></span>
+<span id="camera-profile-c-interface"></span>
+<span id="build-and-browse-the-reference"></span>
+<span id="evidence-and-design-history"></span>
+<span id="documentation-follow-up"></span>
 
-## C++ API Reference
+**Browse by task**
 
-The [generated reference](https://zackboll.github.io/ams-gra-gige-mel-provider/)
-documents project C++ interfaces, not the pinned upstream MEL API. Build the
-reference for your checkout with the
-[local documentation instructions](../README.md#build-the-documentation).
+- [Getting Started](getting-started.md) — build, capture, or connect a consumer.
+- [Camera Integration](camera-integration.md) — choose a backend, device, and camera profile.
+- [MEL Capabilities](mel-capabilities.md) — find supported behavior and its limits.
+- [C++ API Reference](cpp-api-reference.md) — browse installed contracts, internals, and source.
+- [Engineering & Qualification](engineering-qualification.md) — inspect requirements, test evidence, and design history.
 
-<!-- generated-api-navigation -->
-
-## Use and integrate
-
-| Need | Start here |
-| --- | --- |
-| Build and capture without a camera SDK | [README quick start](../README.md#sdk-free-quick-start), [native capture example](../examples/capture.cpp) |
-| Look up MEL behavior in detail | [Implementation profile](implementation-profile.md), [configuration](configuration.md), [installed MEL contract tests](../tests/install_consumer/) |
-| Understand interface boundaries | [Architecture](architecture.md), [consumer integration guide](consumer-integration.md) |
-
-## MEL Implementation
-
-Follow the [implementation profile](implementation-profile.md) to
-[Requirements Traceability](mel-traceability.md), then to the C++ reference
-and [Tests/Evidence](mel-traceability-evidence.md).
-
-## Camera Integration
-
-- [Create a Camera Profile](camera-profile-tutorial.md) — implement, build,
-  select and qualify a new model on an existing backend. Keep the
-  [authoring contract](camera-profile-authoring.md) handy.
-- [Aravis integration and timing gates](aravis-integration.md).
-- [Pleora integration, licensing and evaluation limits](pleora-integration.md)
-  and [consolidation disposition](pleora-consolidation.md).
-- [Internal runtime selection](runtime-selection.md) for compiled backends and
-  explicit profile modules.
-- [Cognex module build/admission](../camera_profiles/cognex_cic_5000r/README.md)
-  and [earlier physical camera record](cognex-cic-5000r.md).
-
-### Camera Profile C++ Interface
-
-<!-- generated-profile-navigation -->
-
-- [`ICameraProfile` and its owned state](../src/profiles/camera_profile.hpp)
-  and [`IDeviceFeatures`](../src/device_features.hpp) — internal, uninstalled.
-- [Camera Profile Examples](camera-profile-examples.md) — reference implementations.
-
-## Develop
-
-1. Read the [architecture](architecture.md) and [repository instructions](../AGENTS.md).
-2. For a **new camera model on an existing SDK**, start with
-   [Create a Camera Profile](camera-profile-tutorial.md). Do not add SDK policy
-   branches to the MEL facade.
-3. For a **new SDK/transport**, start with [backend authoring](backend-authoring.md),
-   then [backend portability](backend-portability.md) and
-   [camera-profile portability](camera-profile-portability.md).
-4. For **MEL implementation work**, use the
-   [MEL requirements traceability inventory](mel-traceability.md)
-   together with the exact pinned [IR MEL declarations](../third_party/ir-mel/include/)
-   and [Common MEL declarations](../third_party/common-mel/include/).
-   The [implementation profile](implementation-profile.md) describes current
-   behavior; it is not a substitute for the complete upstream requirements.
-5. Run the SDK-free development suite from the [quick start](../README.md#sdk-free-quick-start).
-   The [CMake definitions](../CMakeLists.txt), [presets](../CMakePresets.json) and
-   [CI workflow](../.github/workflows/ci.yml) are the executable build/test
-   configuration. SDK-enabled and sanitizer results require their own executed
-   evidence; configured CI lanes alone are not qualification.
-
-### Behavior references
-
-- Images and memory: [Mono12](mono12-image-profile.md),
-  [source-backed stacks](stacked-image-provider.md),
-  [Image LOS](image-los-metadata.md).
-- Commands and software state: [ModeCmd](mode-command.md),
-  [Health](health-status.md), [software BIT](software-bit.md),
-  [subsystem status](subsystem-status.md).
-- Navigation: [reception](navigation-reception.md),
-  [optional backend forwarding](navigation-backend-forwarding.md).
-- Internal transport work: [register/memory service](device-register-transport.md),
-  [controlled GVCP experiment](controlled-gvcp-transport.md),
-  [loopback single-owner experiment](gvcp-single-owner.md).
-
-## Evidence and design history
-
-Historical records retain their original scope, test counts and conclusions.
-Use [current status](status.md) to distinguish today's implementation from those
-milestone snapshots; a design proposal is not proof of implementation.
-
-- [Validation record](validation.md) and [task design/validation records](tasks/).
-- [Cognex physical observations](cognex-cic-5000r.md),
-  [GVSP receive-buffer measurements](gvsp-receive-buffer.md),
-  [inconclusive packet-spacing experiment](gvsp-packet-spacing.md).
-- Pleora: [stream-only audit](pleora-stream-only-audit.md),
-  [native TSan investigation](pleora-native-tsan-investigation.md),
-  [scoped TSan exception](pleora-tsan-exception.md),
-  [vendor escalation](pleora-tsan-vendor-escalation.md),
-  [GenApi lock-order investigation](genapi-tsan-lock-order.md).
-- Provider teardown: [TSan investigation](provider-thread-exit-tsan.md),
-  [thread-exit stacks](provider-thread-exit-stacks.md).
-- GenTL: [probe design](tasks/GIGE-MEL-GENTL-001-design.md),
-  [backend fixture results](tasks/GIGE-MEL-GENTL-002-validation.md),
-  [producer qualification results](tasks/GIGE-MEL-GENTL-003-validation.md),
-  [wire harness results](tasks/GIGE-MEL-GENTL-003A-validation.md).
-- [Native C++ provider decision](adr/0001-native-cpp-provider.md),
-  [copy-first memory decision](adr/0002-copy-first-memory.md),
-  [upstream provenance](upstream-provenance.md).
-
-## Build and browse the reference
-
-Enable `GIGE_MEL_BUILD_DOCS` in a separate build directory and build the `docs`
-target. See [README: build the documentation](../README.md#build-the-documentation)
-for commands and tool versions, and [contributor guidance](../CONTRIBUTING.md#documentation)
-for validation and deployment. Browse `build/documentation/docs/html/index.html`
-for the three reference sections and search; use the local HTTP server for search.
-The four project headers under `include/gige_mel/` are installed. The camera
-extension and core sections describe uninstalled source and are not public API.
-
-The [live GitHub Pages site](https://zackboll.github.io/ams-gra-gige-mel-provider/)
-publishes only validated `main` pushes. The footer identifies the deployed source
-commit. Qualification Evidence links historical records at the generated site's
-exact source revision; the full archives are not copied into Pages.
-
-## Documentation follow-up
-
-The following are remaining gaps, not implemented features or claims about the
-scope of future tickets:
-
-| Campaign item | Remaining documentation work |
-| --- | --- |
-| Core API comments | Expand declaration-level ownership, lifetime and error documentation in the project headers and implementation sources. Source extraction is not complete contract documentation. |
+Use **Search** in the generated site to find guides and C++ symbols. The footer
+identifies the source revision. Historical test evidence does not establish
+current camera or SDK qualification.

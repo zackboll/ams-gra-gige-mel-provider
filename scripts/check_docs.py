@@ -3,6 +3,7 @@
 
 import argparse
 from html.parser import HTMLParser
+import json
 from pathlib import Path
 import posixpath
 import re
@@ -86,13 +87,65 @@ INSTALLED_METHODS = (
     "submit_navigation", "open_line_of_sight", "open_stacked_images",
 )
 SEARCH = ("search/search.js", "search/searchdata.js")
-ENTRY_PAGES = ("index.html", CONSUMER_GUIDE, PROFILE_TUTORIAL, MEL_PROFILE, TRACEABILITY,
-               TRACE_EVIDENCE, QUALIFICATION, STATUS, BACKEND_AUTHORING, *SECTIONS)
+
+
+def guide(name):
+    return f"md_docs_2{name}.html"
+
+
+HOME = "index.html"
+GUIDES_INDEX = "pages.html"
+GETTING_STARTED = guide("getting-started")
+CAMERA = guide("camera-integration")
+MEL = guide("mel-capabilities")
+API = guide("cpp-api-reference")
+ENGINEERING = guide("engineering-qualification")
+INDEXES = guide("source-type-indexes")
+NAVIGATION = guide("navigation-los")
+QUICK_START = ("md_README.html", "sdk-free-quick-start")
+HISTORICAL = guide("historical-validation")
+EXPERIMENTS = guide("backend-transport-experiments")
+DESIGN = guide("design-decisions")
+REFERENCE_INDEXES = ("namespaces.html", "namespacemembers.html", "annotated.html", "classes.html",
+                     "hierarchy.html", "functions.html", "files.html", "globals.html")
+API_PAGES = ("api_installed.html", "api_extensions.html", "api_core.html")
+HIERARCHY = {
+    HOME: (GETTING_STARTED, CAMERA, MEL, API, ENGINEERING),
+    GETTING_STARTED: (QUICK_START[0], CONSUMER_GUIDE, STATUS),
+    CAMERA: (guide("backend-selection"), PROFILE_TUTORIAL, guide("genicam-sdk-guide"),
+             guide("pleora-guide"), guide("gentl-status")),
+    guide("backend-selection"): (guide("runtime-selection"), BACKEND_AUTHORING),
+    BACKEND_AUTHORING: (guide("backend-portability"),),
+    PROFILE_TUTORIAL: (guide("camera-profile-authoring"), PROFILE_EXAMPLES, guide("camera-profile-portability")),
+    MEL: (MEL_PROFILE, *map(guide, ("image-frame-metadata", "configuration", "health-status",
+                                   "navigation-los", "stacked-image-provider"))),
+    guide("image-frame-metadata"): (guide("mono12-image-profile"),),
+    guide("configuration"): (guide("mode-command"),),
+    guide("health-status"): (guide("software-bit"), guide("subsystem-status")),
+    NAVIGATION: tuple(map(guide, ("navigation-reception", "navigation-backend-forwarding", "image-los-metadata"))),
+    API: (*API_PAGES, INDEXES),
+    ENGINEERING: (TRACEABILITY, QUALIFICATION, EXPERIMENTS, HISTORICAL, DESIGN),
+    TRACEABILITY: (TRACE_EVIDENCE,),
+    EXPERIMENTS: (guide("device-register-transport"),),
+    DESIGN: (*map(guide, ("architecture", "mel-surface-roadmap", "upstream-provenance", "documentation-warnings")),
+             "md_CONTRIBUTING.html"),
+}
+ORIGINAL_RECORDS = {
+    EXPERIMENTS: ("docs/tasks/GIGE-MEL-GENTL-003-validation.md", "docs/gvcp-single-owner.md"),
+    HISTORICAL: ("docs/validation.md", "docs/cognex-cic-5000r.md", "docs/provider-thread-exit-tsan.md"),
+    DESIGN: ("docs/adr/0001-native-cpp-provider.md", "docs/adr/0002-copy-first-memory.md"),
+    guide("genicam-sdk-guide"): ("docs/aravis-integration.md",),
+    guide("pleora-guide"): ("docs/pleora-integration.md",),
+}
+ENTRY_PAGES = tuple(dict.fromkeys((GUIDES_INDEX, *HIERARCHY, *ORIGINAL_RECORDS, INDEXES, CONSUMER_GUIDE,
+                                 MEL_PROFILE, TRACE_EVIDENCE, QUALIFICATION, STATUS, PROFILE_EXAMPLES, *SECTIONS)))
 ENTRY_LINKS = {
-    "index.html": (CONSUMER_GUIDE, PROFILE_TUTORIAL, "api_installed.html", "api_extensions.html",
-                   "api_core.html", MEL_PROFILE, TRACEABILITY, QUALIFICATION),
+    **HIERARCHY,
+    HOME: (*HIERARCHY[HOME], CONSUMER_GUIDE, STATUS),
+    NAVIGATION: (*HIERARCHY[NAVIGATION], "navigation_8hpp.html", "line__of__sight_8hpp.html"),
+    INDEXES: REFERENCE_INDEXES,
     MEL_PROFILE: (TRACEABILITY,),
-    TRACEABILITY: (MEL_PROFILE, "api_core.html", TRACE_EVIDENCE),
+    TRACEABILITY: (*HIERARCHY[TRACEABILITY], MEL_PROFILE, "api_core.html"),
     "api_core.html": (TRACEABILITY, TRACE_EVIDENCE),
     TRACE_EVIDENCE: (TRACEABILITY, "api_core.html", STATUS),
     QUALIFICATION: (STATUS, TRACEABILITY),
@@ -100,7 +153,7 @@ ENTRY_LINKS = {
     CONSUMER_GUIDE: ("api_installed.html", "provider_8hpp.html", "backend_8hpp.html",
                      "navigation_8hpp.html", "line__of__sight_8hpp.html"),
     "api_installed.html": (CONSUMER_GUIDE, BACKEND_AUTHORING),
-    PROFILE_TUTORIAL: ("api_extensions.html", PROFILE_EXAMPLES, "md_docs_2camera-profile-authoring.html"),
+    PROFILE_TUTORIAL: (*HIERARCHY[PROFILE_TUTORIAL], "api_extensions.html"),
     "api_extensions.html": (PROFILE_TUTORIAL, PROFILE_EXAMPLES),
     PROFILE_EXAMPLES: ("api_extensions.html", PROFILE_TUTORIAL, "camera__profile_8hpp.html",
                        "device__features_8hpp.html", "frame__policy_8hpp.html", "profile__module_8hpp.html",
@@ -124,6 +177,10 @@ class Page(HTMLParser):
         self.links = []
         self.assets = []
         self.breadcrumb = []
+        self.guide_rows = []
+        self.body_links = []
+        self.in_content = False
+        self.guide_row = None
         self.in_breadcrumb_item = False
         self.current_link = None
         self.link_text = []
@@ -137,8 +194,14 @@ class Page(HTMLParser):
         if tag == "a" and "href" in attrs:
             self.current_link = attrs["href"]
             self.link_text = []
+        elif tag == "tr" and re.fullmatch(r"row_(\d+_)+", attrs.get("id", "")):
+            self.guide_row = attrs["id"]
         elif tag == "li" and "navelem" in attrs.get("class", "").split():
             self.in_breadcrumb_item = True
+        elif tag == "div" and attrs.get("id") == "doc-content":
+            self.in_content = True
+        elif tag == "div" and attrs.get("id") in {"page-nav", "nav-path"}:
+            self.in_content = False
         elif tag in {"img", "script", "iframe", "link", "object"}:
             key = "href" if tag == "link" else "data" if tag == "object" else "src"
             if key in attrs:
@@ -151,9 +214,15 @@ class Page(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "li":
             self.in_breadcrumb_item = False
+        if tag == "tr":
+            self.guide_row = None
         if tag == "a" and self.current_link is not None:
             link = (self.current_link, " ".join("".join(self.link_text).split()))
             self.links.append(link)
+            if self.in_content:
+                self.body_links.append(link)
+            if self.guide_row:
+                self.guide_rows.append((self.guide_row, self.current_link))
             if self.in_breadcrumb_item:
                 self.breadcrumb.append(link)
             self.current_link = None
@@ -166,6 +235,111 @@ def local_target(page, href):
     target = (posixpath.normpath(posixpath.join(posixpath.dirname(page), unquote(url.path)))
               if url.path else page)
     return target, unquote(url.fragment)
+
+
+def guide_parents(rows):
+    """Read Doxygen's Related Pages directory row IDs (e.g. row_1_0_)."""
+    paths = dict(rows)
+    if len(paths) != len(rows):
+        raise ValueError("Guides index contains duplicate row IDs")
+    for row, url in rows:
+        parent = row.rstrip("_").rsplit("_", 1)[0] + "_"
+        if parent != "row_" and parent not in paths:
+            raise ValueError(f"Guides index missing parent for {url}")
+        yield paths.get(parent, HOME), url
+
+
+def sidebar_parents(root, pages, authored):
+    """Read the pinned generator's JSON-shaped NAVTREE data without executing JS."""
+    def read_tree(file, variable):
+        text = (root / file).read_text(encoding="utf-8")
+        data = re.search(rf"\bvar {re.escape(variable)} =\s*(\[.*?\n\s*\]);", text, re.S)
+        if not data:
+            raise ValueError(f"{file}: missing sidebar tree data")
+        return json.loads(data[1])
+
+    def visit(nodes, parent, seen):
+        for label, url, children in nodes:
+            if parent == HOME and label == "Reference Indexes":
+                continue  # A shortcut, not a second structural parent for INDEXES.
+            if url not in authored:
+                continue  # Ignore sections and the separately checked reference group.
+            if url in seen:
+                raise ValueError(f"Sidebar cycle at {url}")
+            yield parent, url
+            if isinstance(children, str):
+                children = read_tree(children + ".js", children.replace("-", "_"))
+            if children:
+                yield from visit(children, url, seen | {url})
+
+    [(title, home, nodes)] = read_tree("navtreedata.js", "NAVTREE")
+    if not title or home != HOME:
+        raise ValueError("Sidebar has no project root")
+    groups = [(url, children) for label, url, children in nodes if label == "Reference Indexes"]
+    if len(nodes) != len(HIERARCHY[HOME]) + 1 or len(groups) != 1:
+        raise ValueError("Sidebar must expose five guide roots and one reference-index group")
+    url, indexes = groups[0]
+    target, anchor = local_target(HOME, url)
+    if target != INDEXES or (anchor and anchor not in pages[INDEXES].anchors):
+        raise ValueError("Sidebar reference group must link to Source/Type Indexes")
+    if {url for _, url, _ in indexes} != {"namespaces.html", "annotated.html", "files.html"}:
+        raise ValueError("Sidebar reference group must retain namespaces, classes and files")
+    yield from visit(nodes, HOME, {HOME})
+
+
+def check_parents(edges, authored, name):
+    parents = {}
+    for parent, child in edges:
+        if child in parents:
+            raise ValueError(f"{name}: duplicate parent for {child}")
+        parents[child] = parent
+    for child in parents:
+        visited = {child}
+        parent = parents[child]
+        while parent != HOME:
+            if parent in visited:
+                raise ValueError(f"{name}: cyclic parent at {parent}")
+            if parent not in parents:
+                raise ValueError(f"{name}: missing parent page {parent}")
+            visited.add(parent)
+            parent = parents[parent]
+    expected = {child: parent for parent, children in HIERARCHY.items() for child in children}
+    for child in sorted(authored | parents.keys() | expected.keys()):
+        if child not in authored or child not in expected or parents.get(child) != expected[child]:
+            raise ValueError(f"{name}: wrong or missing parent for {child}: "
+                             f"expected {expected.get(child)}, found {parents.get(child)}")
+
+
+def check_navigation(root, pages, search_index):
+    authored = {path for path in pages if path.startswith(("md_", "api_"))}
+    if any(guide(Path(record).stem) in authored for records in ORIGINAL_RECORDS.values() for record in records):
+        raise ValueError("Original historical records must be linked, not published as guides")
+    related = list(guide_parents(pages[GUIDES_INDEX].guide_rows))
+    check_parents(related, authored, "Guides index")
+    check_parents(sidebar_parents(root, pages, authored), authored, "Sidebar")
+    for guide_url in (*HIERARCHY[HOME], CONSUMER_GUIDE, PROFILE_TUTORIAL, NAVIGATION,
+                      QUALIFICATION, HISTORICAL, EXPERIMENTS, STATUS, *API_PAGES):
+        if f"'../{guide_url}'" not in search_index:
+            raise ValueError(f"Missing guide search result: {guide_url}")
+
+    # Focused negative controls against generated data, not mock page IDs.
+    try:
+        check_parents([edge for edge in related if edge != (GETTING_STARTED, CONSUMER_GUIDE)],
+                      authored, "Guides index")
+    except ValueError as error:
+        if f"missing parent for {CONSUMER_GUIDE}" not in str(error):
+            raise
+    else:
+        raise ValueError("Guide parent negative control accepted a missing child")
+    try:
+        check_entry_links(API, [(href, label) for href, label in pages[API].body_links
+                                if href != "api_installed.html"])
+    except ValueError as error:
+        if "no navigation to api_installed.html" not in str(error):
+            raise
+    else:
+        raise ValueError("Reference path negative control accepted a missing Installed Interfaces link")
+    print(f"Verified {len(authored)} authored pages in Guides and sidebar, and 2 navigation negative controls")
 
 
 def check_status_source(text):
@@ -257,13 +431,27 @@ def check_installed_methods(root, targets):
     print(f"Verified {len(INSTALLED_METHODS)} installed API method descriptions")
 
 
-def verify_entry(page, parsed, text, sha):
-    if (f"{REPOSITORY}/commit/{sha}", f"Source commit: {sha}") not in parsed.links:
-        raise ValueError(f"{page}: missing source provenance for {sha}")
-    linked = {local_target(page, href) for href, _ in parsed.links}
+def check_entry_links(page, body_links):
+    linked = {local_target(page, href) for href, _ in body_links}
     for target in ENTRY_LINKS.get(page, ()):
         if (target, "") not in linked:
             raise ValueError(f"{page}: no navigation to {target}")
+    if page in {HOME, GETTING_STARTED} and QUICK_START not in linked:
+        raise ValueError(f"{page}: no direct SDK-free quick start link")
+    if page == HOME and [local_target(page, href) for href, label in body_links if label][:3] != [
+            QUICK_START, (CONSUMER_GUIDE, ""), (STATUS, "")]:
+        raise ValueError("Homepage must lead with the quick start, consumer guide and current status")
+
+
+def verify_entry(page, parsed, text, sha):
+    if (f"{REPOSITORY}/commit/{sha}", f"Source commit: {sha}") not in parsed.links:
+        raise ValueError(f"{page}: missing source provenance for {sha}")
+    check_entry_links(page, parsed.body_links)
+    linked = {local_target(page, href) for href, _ in parsed.body_links}
+    urls = {href for href, _ in parsed.body_links}
+    for record in ORIGINAL_RECORDS.get(page, ()):
+        if f"{REPOSITORY}/blob/{sha}/{record}" not in urls:
+            raise ValueError(f"{page}: missing revision-pinned original record: {record}")
     if page == STATUS:
         verify_rendered_status_matrix(text)
     for fragment in {PROFILE_TUTORIAL: (QUALIFICATION_GROUPS[0], QUALIFICATION_GROUPS[2]),
@@ -275,7 +463,6 @@ def verify_entry(page, parsed, text, sha):
         for fragment in QUALIFICATION_GROUPS:
             if fragment not in parsed.anchors or (page, fragment) not in linked:
                 raise ValueError(f"{page}: no evidence navigation to #{fragment}")
-        urls = {href for href, _ in parsed.links}
         for source in QUALIFICATION_RECORDS:
             if f"{REPOSITORY}/blob/{sha}/{source}" not in urls:
                 raise ValueError(f"{page}: missing revision-pinned original record: {source}")
@@ -284,7 +471,6 @@ def verify_entry(page, parsed, text, sha):
             if (f"{REPOSITORY}/blob/{sha}/{source}", label) not in parsed.links:
                 raise ValueError(f"{page}: missing revision-pinned link for {source}")
     if page == TRACE_EVIDENCE:
-        urls = {href for href, _ in parsed.links}
         for source in TRACE_LINKS:
             if f"{REPOSITORY}/blob/{sha}/{source}" not in urls:
                 raise ValueError(f"{page}: missing revision-pinned evidence/implementation link: {source}")
@@ -325,7 +511,7 @@ def validate_site(root, sha, sources, evidence_ids=None):
             if item.suffix == ".html":
                 pages[path] = Page(data.decode("utf-8"))
 
-    for path in (*ENTRY_PAGES, "files.html", *SEARCH):
+    for path in (*ENTRY_PAGES, *REFERENCE_INDEXES, "navtreedata.js", "menudata.js", *SEARCH):
         if path not in files:
             errors.append(f"Missing required generated file: {path}")
     if evidence_ids is not None and QUALIFICATION in pages:
@@ -395,6 +581,7 @@ def validate_site(root, sha, sources, evidence_ids=None):
 
     if errors:
         raise ValueError("Documentation validation failed:\n" + "\n".join(sorted(set(errors))))
+    check_navigation(root, pages, search_index)
     print(f"Verified {len(pages)} HTML pages, {len(sources)} source browsers, search, "
           f"navigation and publication boundary at {sha}")
 
@@ -410,7 +597,11 @@ def verify_live(sha):
             targets = set()
             for path in ENTRY_PAGES:
                 text = fetch(path)
-                targets.update(verify_entry(path, Page(text), text, sha).values())
+                parsed = Page(text)
+                targets.update(verify_entry(path, parsed, text, sha).values())
+                if path == GUIDES_INDEX:
+                    authored = {child for children in HIERARCHY.values() for child in children}
+                    check_parents(guide_parents(parsed.guide_rows), authored, "Live Guides index")
             for target, fragment in sorted(targets):
                 parsed = Page(fetch(target))
                 verify_entry(target, parsed, "", sha)

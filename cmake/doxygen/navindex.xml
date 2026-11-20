@@ -1,0 +1,20 @@
+<navindex>
+  <tab type="mainpage" title="Home"/>
+  <tab type="pages" title="Guides" intro="Expand a section to browse its guides."/>
+  <tab type="usergroup" title="Reference Indexes" url="md_docs_2source-type-indexes.html">
+    <tab type="namespaces" title="Namespaces">
+      <tab type="namespacelist"/>
+      <tab type="namespacemembers"/>
+    </tab>
+    <tab type="classes" title="Classes">
+      <tab type="classlist"/>
+      <tab type="classindex" visible="$ALPHABETICAL_INDEX"/>
+      <tab type="hierarchy"/>
+      <tab type="classmembers"/>
+    </tab>
+    <tab type="files" title="Files">
+      <tab type="filelist"/>
+      <tab type="globals"/>
+    </tab>
+  </tab>
+</navindex>

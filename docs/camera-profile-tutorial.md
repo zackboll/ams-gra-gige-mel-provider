@@ -4,7 +4,7 @@ Add a camera model to an existing GigE MEL Provider backend without adding
 camera-specific branches to the MEL facade. Use the [Cognex CIC-5000R module](../camera_profiles/cognex_cic_5000r/README.md)
 as the real-camera reference and the [rate-limited module](../examples/profile_module/README.md)
 to learn the module and state lifetimes without requiring a camera. Keep the
-[camera-profile authoring contract](camera-profile-authoring.md) open for the
+<!-- subpage --> [camera-profile authoring contract](camera-profile-authoring.md) open for the
 detailed interface requirements. Compare [Cognex module fixture evidence](qualification-evidence.md#sdk-free-provider-and-profiles)
 with the [earlier physical camera experiments](qualification-evidence.md#cognex-cic-5000r-physical-observations);
 the measurements informed policy but did not qualify the module on hardware.
@@ -43,8 +43,9 @@ GenTL's current internal adapter is a read-only foundation, not a catalog target
 for these modules and not a streaming qualification.
 
 **C++ Interface:** start with the [internal extension reference](index.md#camera-profile-c-interface),
-then open [Camera Profile Examples](camera-profile-examples.md) for the reference
+then open <!-- subpage --> [Camera Profile Examples](camera-profile-examples.md) for the reference
 implementations. These are source-tree interfaces, not installed public API.
+See also <!-- subpage --> [profile portability](camera-profile-portability.md).
 
 ## 2. Implement the profile and open-time admission
 

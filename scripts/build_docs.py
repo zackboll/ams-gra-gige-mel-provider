@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from urllib.parse import quote, unquote, urlsplit
 
-from check_docs import REPOSITORY, check_status_source, project_sources, validate_site
+from check_docs import PAGES, REPOSITORY, check_status_source, project_sources, validate_site
 import check_mel_traceability as traceability
 import check_qualification_evidence as evidence
 
@@ -30,13 +30,23 @@ GUIDES = {
         "image-los-metadata", "mono12-image-profile", "mode-command", "health-status",
         "software-bit", "subsystem-status", "navigation-reception",
         "navigation-backend-forwarding", "device-register-transport", "documentation-warnings",
+        "getting-started", "camera-integration", "backend-selection", "genicam-sdk-guide",
+        "pleora-guide", "gentl-status", "mel-capabilities", "image-frame-metadata",
+        "navigation-los", "cpp-api-reference", "source-type-indexes",
+        "engineering-qualification", "backend-transport-experiments", "historical-validation",
+        "design-decisions",
     )),
 }
 
 # Repository prose uses inline Markdown links for local paths. Reference-style
 # link definitions in the published guides use absolute upstream URLs.
-LINK = re.compile(r"(!?)\[([^\[\]]+)\]\(([^\s()]+)\)")
+LINK = re.compile(r"(<!-- subpage --> )?(!?)\[([^\[\]]+)\]\(([^\s()]+)\)")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+GENERATED_LINKS = {
+    "api_installed.html", "api_extensions.html", "api_core.html", "annotated.html",
+    "classes.html", "hierarchy.html", "functions.html", "namespaces.html",
+    "namespacemembers.html", "files.html", "globals.html",
+}
 
 
 def git(*args):
@@ -45,16 +55,30 @@ def git(*args):
 
 def stage_guide(path, stage, tracked, sources, sha):
     def rewrite(match):
-        image, label, target = match.groups()
+        subpage, image, label, target = match.groups()
         # Doxygen's Markdown-to-reference conversion can consume subsequent
         # paragraphs when it encounters a wrapped link label.
         label = re.sub(r"\s*\n\s*", " ", label)
         prefix = f"{image}[{label}]("
         url = urlsplit(target)
+        page = target.removeprefix(PAGES)
+        if page != target and urlsplit(page).path in GENERATED_LINKS:
+            if subpage:
+                if url.fragment or url.query or image:
+                    raise ValueError(f"{path}: invalid generated subpage: {target}")
+                return f'@subpage {page.removesuffix(".html")} "{label}"'
+            return f"{prefix}{page})"
         if url.scheme or url.netloc or not url.path:
+            if subpage:
+                raise ValueError(f"{path}: invalid subpage: {target}")
             return f"{prefix}{target})"
         resolved = (ROOT / path).parent / unquote(url.path)
         relative = resolved.resolve().relative_to(ROOT).as_posix()
+        if subpage:
+            if relative not in GUIDES or relative == "docs/index.md" or url.fragment or url.query or image:
+                raise ValueError(f"{path}: subpage must be a staged guide without a fragment: {target}")
+            page_id = "md_" + relative.removesuffix(".md").replace("/", "_2")
+            return f'@subpage {page_id} "{label}"'
         if relative == "docs/index.md":
             api_page = {"c-api-reference": "api_installed",
                         "camera-profile-c-interface": "api_extensions"}.get(url.fragment)
@@ -94,13 +118,6 @@ def stage_guide(path, stage, tracked, sources, sha):
     output = stage / path
     output.parent.mkdir(parents=True, exist_ok=True)
     text = "".join(chunks) + LINK.sub(rewrite, "".join(prose))
-    if path == "docs/index.md":
-        text = text.replace("<!-- generated-api-navigation -->", """- [Installed C++ interfaces](@ref api_installed) — for MEL consumers and native C++ integrators.
-- [Camera extension interfaces (internal, uninstalled)](@ref api_extensions) — for profile and backend authors.
-- [Core implementation reference (internal)](@ref api_core) — for runtime maintainers, with a line-numbered source browser.
-""")
-        text = text.replace("<!-- generated-profile-navigation -->",
-                            "- [Camera profile C++ interface](@ref api_extensions)\n")
     if path == "docs/mel-traceability.md":
         text = text.replace("[C++ Implementation](@ref src/provider.cpp)",
                             "[C++ Implementation](@ref api_core)")
@@ -134,6 +151,17 @@ def build(args):
     (stage / "docs/mel-traceability-evidence.md").write_text(
         traceability.report(lock, operations, sha), encoding="utf-8")
 
+    # Doxygen 1.14 requires complete class/file/etc. layouts, even when only
+    # navindex is customized. Keep those sections exactly as Doxygen ships them.
+    layout = stage / "layout.xml"
+    subprocess.run([args.doxygen, "-l", layout], cwd=stage, check=True, stdout=subprocess.DEVNULL)
+    nav = (ROOT / "cmake/doxygen/navindex.xml").read_text(encoding="utf-8").strip()
+    default_layout = layout.read_text(encoding="utf-8")
+    merged, count = re.subn(r"<navindex>.*?</navindex>", lambda _: nav, default_layout, flags=re.S)
+    if count != 1:
+        raise ValueError("Cannot replace Doxygen's default navigation layout")
+    layout.write_text(merged, encoding="utf-8")
+
     # Keep provenance visible on every page with Doxygen's standard footer.
     footer = stage / "footer.html"
     subprocess.run([args.doxygen, "-w", "html", "header.html", "footer.html", "doxygen.css"],
@@ -144,10 +172,13 @@ def build(args):
                   f'<a href="{REPOSITORY}">GitHub repository</a> · '
                   f'<a href="{REPOSITORY}/blob/{sha}/LICENSE">Apache-2.0</a> · '
                   f'<a href="{REPOSITORY}/blob/{sha}/NOTICE">Attribution and notices</a>')
-    if "</body>" not in footer_text:
+    footer_slot = "</div>\n<!--END GENERATE_TREEVIEW-->"
+    if footer_slot not in footer_text:
         raise ValueError("Cannot add provenance to the Doxygen footer")
-    footer.write_text(footer_text.replace("</body>",
-                      f'<div class="footer">{provenance}</div>\n</body>'), encoding="utf-8")
+    # Tree view fixes the standard footer to the viewport. Appending a separate
+    # footer below it puts provenance outside Firefox's visible scroll area.
+    footer.write_text(footer_text.replace(footer_slot,
+                      f'<div class="footer">{provenance}</div>\n{footer_slot}', 1), encoding="utf-8")
 
     inputs = [ROOT / p for p in sorted(sources | annotations)] + sorted(GUIDES)
     version_definitions = " ".join(f"GIGE_MEL_VERSION_{key}={value}" for key, value in
@@ -159,6 +190,7 @@ STRIP_FROM_PATH = "{ROOT}" "{stage}"
 INPUT = {" ".join(f'"{p}"' for p in inputs)}
 USE_MDFILE_AS_MAINPAGE = docs/index.md
 HTML_FOOTER = "{footer}"
+LAYOUT_FILE = "{layout}"
 WARN_LOGFILE = "{out / 'doxygen-warnings.log'}"
 DOT_PATH = "{Path(args.dot).parent}"
 PREDEFINED += {version_definitions} GenTLMajorVersion=1 GenTLMinorVersion=6 GC_GENTL_HEADER_VERSION=106
