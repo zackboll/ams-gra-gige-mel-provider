@@ -360,7 +360,8 @@ if(BUILD_TESTING)
   target_link_libraries(profile_navigation_tests PRIVATE gige_mel_profile_navigation gige_mel_selection
     gige_mel_provider gige_mel_build_options Threads::Threads)
   add_dependencies(profile_navigation_tests gige_mel_external_test_profile)
-  foreach(scenario bridge_capability_discovery bridge_preparation_and_mapping bridge_uncertainty_and_control_loss
+  foreach(scenario bridge_capability_discovery bridge_preparation_and_mapping bridge_signed_zero_representation
+      bridge_uncertainty_and_control_loss
       bridge_concurrency_and_teardown mel_profile_a_receipt_only mel_profile_b_dispatch mel_profile_b_uncertainty
       mel_profile_b_lifecycle dynamic_module_navigation)
     add_test(NAME profile_navigation_${scenario} COMMAND profile_navigation_tests ${scenario})

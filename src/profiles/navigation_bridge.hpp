@@ -60,6 +60,11 @@ public:
 /// | Port `uncertain`, exception, or acceptance after control loss | `timeout` (uncertain) | yes |
 /// | Earlier unresolved/lost outcome; concurrent; reentrant; retired | `invalid_state` / `disconnected` / `busy` | no |
 ///
+/// "Altered" means not representation-identical: every floating-point field,
+/// including all 18 covariance entries, is compared by its IEEE 754 bit
+/// pattern, so a change from +0.0 to -0.0 is refused although the values
+/// compare equal numerically. Other fields use ordinary equality.
+///
 /// `timeout` is the existing INavigationSink encoding for uncertain acceptance.
 /// Uncertainty and control loss are sticky: later submissions are refused
 /// without invoking the handler or port. Nothing is retried automatically.

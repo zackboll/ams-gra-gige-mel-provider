@@ -59,7 +59,11 @@ const IProfileNavigationHandler* navigation_handler(const ICameraProfileState&) 
   destroys it. The profile author controls the payload layout; there is no
   universal detector wire format.
 * **No implicit conversion.** `report` must equal the submitted report exactly;
-  the bridge refuses an operation whose copy differs.
+  the bridge refuses an operation whose copy differs. Floating-point fields,
+  including all 18 covariance entries, are compared by IEEE 754 bit pattern,
+  not numerically, so a change between +0.0 and -0.0 counts as altered. Other
+  fields use ordinary equality. The comparison is field by field and never uses
+  `memcmp`, since padding bytes are not value data.
 
 ## Bridge and backend port
 

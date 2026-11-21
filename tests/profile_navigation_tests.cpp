@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <bit>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -41,6 +42,9 @@ namespace {
     } while (false)
 
 bool contains(std::string_view text, std::string_view part) { return text.find(part) != std::string_view::npos; }
+
+constexpr std::uint64_t bits(const double& value) noexcept { return std::bit_cast<std::uint64_t>(value); }
+static_assert(bits(0.0) != bits(-0.0));
 
 template <class T> std::shared_ptr<T> response(mel::RequestFor<T> future) {
     CHECK(future.wait_for(0ms) == std::future_status::ready);
@@ -99,7 +103,6 @@ void check_record(const gp::NavigationOperation& operation, const gb::Navigation
     CHECK(operation.report == expected);
     const auto fields = nr::decode(operation.payload);
     CHECK(fields.has_value());
-    const auto bits = [](double value) { return std::bit_cast<std::uint64_t>(value); };
     const std::vector<std::pair<std::uint16_t, std::uint64_t>> wanted{
         {0x0001, static_cast<std::uint64_t>(expected.system_time.count())},
         {0x0002, nr::state_code(expected.state)},
@@ -190,6 +193,103 @@ void bridge_preparation_and_mapping() {
     f.recording->set_mode(fx::PortMode::accept);
     CHECK(f.bridge->submit(expected_report(12ns)));
     CHECK(f.recording->operation_count() == 4 && f.controls->rejected == 2);
+}
+
+// Every binary64 field of NavigationReport, named, as an independently written
+// list (not derived from the bridge's comparison): 18 named + 18 covariance.
+using FieldRef = double& (*)(gb::NavigationReport&);
+#define GIGE_MEL_FLOAT_FIELD(path) {#path, [](gb::NavigationReport& r) -> double& { return r.path; }}
+#define GIGE_MEL_COVARIANCE_FIELD(name) GIGE_MEL_FLOAT_FIELD(position_velocity_covariance_uncertainty.name)
+const std::vector<std::pair<std::string_view, FieldRef>>& floating_fields() {
+    static const std::vector<std::pair<std::string_view, FieldRef>> fields{
+        GIGE_MEL_FLOAT_FIELD(latitude), GIGE_MEL_FLOAT_FIELD(longitude), GIGE_MEL_FLOAT_FIELD(altitude),
+        GIGE_MEL_FLOAT_FIELD(attitude.roll), GIGE_MEL_FLOAT_FIELD(attitude.pitch), GIGE_MEL_FLOAT_FIELD(attitude.yaw),
+        GIGE_MEL_FLOAT_FIELD(attitude_rate.attitude_rate.roll), GIGE_MEL_FLOAT_FIELD(attitude_rate.attitude_rate.pitch),
+        GIGE_MEL_FLOAT_FIELD(attitude_rate.attitude_rate.yaw),
+        GIGE_MEL_FLOAT_FIELD(speed.north), GIGE_MEL_FLOAT_FIELD(speed.east), GIGE_MEL_FLOAT_FIELD(speed.down),
+        GIGE_MEL_FLOAT_FIELD(acceleration.north), GIGE_MEL_FLOAT_FIELD(acceleration.east),
+        GIGE_MEL_FLOAT_FIELD(acceleration.down),
+        GIGE_MEL_FLOAT_FIELD(wander_angle), GIGE_MEL_FLOAT_FIELD(magnetic_heading), GIGE_MEL_FLOAT_FIELD(altitude_msl),
+        GIGE_MEL_COVARIANCE_FIELD(position_position_pn_pn), GIGE_MEL_COVARIANCE_FIELD(position_position_pn_pe),
+        GIGE_MEL_COVARIANCE_FIELD(position_position_pn_pd), GIGE_MEL_COVARIANCE_FIELD(position_position_pe_pe),
+        GIGE_MEL_COVARIANCE_FIELD(position_position_pe_pd), GIGE_MEL_COVARIANCE_FIELD(position_position_pd_pd),
+        GIGE_MEL_COVARIANCE_FIELD(position_velocity_pn_vn), GIGE_MEL_COVARIANCE_FIELD(position_velocity_pn_ve),
+        GIGE_MEL_COVARIANCE_FIELD(position_velocity_pn_vd), GIGE_MEL_COVARIANCE_FIELD(position_velocity_pe_ve),
+        GIGE_MEL_COVARIANCE_FIELD(position_velocity_pe_vd), GIGE_MEL_COVARIANCE_FIELD(position_velocity_pd_vd),
+        GIGE_MEL_COVARIANCE_FIELD(velocity_velocity_vn_vn), GIGE_MEL_COVARIANCE_FIELD(velocity_velocity_vn_ve),
+        GIGE_MEL_COVARIANCE_FIELD(velocity_velocity_vn_vd), GIGE_MEL_COVARIANCE_FIELD(velocity_velocity_ve_ve),
+        GIGE_MEL_COVARIANCE_FIELD(velocity_velocity_ve_vd), GIGE_MEL_COVARIANCE_FIELD(velocity_velocity_vd_vd)};
+    return fields;
+}
+#undef GIGE_MEL_COVARIANCE_FIELD
+#undef GIGE_MEL_FLOAT_FIELD
+
+// A handler that changes only the sign of a zero returns a copy that the numeric
+// (defaulted) operator== still calls equal. The bridge must refuse it before the
+// recording port is entered, for every floating-point field, in both directions.
+void bridge_signed_zero_representation() {
+    CHECK(floating_fields().size() == 36);
+    BridgeFixture f;
+    // Every floating-point field is +0.0: finite and inside the fixture policy.
+    gb::NavigationReport zeros;
+    zeros.system_time = 20ns;
+    zeros.state = gb::NavigationSolutionState::gps;
+    for (const auto& [name, field] : floating_fields()) CHECK(bits(field(zeros)) == bits(0.0));
+
+    // Positive control: an unchanged copy of +0.0 values is forwarded bit-exactly.
+    CHECK(f.bridge->submit(zeros));
+    CHECK(f.recording->entries() == 1 && f.recording->operation_count() == 1);
+    for (const auto& [name, field] : floating_fields())
+        CHECK(bits(field(f.recording->operations.back().report)) == bits(0.0));
+
+    std::string accepted;
+    const auto refused_before_port = [&](const gb::NavigationReport& report, std::string_view name,
+                                         std::string_view direction) {
+        const auto entries = f.recording->entries();
+        const auto events = f.recording->snapshot_events();
+        const auto operations = f.recording->operation_count();
+        const auto prepared = f.controls->prepared.load();
+        const auto status = f.bridge->submit(report);
+        CHECK(f.controls->prepared == prepared + 1);  // the handler ran and built the copy
+        // Report all missed fields so a failure in latitude cannot hide one in covariance.
+        if (status) {
+            accepted += "\n  ";
+            accepted += name;
+            accepted += direction;
+            return;
+        }
+        expect_status(status, gb::ErrorCode::invalid_state, "altered the report");
+        CHECK(f.recording->entries() == entries);      // but the port was never entered
+        CHECK(f.recording->snapshot_events() == events && f.recording->operation_count() == operations);
+    };
+    for (const auto& entry : floating_fields()) {
+        const auto field = entry.second;
+        auto flipped = zeros;
+        field(flipped) = -0.0;
+        CHECK(bits(field(flipped)) == bits(-0.0));
+        // +0.0 -> -0.0 in exactly this field of the returned copy.
+        f.controls->alter_copy = [field](gb::NavigationReport& copy) { field(copy) = -0.0; };
+        refused_before_port(zeros, entry.first, " (+0.0 -> -0.0)");
+        // -0.0 -> +0.0: the submitted report carries -0.0 and the handler clears the sign.
+        f.controls->alter_copy = [field](gb::NavigationReport& copy) { field(copy) = +0.0; };
+        refused_before_port(flipped, entry.first, " (-0.0 -> +0.0)");
+    }
+    if (!accepted.empty()) throw std::runtime_error("signed-zero changes accepted in:" + accepted);
+    f.controls->alter_copy = {};
+
+    // Refusals are definite, not sticky, and -0.0 itself is forwarded unchanged.
+    auto negative = zeros;
+    negative.latitude = -0.0;
+    negative.position_velocity_covariance_uncertainty.position_velocity_pn_ve = -0.0;
+    CHECK(f.bridge->submit(negative));
+    CHECK(f.recording->entries() == 2 && f.recording->operation_count() == 2);
+    auto& operation = f.recording->operations.back();
+    for (const auto& [name, field] : floating_fields())
+        CHECK(bits(field(operation.report)) == bits(field(negative)));
+    check_record(operation, negative);
+    CHECK(f.bridge->submit(expected_report(21ns)));
+    check_record(f.recording->operations.back(), expected_report(21ns));
+    CHECK(f.recording->entries() == 3 && f.controls->rejected == 0);
 }
 
 void bridge_uncertainty_and_control_loss() {
@@ -420,6 +520,26 @@ void mel_profile_b_dispatch() {
         expect_error(s.image->send(mel_report(time)), code);
     }
     b.controls->fault = Fault::none;
+    // Signed-zero change in the handler's copy (latitude, then a covariance
+    // entry): numerically equal, but not the unchanged report. Refused before the
+    // port with no callback and no timestamp commit.
+    {
+        const auto entries = b.recording->entries();
+        auto zero_latitude = mel_report(time);
+        zero_latitude.setLatitude(0.0);
+        b.controls->alter_copy = [](gb::NavigationReport& copy) { copy.latitude = -0.0; };
+        expect_error(s.image->send(zero_latitude), mel::ErrorCode::InvalidState, "altered the report");
+        auto zero_cross = mel_report(time);
+        auto cross = zero_cross.getPositionVelocityCovarianceUncertainty();
+        cross.setPositionVelocityPnVe(0.0);
+        zero_cross.setPositionVelocityCovarianceUncertainty(cross);
+        b.controls->alter_copy = [](gb::NavigationReport& copy) {
+            copy.position_velocity_covariance_uncertainty.position_velocity_pn_ve = -0.0;
+        };
+        expect_error(s.image->send(zero_cross), mel::ErrorCode::InvalidState, "altered the report");
+        b.controls->alter_copy = {};
+        CHECK(b.recording->entries() == entries);
+    }
     CHECK(b.recording->operation_count() == 3 && calls == 3);
     // Definite backend refusal maps through the existing sink contract.
     b.recording->refuse_code = gb::ErrorCode::disconnected;
@@ -616,6 +736,7 @@ int main(int argc, char** argv) {
     const std::vector<std::pair<std::string, void (*)()>> tests{
         {"bridge_capability_discovery", bridge_capability_discovery},
         {"bridge_preparation_and_mapping", bridge_preparation_and_mapping},
+        {"bridge_signed_zero_representation", bridge_signed_zero_representation},
         {"bridge_uncertainty_and_control_loss", bridge_uncertainty_and_control_loss},
         {"bridge_concurrency_and_teardown", bridge_concurrency_and_teardown},
         {"mel_profile_a_receipt_only", mel_profile_a_receipt_only},

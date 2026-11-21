@@ -175,7 +175,8 @@ Contract for `prepare_navigation(const NavigationReport&) const`:
   nothing has been submitted.
 * Return an owned `NavigationOperation`: a nonempty, profile-defined `format`
   label, an **unchanged** copy of the complete report (timestamps and all 18
-  covariance values; the bridge rejects an altered copy), and your own
+  covariance values; the bridge rejects an altered copy, compared bit for bit,
+  so even turning +0.0 into -0.0 is refused), and your own
   `payload` bytes. There is no implicit coordinate, time or unit conversion. Your
   encoding is yours: there is no universal detector wire format.
 * The call must be bounded and must not perform device I/O, block or wait,

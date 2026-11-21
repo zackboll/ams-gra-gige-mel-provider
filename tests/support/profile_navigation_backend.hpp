@@ -56,7 +56,9 @@ struct Recording {
     b::ErrorCode refuse_code{b::ErrorCode::busy};
     Gate port_gate;
     unsigned ports_created{0}, ports_destroyed{0}, devices_opened{0}, sink_devices{0};
+    unsigned port_entries{0}; // every RecordingPort::submit entry, whatever the mode
     void event(std::string text) { std::lock_guard lock(mutex); events.push_back(std::move(text)); }
+    unsigned entries() const { std::lock_guard lock(mutex); return port_entries; }
     std::vector<std::string> snapshot_events() const { std::lock_guard lock(mutex); return events; }
     std::size_t operation_count() const { std::lock_guard lock(mutex); return operations.size(); }
     void set_mode(PortMode value) { std::lock_guard lock(mutex); mode = value; }
@@ -74,6 +76,7 @@ public:
         ++r_->ports_destroyed;
     }
     p::NavigationExecution submit(p::NavigationOperation operation) override {
+        { std::lock_guard lock(r_->mutex); ++r_->port_entries; }
         r_->port_gate.pass();
         PortMode mode;
         {

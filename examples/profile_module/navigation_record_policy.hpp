@@ -51,12 +51,15 @@ inline std::uint8_t state_code(b::NavigationSolutionState state) {
 }
 
 /// Test instrumentation and fault injection, shared by the test that built the
-/// profile. Configure on_prepare before concurrent use; counters are atomic.
+/// profile. Configure hooks before concurrent use; counters are atomic.
 struct Controls {
     enum class Fault { none, error, throw_runtime, throw_allocation, empty_format, alter_report };
     std::atomic<Fault> fault{Fault::none};
     std::atomic<unsigned> prepared{}, rejected{}, entered{}, states{}, retired{};
     std::function<void()> on_prepare;
+    /// Applied to the operation's report copy after it is built, to inject a
+    /// representation-only change (e.g. +0.0 -> -0.0) the bridge must refuse.
+    std::function<void(b::NavigationReport&)> alter_copy;
 };
 
 /// Append one TLV field: uint16 id, uint16 length, then little-endian value bytes.
@@ -165,6 +168,7 @@ public:
         p::NavigationOperation operation{std::string(format), report, encode(report)};
         if (controls_->fault.load() == Fault::empty_format) operation.format.clear();
         if (controls_->fault.load() == Fault::alter_report) operation.report.latitude = -operation.report.latitude;
+        if (controls_->alter_copy) controls_->alter_copy(operation.report);
         ++controls_->prepared;
         return operation;
     }
