@@ -77,32 +77,48 @@ acquisition transport; SDK coexistence and cross-session stale ACK fencing are
 unqualified. See @ref md_docs_2device-register-transport "device register/memory access" and
 @ref md_docs_2backend-transport-experiments "transport experiments and original validation records".
 
-@subsection extension_navigation Future sensor-specific MEL operations
+@subsection extension_navigation Optional profile navigation handler
 
 @verbatim
 MEL ImageChannel::send(NavigationReport)
     ↓
-Common MEL validation
+Common MEL validation (unchanged)
     ↓
-Optional INavigationSink
+Optional INavigationSink (only when the profile provides a handler)
     ↓
-Future sensor-specific navigation handler
+ProfileNavigationBridge
     ↓
-Qualified device-control / register transport
+IProfileNavigationHandler::prepare_navigation → owned NavigationOperation
     ↓
-Detector-defined staging and acceptance protocol
+Backend-owned INavigationOperationPort (SDK-free recording fixture only)
+    ↓
+Future: qualified transport, detector-defined staging and acceptance
 @endverbatim
 
-Today the common provider validates navigation and can submit it through the
-optional backend-independent @ref gige_mel::backend::INavigationSink. Aravis and
-Pleora expose internal register/memory access; controlled GVCP is an experimental
-loopback foundation. These pieces are not wired together: there is no
-profile-provided navigation handler, sensor-specific wire serializer or physical
-GVCP navigation transfer through the common provider. Detector acknowledgement
-and processing, navigation-to-image correlation, and transfer alignment are
-unqualified. A future handler should compose with the backend-owned device and
-its control authority, not put vendor addresses into `src/provider.cpp`. A
-transport ACK is not proof of detector processing. See
+A profile state may also implement the optional
+@ref gige_mel::backend::profiles::IProfileNavigationHandler. Discover it with
+@ref gige_mel::backend::profiles::navigation_handler; absence means no navigation
+processing. Base profile vtables and the module descriptor are unchanged.
+@ref gige_mel::backend::profiles::IProfileNavigationHandler::prepare_navigation
+applies sensor policy without device I/O and returns an owned
+@ref gige_mel::backend::profiles::NavigationOperation value with a
+profile-defined format, the unchanged complete report and profile-defined bytes.
+
+A backend builds @ref gige_mel::backend::profiles::ProfileNavigationBridge with
+@ref gige_mel::backend::profiles::ProfileNavigationBridge::create over its own
+@ref gige_mel::backend::profiles::INavigationOperationPort, and delegates
+@ref gige_mel::backend::INavigationSink to
+@ref gige_mel::backend::profiles::ProfileNavigationBridge::submit.
+@ref gige_mel::backend::profiles::ProfileNavigationBridge::shutdown drains before
+retirement. Preparation errors are definite; uncertain or control-lost outcomes
+map to `timeout` and are never retried. Module wrappers preserve the capability,
+and the header is part of the build identity.
+
+Only an SDK-free recording port exercises this path. No production adapter,
+authority grant, register write, GVCP transfer or detector protocol is connected.
+Transport ACKs, detector processing, navigation-to-image correlation and transfer
+alignment remain unqualified; do not put vendor addresses into `src/provider.cpp`.
+See @ref md_docs_2camera-profile-authoring "camera-profile authoring",
 @ref md_docs_2navigation-backend-forwarding "navigation forwarding" and
 @ref md_docs_2qualification-evidence "qualification evidence".
 */

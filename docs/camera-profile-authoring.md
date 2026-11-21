@@ -155,6 +155,99 @@ production. Live backend switching, reconnect,
 navigation transport, new payload representations and qualified camera time are
 separate work.
 
+## Optional navigation handler (GIGE-MEL-047)
+
+A profile may optionally interpret, validate and prepare MEL navigation for its
+detector. This is an additional interface on the **same concrete state object**,
+[`IProfileNavigationHandler`](../src/profiles/navigation_handler.hpp). It is not a
+new virtual method on `ICameraProfile` or `ICameraProfileState`, and a profile
+that omits it provides no navigation processing (no default handler exists).
+Design, mapping and evidence are in the [GIGE-MEL-047 design](tasks/GIGE-MEL-047-design.md)
+and [validation](tasks/GIGE-MEL-047-validation.md); the runtime path is in
+[navigation forwarding](navigation-backend-forwarding.md#optional-camera-profile-navigation-handler-gige-mel-047).
+
+Contract for `prepare_navigation(const NavigationReport&) const`:
+
+* The common provider has already validated the report structurally and checked
+  its timestamp ordering. Apply only your **additional** sensor policy. Return
+  `unsupported` for a profile-specific unsupported condition and
+  `invalid_argument` for values outside profile policy. Errors are definite;
+  nothing has been submitted.
+* Return an owned `NavigationOperation`: a nonempty, profile-defined `format`
+  label, an **unchanged** copy of the complete report (timestamps and all 18
+  covariance values; the bridge rejects an altered copy, compared bit for bit,
+  so even turning +0.0 into -0.0 is refused), and your own
+  `payload` bytes. There is no implicit coordinate, time or unit conversion. Your
+  encoding is yours: there is no universal detector wire format.
+* The call must be bounded and must not perform device I/O, block or wait,
+  retain the borrowed report, start workers or queues, or call provider or
+  consumer code. Frame receive may run concurrently, so use immutable state or
+  synchronized instrumentation.
+* The operation is a plain value. It may outlive your state and module, and
+  must therefore contain no pointers into them.
+
+Execution belongs to the backend, not to the profile. A backend constructs an
+`INavigationOperationPort` it owns and a `ProfileNavigationBridge` from
+[`navigation_bridge.hpp`](../src/profiles/navigation_bridge.hpp). It exposes
+`INavigationSink` on its device **only** when the selected state has a handler.
+SDK-free example, test only, from the
+[fixture profile](../examples/profile_module/navigation_record_policy.hpp) and
+[recording backend](../tests/support/profile_navigation_backend.hpp):
+
+```cpp
+namespace p = gige_mel::backend::profiles;
+
+// 1. State: ordinary profile state plus the optional handler.
+class State final : public p::ICameraProfileState, public p::IProfileNavigationHandler {
+    // ... capabilities/configuration/apply/preflight/validate_frame ...
+    gige_mel::backend::Result<p::NavigationOperation> prepare_navigation(
+        const gige_mel::backend::NavigationReport& report) const override {
+        if (report.state == gige_mel::backend::NavigationSolutionState::aligning)   // 3. own policy
+            return gige_mel::backend::Error{gige_mel::backend::ErrorCode::unsupported, "Aligning not accepted"};
+        return p::NavigationOperation{"test.fictional-navigation-record.v1", report, encode(report)};
+    }
+};
+
+// 2. Discovery and 4. bridge construction inside the backend's open().
+auto state = profile->open(features);                    // borrowed features: this call only
+if (!state) return state.error();
+auto shared = std::move(state).value();
+if (!p::navigation_handler(*shared))                     // Profile A: no sink at all
+    return std::make_shared<PlainDevice>(inner, shared);
+auto bridge = p::ProfileNavigationBridge::create(shared, std::make_unique<RecordingPort>(recording));
+if (!bridge) return bridge.error();
+return std::make_shared<NavigationDevice>(inner, shared, std::move(bridge).value(), recording);
+
+// Device: INavigationSink delegates; close() and ~Device() call bridge->shutdown() first.
+gige_mel::backend::Status submit_navigation(gige_mel::backend::NavigationReport report) override {
+    return bridge_->submit(report);   // 6. preparation errors are definite; uncertainty is `timeout`
+}
+
+// 5. MEL: unchanged public API.
+auto manager = gige_mel::make_api_manager(settings, backend);
+auto control = ams::iface::irmel::getControl(settings.instance, manager);
+control->init();
+auto image = /* attach the Image channel */;
+auto reply = image->send(report).get();   // success = recording port accepted it, nothing more
+
+// 7. Shutdown: detach / drop Control as usual. The device close drains an active
+// submission, retires the port, then releases the bridge's state (and module pin).
+```
+
+The port returns `accepted`, `not_submitted` (definite, with a code) or
+`uncertain`, plus any control loss. The bridge maps these conservatively: once
+uncertainty or loss is reported, it refuses later submissions and never retries
+automatically. A recording port's acceptance is fixture acceptance. It does not
+mean that a transport acknowledged the report or that a detector received,
+applied or used it. No production adapter exposes this sink, and the Cognex
+profile has no handler.
+
+**Modules.** Implement the handler on the module's state as above. The host
+loader wraps that state in a forwarding subtype only when the module state
+provides the capability, and keeps the module mapped until the bridge's state
+reference retires. `navigation_handler.hpp` is in the build-identity closure, so
+modules built before GIGE-MEL-047 are refused and must be rebuilt with the host.
+
 ## Matched-C++ dynamic modules, v1 (GIGE-MEL-035)
 
 See the [independent build example](../examples/profile_module/README.md),

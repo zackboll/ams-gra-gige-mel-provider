@@ -553,6 +553,10 @@ Absent sinks preserve receipt-only behavior; sink errors, including unsupported,
 return typed failures without callback or retained-report update. No production
 navigation transport is implemented. It is **PARTIAL required
 navigation support**, not full navigation integration or MEL conformance.
+An internal [optional profile navigation handler](navigation-backend-forwarding.md#optional-camera-profile-navigation-handler-gige-mel-047)
+(GIGE-MEL-047) lets a selected camera profile prepare an owned operation behind
+such a sink. It is exercised only with an SDK-free recording backend; no
+production adapter exposes it, and MEL behavior and advertisement are unchanged.
 
 [ModeCmd's bounded subset](mode-command.md) synchronously accepts only
 `Standby/Unused/default-ScanParam` with initialized Control and known-valid actual
