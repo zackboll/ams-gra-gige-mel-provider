@@ -17,6 +17,7 @@ Header | Entry points
 @ref include/gige_mel/backend.hpp "backend.hpp" | @ref installed_backend_contracts
 @ref include/gige_mel/navigation.hpp "navigation.hpp" | @ref gige_mel::backend::NavigationReport
 @ref include/gige_mel/line_of_sight.hpp "line_of_sight.hpp" | @ref gige_mel::backend::LosSupport and @ref gige_mel::backend::LosObservation
+@ref include/gige_mel/image_field_of_view.hpp "image_field_of_view.hpp" | @ref gige_mel::backend::ImageFieldOfView and @ref gige_mel::backend::IImageFieldOfViewSource
 @ref include/gige_mel/task_execution.hpp "task_execution.hpp" | @ref gige_mel::backend::ITaskExecutionSource and @ref gige_mel::backend::ITaskExecutionSession
 
 @section installed_backend_contracts Backend Contracts
@@ -40,7 +41,7 @@ Follow @ref gige_mel::backend::IFrameStream from start through
 for admission and timing, and @ref gige_mel::backend::FrameLease for native
 ownership versus explicit MEL buffer release.
 
-@subsection installed_optional_capabilities Optional Navigation, LOS, Stack and Task Capabilities
+@subsection installed_optional_capabilities Optional Navigation, FOV, LOS, Stack and Task Interfaces
 
 - Virtual tasking: @ref gige_mel::backend::ITaskExecutionSource opens an owned
   @ref gige_mel::backend::ITaskExecutionSession. The
@@ -49,6 +50,10 @@ ownership versus explicit MEL buffer release.
   qualifies it; it does not grant physical control authority.
 - Navigation input: @ref gige_mel::backend::INavigationSink and
   @ref gige_mel::backend::INavigationSink::submit_navigation "submit_navigation()".
+- Image optics: @ref gige_mel::backend::IImageFieldOfViewSource::image_field_of_view "image_field_of_view()"
+  resolves two angles for the frozen actual configuration before acquisition.
+  Only absence selects the session-pitch model; explicit errors fail enable.
+  This source-level C++ extension is fixture-qualified only and does not apply to Stack.
 - LOS output: @ref gige_mel::backend::ILineOfSightSource,
   @ref gige_mel::backend::ILineOfSightSource::open_line_of_sight "open_line_of_sight()"
   and @ref gige_mel::backend::ILineOfSightStream.

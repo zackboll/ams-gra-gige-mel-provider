@@ -887,7 +887,7 @@
           "symbol": "FrameDescriptor"
         }
       ],
-      "behavior": "Provider invokes service listener with packed host buffer and FrameHeader after admission and copy; receiver must release. Hardware timestamp validity and calibrated optics are separate. Header carries integration-start time, configured exposure/ROI/FOV, Mono storage bits, one band, modulo-32-bit frame ID, staring snapshot flags and configured sensor location; navigation/inertial vectors remain empty.",
+      "behavior": "Provider invokes service listener with packed host buffer and FrameHeader after admission and copy; receiver must release. Header carries integration-start time, actual exposure/ROI, the FOV frozen on enable, Mono storage bits, one band, modulo-32-bit frame ID, staring snapshot flags and configured sensor location; navigation/inertial vectors remain empty. Image FOV is linear session pitch unless supplied by an explicit source; invalid angles or a failed explicit source preclude acquisition. No physical optics or timestamp qualification follows from FOV.",
       "evidence": [
         {
           "path": "tests/provider_backend_contract_tests.cpp",
@@ -895,6 +895,13 @@
           "result": "positive",
           "level": "SDK-free",
           "demonstrates": "Checks Mono8 storage bits, geometry, ROI, time, FOV and repacked pixel bytes for both SDK-free backends."
+        },
+        {
+          "path": "tests/profile_image_fov_tests.cpp",
+          "scenario": "image_delivery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Public Image callbacks carry both frozen angles from a separately loaded virtual optics profile; equal-size offset changes and C2 readback affect FOV, without per-frame resolution or changes to retained bytes and saved headers."
         },
         {
           "path": "tests/aravis_timestamp_contract.cpp",

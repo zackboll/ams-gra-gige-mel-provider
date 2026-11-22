@@ -339,6 +339,24 @@ The synthetic optics are a defined virtual model, not real sensor calibration.
 An injected hardware adapter must supply an appropriate characterized profile;
 it must not inherit the virtual optics as if they describe a physical camera.
 
+### Frozen Image field of view
+
+For devices with no optional FOV source, the provider still calculates width
+and height times the respective session angular pitches. An explicit
+`IImageFieldOfViewSource` supplies both angles instead. After ordinary buffer
+and configuration admission, Image enable resolves FOV once for the retained
+actual readback and generation, before opening the stream or starting workers.
+Angles must be finite and strictly positive, including linear products. An
+error, exception or invalid result fails enable without fallback or publication.
+The worker uses only the frozen scalars; repeated enable does not resolve them
+again. StackedImage is independent.
+
+The positive [profile example](camera-profile-examples.md#inherited-virtual-optics)
+uses a virtual optical model, qualified only in SDK-free fixtures. Production
+SDK adapters do not forward it, and Cognex makes no physical optics claim.
+Production timestamps, LOS, navigation association and calibration operations
+are unchanged. No new MEL command, callback type or capability is advertised.
+
 Frames are rejected when their layout, completion status, configuration
 snapshot/generation, stream generation, or timestamp contract does not match.
 An invalid first frame cannot establish the accepted stream generation. A clock

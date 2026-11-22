@@ -428,6 +428,17 @@ if(BUILD_TESTING)
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/identity-closure-check -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/profile_identity_closure.cmake)
   set_tests_properties(profile_identity_closure PROPERTIES TIMEOUT 30)
+  add_executable(profile_image_fov_tests tests/profile_image_fov_tests.cpp tests/support/contract_fixture_camera.cpp)
+  target_compile_definitions(profile_image_fov_tests PRIVATE
+    GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile"
+    GIGE_MEL_COGNEX_MODULE="${cognex_module}")
+  target_link_libraries(profile_image_fov_tests PRIVATE gige_mel_selection gige_mel_provider
+    gige_mel_build_options Threads::Threads)
+  add_dependencies(profile_image_fov_tests gige_mel_external_test_profile gige_mel_cognex_profile)
+  foreach(scenario module_and_bridge image_delivery enable_failures)
+    add_test(NAME profile_image_fov_${scenario} COMMAND profile_image_fov_tests ${scenario})
+    set_tests_properties(profile_image_fov_${scenario} PROPERTIES TIMEOUT 30)
+  endforeach()
   add_test(NAME dynamic_profile_module_contract COMMAND device_feature_tests --dynamic-module-only)
   add_test(NAME cognex_profile_contract COMMAND device_feature_tests --cognex-only)
   set_tests_properties(cognex_profile_contract PROPERTIES TIMEOUT 30)

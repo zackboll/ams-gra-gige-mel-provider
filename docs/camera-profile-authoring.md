@@ -79,6 +79,26 @@ optional capability interface. Camera policy can reuse defaults while one common
 MEL implementation owns the provider mechanics; it cannot replace arbitrary
 unsupported MEL operations.
 
+### Optional Image field of view
+
+A state with an explicitly supplied immutable model can implement
+[`IProfileImageFieldOfView`](../src/profiles/image_field_of_view.hpp). Its input
+is the complete borrowed actual configuration, including ROI dimensions and
+offsets. Return two owned radians or an owned error. The operation must be
+bounded, deterministic, synchronous and non-reentrant: no native feature access,
+transport, waits, acquisition, callbacks or retained configuration/service
+references. Default monochrome and Cognex states do not implement it.
+
+The **deployment** selects the actual lens/model and owns its provenance; the
+**profile** interprets it. Do not derive physical optics from camera identity,
+dimensions, or pixel pitch. The unchanged module factory takes no deployment
+argument. The [virtual example](camera-profile-examples.md#inherited-virtual-optics)
+uses explicit fixture constants, not a calibration input mechanism.
+**Device composition** exposes the optional backend interface only when the
+selected state supplies it. The **common provider** validates the returned value,
+freezes it with the run's actual configuration and publishes the two existing
+MEL fields. See [backend authoring](backend-authoring.md#optional-image-field-of-view).
+
 `IDeviceFeatures` in `src/device_features.hpp` supplies project-owned typed
 scalar values, fresh numeric bounds/increments/units, implementation queries,
 enum-entry availability and checked integer/float writes. Adapters check native

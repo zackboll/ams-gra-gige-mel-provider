@@ -5,6 +5,12 @@ operation-by-operation status and evidence. This roadmap keeps milestone history
 and sequencing; see [current status](status.md) for audited backend boundaries
 and [Qualification Evidence](qualification-evidence.md) for original runs.
 
+Optional profile Image FOV changes the source of two existing `FrameHeader`
+fields, not the MEL surface. The provider freezes a selected model's owned
+radians for the actual run configuration. Devices without the source retain the
+linear session-pitch model. The positive optics are virtual and fixture-only;
+see the [Image profile](implementation-profile.md#frozen-image-field-of-view).
+
 GIGE-MEL-GENTL-003A adds isolated simulated-camera wire qualification tooling,
 **no MEL surface** ([design](tasks/GIGE-MEL-GENTL-003A-design.md)). Independent
 observation now detects writes, privilege changes, unknown/repeated commands and

@@ -175,18 +175,15 @@ auto session = gige_mel::selection::select_session(catalog.value(), {
     "aravis", "EXACT_DEVICE_ID", std::string(loaded.value().profile->id()), {}});
 ```
 
-**Optional capabilities survive wrapping (GIGE-MEL-047).** The host wraps
-every module state so that it can pin the module. If the module's own state
-implements the optional [`IProfileNavigationHandler`](../src/profiles/navigation_handler.hpp),
-the loader returns a forwarding wrapper subtype that also implements it.
-Otherwise it returns the plain wrapper, which does not. `navigation_handler(state)`
-on the host-visible state therefore gives the same answer as on the module
-object. The forwarder uses the retained module state's own handler; module code,
-the state's control block and deleter retire before the module pin, in the
-existing order. The descriptor, discovery symbol and interface revision are
-unchanged. The handler header joins the build-identity closure, so pre-047
-module binaries are refused as an incompatible build identity and must be
-rebuilt with the host. See the [design](tasks/GIGE-MEL-047-design.md#dynamic-modules).
+**Optional capabilities survive wrapping.** The host wraps each module state
+with exactly the companions it implements: neither, navigation only, Image FOV
+only, or both. See [`IProfileNavigationHandler`](../src/profiles/navigation_handler.hpp)
+and [`IProfileImageFieldOfView`](../src/profiles/image_field_of_view.hpp).
+The forwarders borrow from the retained module state; the module-side state,
+control block and deleter retire before the final module pin. A returned FOV
+value has no module dependency. The descriptor, discovery symbol and interface
+revision are unchanged. Companion and value headers are in the build-identity
+closure; older module binaries must be rebuilt with the matching host.
 
 Use `pleora` and its exact MAC ID for the other adapter. Selection never opens
 or acquires. Each selected profile is a fresh module factory result. Dropping

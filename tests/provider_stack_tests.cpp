@@ -156,6 +156,27 @@ void payload_ownership() {
     CHECK(image->unregisterBuffer(alias) == ir::Return::Success);
     CHECK(f.recording->image_streams == 0);
 }
+void independent_of_image_fov() {
+    auto recording = std::make_shared<r::Recording>();
+    recording->unusable_image_fov = true;
+    Fixture f(recording);
+    auto image = std::dynamic_pointer_cast<ir::ImageChannel>(f.control->attachChannel(f.config(ir::ChannelType::IRSTImage)));
+    CHECK(image);
+    auto buffer = ir::getBuffer("synthetic", f.manager);
+    CHECK(buffer->init(f.bytes.data(), f.bytes.size(), 0) == ir::Return::Success);
+    CHECK(image->registerBuffer(buffer) == ir::Return::Success);
+    CHECK(image->enable() == ir::Return::Fail);
+    CHECK(recording->image_fov_requests == 1 && recording->image_streams == 0);
+    CHECK(image->unregisterBuffer(buffer) == ir::Return::Success);
+    f.attach();
+    auto stream = f.start();
+    stream->wait(stream->deliver());
+    CHECK(f.listener->calls() == 1);
+    f.exact();
+    CHECK(f.stack->disable() == ir::Return::Success);
+    CHECK(f.buffer->release() == ir::Return::Success);
+    CHECK(recording->image_fov_requests == 1 && recording->image_streams == 0);
+}
 void malformed() {
     for (unsigned invalid = 0; invalid < 8; ++invalid) {
         Fixture f; f.attach(); auto stream = f.start(); auto s = r::support();
@@ -310,7 +331,7 @@ int main() {
 #if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
         admission_ordering();
 #endif
-        discovery(); payload_ownership(); malformed(); callback_results(); lifecycle(); teardown();
+        discovery(); payload_ownership(); independent_of_image_fov(); malformed(); callback_results(); lifecycle(); teardown();
         std::cout << "stack discovery, exact payload/header, ownership, failures, lifecycle and teardown passed\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

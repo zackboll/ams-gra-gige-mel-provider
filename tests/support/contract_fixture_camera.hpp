@@ -70,6 +70,8 @@ struct Observation {
     std::atomic<unsigned> pools_retired{0};
     std::atomic<unsigned> shared_states_retired{0};
     std::atomic<unsigned> streams_retired{0};
+    std::atomic<unsigned> stream_creation_attempts{0};
+    std::atomic<unsigned> stream_start_attempts{0};
     std::atomic<unsigned> devices_retired{0};
     std::atomic<unsigned> backends_retired{0};
     // Incremented under the device mutex immediately before a receive blocks.
@@ -95,5 +97,12 @@ constexpr std::uint8_t pixel(std::uint32_t sensor_x, std::uint32_t sensor_y, std
 
 std::shared_ptr<gige_mel::backend::ICameraBackend> make_backend(
     Options options = {}, std::shared_ptr<Observation> observation = {});
+
+// Stream-only reuse for devices with their own actual configuration service.
+// Transfers an already admitted readback by value, with no separate apply or
+// configuration store exposed to the provider. Each stream has its own clock,
+// pool and sequence; the device must serialize acquisition and configuration.
+std::unique_ptr<gige_mel::backend::IFrameStream> make_stream(
+    gige_mel::backend::CameraConfiguration actual, std::shared_ptr<Observation> observation);
 
 } // namespace contract_fixture

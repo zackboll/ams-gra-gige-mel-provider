@@ -91,6 +91,26 @@ Use `Result<T>` for values or project-owned `Error`; use `Status` for operations
 
 Ordinary SDK failures must be translated into those values with useful diagnostic text. Do not leak a vendor exception across the interface. The bootstrap does not promise allocation-free error reporting: allocation while constructing a result, string, backend, or shared owner may still throw. Catch/translate exceptions at the owning provider boundary as appropriate. Nonthrowing stop/destructor/release paths must actually remain nonthrowing.
 
+### Optional Image field of view
+
+A device can additionally implement
+[`IImageFieldOfViewSource`](../include/gige_mel/image_field_of_view.hpp). The
+installed header is SDK- and MEL-independent: this is a project-owned **C++
+source compatibility boundary**, not a stable binary plugin ABI. It does not
+change `ICameraDevice` or create a dependency on the profile loader. With a
+profile, expose it only when the actual selected state has the companion;
+`retain_image_field_of_view` provides an owning alias for forwarding that pins
+the state (and its module). Do not retain the borrowed configuration or services.
+
+The provider calls the source synchronously during serialized Image enable,
+after admission and before native stream creation. Use only immutable model
+data, without feature access, transport, waits, acquisition, provider reentry
+or callbacks. The provider validates finite positive radians (no generic upper
+angle limit), then freezes and publishes them for that run. An explicit error,
+exception or invalid value fails enable before acquisition; only absence selects
+the session-pitch calculation. StackedImage does not use this interface.
+Production SDK adapters and the default synthetic backend do not forward it.
+
 ### Backend identity and selection
 
 `DeviceInfo` has `backend_id`, `device_id`, and `display_name`. A device ID must remain stable under enumeration reorder. Do not use “camera index zero” as a persistent identity. Record enough additional deployment information outside this small initial structure to diagnose camera serial/model/firmware, interface, SDK version, and transport selection.

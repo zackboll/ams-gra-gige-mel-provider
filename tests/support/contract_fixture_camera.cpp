@@ -135,6 +135,7 @@ public:
     FixtureStream& operator=(const FixtureStream&) = delete;
 
     be::Status start(std::uint64_t configuration_generation) override {
+        ++shared_->observation->stream_start_attempts;
         std::lock_guard lock(shared_->mutex);
         if (shared_->closed) return fail(be::ErrorCode::disconnected, "contract fixture camera is logically closed");
         if (shared_->live_stream != token_) return fail(be::ErrorCode::invalid_state, "contract fixture stream is no longer current");
@@ -312,6 +313,7 @@ public:
     }
 
     be::Result<std::unique_ptr<be::IFrameStream>> create_stream() override {
+        ++shared_->observation->stream_creation_attempts;
         std::lock_guard lock(shared_->mutex);
         if (shared_->closed) return fail(be::ErrorCode::disconnected, "contract fixture camera is logically closed");
         if (shared_->live_stream != 0) return fail(be::ErrorCode::busy, "the contract fixture supports one live stream object");
@@ -387,6 +389,14 @@ private:
 };
 
 } // namespace
+
+std::unique_ptr<be::IFrameStream> make_stream(be::CameraConfiguration actual, std::shared_ptr<Observation> observation) {
+    ++observation->stream_creation_attempts;
+    auto state = std::make_shared<Shared>(std::move(observation));
+    state->configuration = actual;
+    state->live_stream = 1;
+    return std::make_unique<FixtureStream>(std::move(state), 1, Options{}.source_slots);
+}
 
 std::shared_ptr<gige_mel::backend::ICameraBackend> make_backend(Options options, std::shared_ptr<Observation> observation) {
     if (!observation) observation = std::make_shared<Observation>();
