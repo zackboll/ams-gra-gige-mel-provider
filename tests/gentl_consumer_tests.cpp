@@ -2,7 +2,7 @@
 // Drives the REAL dlopen/dlsym consumer against a controlled fixture producer
 // built from the verified EMVA header. Fixture success qualifies ownership and
 // error handling only; it is not evidence for any real producer or camera.
-#include "gentl/gentl_consumer.hpp"
+#include "transport/gentl/gentl_consumer.hpp"
 
 #include <dlfcn.h>
 

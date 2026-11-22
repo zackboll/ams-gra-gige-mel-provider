@@ -72,7 +72,7 @@ identical), which gives a second, sub-megabyte provisioning source.
   archive SHA-256 and the header SHA-256, and installs it outside the tree. CMake
   re-checks the header SHA-256 at configure time and refuses any other file. No
   hand-written constants, signatures or structure layouts are used anywhere.
-* The header is included only by the private `src/gentl/gentl_api.hpp`, as a
+* The header is included only by the private `src/transport/gentl/gentl_api.hpp`, as a
   system header. No GenTL type crosses `gentl_consumer.hpp`. A preprocessor check
   requires `GenTLMajorVersion == 1 && GenTLMinorVersion == 6`.
 * Function pointers use the header's own `GC_API_P` typedefs (`PGCInitLib`, ...).

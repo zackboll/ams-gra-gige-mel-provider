@@ -1,5 +1,5 @@
-#include "gentl/gentl_consumer.hpp"
-#include "gentl/gentl_api.hpp"
+#include "gentl_consumer.hpp"
+#include "gentl_api.hpp"
 #include "profiles/frame_policy.hpp"
 
 #include <dlfcn.h>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Default-build guard for GIGE-MEL-GENTL-001 (no SDK, header or producer needed).
+"""GenTL layout and default-build guard (no SDK, header or producer needed).
 
 The GenTL feasibility code must stay outside the installed MEL provider, the
 selection catalog and every factory path, behind a default-OFF option, and the
@@ -19,6 +19,19 @@ def tracked():
 
 
 class GenTLIsolation(unittest.TestCase):
+    def test_consumer_transport_layout(self):
+        transport = ROOT / "src/transport/gentl"
+        for name in ("gentl_api.hpp", "gentl_consumer.hpp", "gentl_consumer.cpp"):
+            self.assertTrue((transport / name).is_file(), name)
+        self.assertFalse((ROOT / "src/gentl").exists())
+
+        code = cmake_code("cmake/GigeMelGenTL.cmake")
+        self.assertRegex(code, r"add_library\(\s*gige_mel_gentl_consumer\s+STATIC\s+"
+                         r"src/transport/gentl/gentl_consumer\.cpp\s*\)")
+        code = cmake_code("cmake/GigeMelGenTLBackend.cmake")
+        self.assertRegex(code, r"target_link_libraries\(\s*gige_mel_gentl_backend\s+"
+                         r"[^)]*\bgige_mel_gentl_consumer\b")
+
     def test_option_is_default_off_and_only_gates_the_module(self):
         text = (ROOT / "CMakeLists.txt").read_text()
         self.assertRegex(text, r'option\(GIGE_MEL_BUILD_GENTL_PROBE "[^"]*" OFF\)')
@@ -26,13 +39,15 @@ class GenTLIsolation(unittest.TestCase):
         self.assertRegex(text, r"if\(GIGE_MEL_BUILD_GENTL_PROBE\)\s*\n\s*include\(cmake/GigeMelGenTL\.cmake\)")
 
     def test_module_never_installs_or_links_the_provider(self):
-        lines = [line.split("#", 1)[0] for line in (ROOT / "cmake/GigeMelGenTL.cmake").read_text().splitlines()]
-        code = "\n".join(lines)
+        code = cmake_code("cmake/GigeMelGenTL.cmake")
         for forbidden in ("install(", "gige_mel_provider", "gige_mel_selection", "FetchContent",
                           "file(DOWNLOAD", "ExternalProject"):
             self.assertNotIn(forbidden, code)
 
     def test_no_provider_selection_or_factory_reference(self):
+        # The installed targets and default catalog are wired in CMakeLists.txt.
+        # Keep all references to GenTL library targets inside their gated modules.
+        self.assertNotRegex(cmake_code("CMakeLists.txt"), r"\bgige_mel_gentl_\w+")
         for path in ["src/provider.cpp", "src/factories.cpp", "src/config_parser.cpp",
                      *[str(p.relative_to(ROOT)) for p in sorted((ROOT / "src/provider").rglob("*"))
                        if p.suffix in (".cpp", ".hpp")],
@@ -49,8 +64,7 @@ class GenTLIsolation(unittest.TestCase):
         self.assertRegex(text, r'option\(GIGE_MEL_BUILD_GENTL_BACKEND "[^"]*" OFF\)')
         self.assertEqual(len(re.findall(r"GigeMelGenTLBackend\.cmake", text)), 1)
         self.assertRegex(text, r"if\(GIGE_MEL_BUILD_GENTL_BACKEND\)\s*\n\s*include\(cmake/GigeMelGenTLBackend\.cmake\)")
-        lines = [line.split("#", 1)[0] for line in (ROOT / "cmake/GigeMelGenTLBackend.cmake").read_text().splitlines()]
-        code = "\n".join(lines)
+        code = cmake_code("cmake/GigeMelGenTLBackend.cmake")
         for forbidden in ("install(", "gige_mel_provider", "gige_mel_selection_builtins", "FetchContent",
                           "file(DOWNLOAD", "ExternalProject", "aravis-0.9", "aravis-0.10"):
             self.assertNotIn(forbidden, code)
@@ -79,6 +93,10 @@ class GenTLIsolation(unittest.TestCase):
                 data = (ROOT / path).read_bytes()
                 # The EMVA header's copyright banner; quoting it is not allowed.
                 self.assertNotIn(b"by GenICam GenTL Subcommittee", data, path)
+
+
+def cmake_code(path):
+    return "\n".join(line.split("#", 1)[0] for line in (ROOT / path).read_text().splitlines())
 
 
 if __name__ == "__main__":

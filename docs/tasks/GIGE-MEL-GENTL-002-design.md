@@ -15,7 +15,7 @@ qualification. Nothing here claims real-camera GenTL operation.
 ## 1. Pre-implementation audit
 
 I reviewed these files on the fetched `main`: `AGENTS.md`, `include/gige_mel/backend.hpp`,
-`src/gentl/gentl_consumer.{hpp,cpp}`, `src/device_features.hpp`,
+`src/transport/gentl/gentl_consumer.{hpp,cpp}`, `src/device_features.hpp`,
 `src/device_registers.hpp`, `src/profiles/camera_profile.hpp`,
 `src/profiles/mono_free_running*`, the Aravis (`AravisDeviceFeatures`) and
 Pleora (`pleora_features.cpp`) feature adapters, `src/selection/*`,
