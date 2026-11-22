@@ -8,7 +8,14 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
+/** @brief Publishes current software Health from one periodic worker per enable.
+ * Does not probe hardware or control acquisition. Publishes Status, Detailed,
+ * BIT and subsystem metadata, in that order when subscribed and prepared.
+ * LF status, discrete/security audit records and NUC temperatures are unsupported.
+ * Disable stops Health publication, not Image/Stack or synchronous communications.
+ */
 class HealthChannelImpl final : public ChannelCore, public ir::HealthStatusChannel {
+    /// Worker-owned stop flag and wakeup state; mutex protects the prompt predicate.
     struct Publisher {
         std::mutex mutex;
         std::condition_variable changed;
@@ -19,8 +26,12 @@ public:
     using ChannelCore::ChannelCore;
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
+    /// Retire the Health worker before the base destructor runs.
     ~HealthChannelImpl() override { stop_auxiliary_locked(); }
 
+    /// Start an immediate sample and periodic (100 ms wait) or prompted updates.
+    /// Acquires operations; repeated enable while running succeeds without a
+    /// second worker. Fail on invalid context/lifecycle or caught startup failure.
     ir::Return enable() override {
         if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
@@ -41,17 +52,20 @@ public:
             return ir::Return::Fail;
         }
     }
+    /// Subscribe once to current software state; prompt any enabled worker, never dispatch inline.
     ir::Return registerMetadataCallback(Callback<mel::MFA_Status> callback) override {
         const auto result = register_callback(status_callback_, std::move(callback));
         if (result == ir::Return::Success) prompt();
         return result;
     }
+    /// Subscribe to schema-1 diagnostics, including counters and last-error history.
     ir::Return registerMetadataCallback(Callback<mel::MFA_StatusDetailed> callback) override {
         const auto result = register_callback(detailed_callback_, std::move(callback));
         if (result == ir::Return::Success) prompt();
         return result;
     }
     GIGE_UNSUPPORTED_CALLBACK(ir::LFStatus)
+    /// Subscribe to periodic current faults and latest completion; never execute BIT here.
     ir::Return registerMetadataCallback(Callback<mel::BIT_Status> callback) override {
         const auto control_pin = runtime_->control.load().lock();
         if (!control_pin) return ir::Return::Fail;
@@ -60,6 +74,8 @@ public:
         if (result == ir::Return::Success) prompt();
         return result;
     }
+    /// Subscribe to the software subsystem report paired with a canonical BIT
+    /// revision, even without a BIT subscriber. Dispatch is worker-only.
     ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const ir::SubsystemStatusResp* const)> callback) override {
         // Same registration contract and lifetime pins as BIT_Status; dispatch
         // only on the existing Health worker, never inline on this thread.
@@ -75,6 +91,7 @@ public:
     GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)
 
 private:
+    /// Wake the current publication state if present; prompts can coalesce.
     void prompt() {
         std::shared_ptr<Publisher> state;
         { std::lock_guard lock(callback_mutex_); state = publisher_; }
@@ -82,6 +99,7 @@ private:
         { std::lock_guard lock(state->mutex); state->prompted = true; }
         state->changed.notify_all();
     }
+    /// Close worker admission, wake the wait and join (detach the handle on self-stop).
     void stop_auxiliary_locked() override {
         std::shared_ptr<Publisher> state;
         { std::lock_guard lock(callback_mutex_); state = publisher_; }
@@ -94,6 +112,9 @@ private:
             else worker_.join();
         }
     }
+    /// Copy subscriber slots and capture one Health snapshot; independently
+    /// gate each dispatch on worker and attachment state. BIT/subsystem
+    /// preparation errors suppress those reports, not Status and Detailed.
     void publish(const Publisher& publisher) {
         Callback<mel::MFA_Status> status_callback;
         Callback<mel::MFA_StatusDetailed> detailed_callback;
@@ -158,6 +179,8 @@ private:
             catch (...) { runtime_->report("Health subsystem publication preparation failed"); }
         }
     }
+    /// Pin Control/channel only during preparation and dispatch, not while
+    /// waiting. Contain preparation failures; a throwing consumer does not stop the worker.
     static void run(const std::shared_ptr<Publisher>& state, const std::weak_ptr<ChannelCore>& weak,
                     const std::shared_ptr<Runtime>& runtime) noexcept {
         while (state->running) {

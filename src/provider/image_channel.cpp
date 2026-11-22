@@ -8,7 +8,15 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
+/** @brief Delivers copied monochrome frames and attachment-local Image metadata.
+ * Camera responses, navigation receipts and communications are available without
+ * image enable. Known-empty bad pixels and source-backed LOS are optional. No
+ * distortion map, quaternion, candidate/preprocessed objects, NUC temperature
+ * or LOS3D kinematics are supplied. LOS is not derived from navigation or
+ * associated with a particular image, and implies no physical alignment.
+ */
 class ImageChannelImpl final : public ChannelCore, public ir::ImageChannel {
+    /// Subscription-owned source and Runtime; per-family time history is worker-local.
     struct LosPublisher {
         std::shared_ptr<Runtime> runtime;
         std::unique_ptr<backend::ILineOfSightStream> stream;
@@ -20,8 +28,25 @@ public:
     using ChannelCore::ChannelCore;
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
+    /// Retire LOS before base acquisition cleanup, including self-thread teardown.
     ~ImageChannelImpl() override { stop_auxiliary_locked(); }
+    /// Submit a complete camera snapshot using the shared configuration transaction.
+    /// @see ChannelCore::camera_command
     mel::RequestFor<ir::CameraCommandResp> send(ir::CameraCommand command) override { return camera_command(command); }
+    /** @brief Accept one structurally valid navigation report for this attachment.
+     * @param report Copied into bounded latest-report state on acceptance;
+     * systemTime (nanoseconds) must strictly increase within this attachment.
+     * @return Ready receipt with exact input time and zero correlation IDs, or
+     * an error future. Rejections leave the local latest report unchanged.
+     * @note Under operations and with Control/channel pinned, forward once to
+     * an optional sink. Without a sink, success means local receipt only; with
+     * a sink it also means backend acceptance as defined by that sink, not
+     * physical application, time alignment or frame association. Timeout or
+     * sink exception can leave external acceptance uncertain (no rollback).
+     * A reserved receipt callback runs inline after unlocking and is drained
+     * by detach. Disable does not reset the accepted timestamp. Error future
+     * construction can itself throw on resource failure.
+     */
     mel::RequestFor<ir::NavigationReportResp> send(mel::NavigationReport report) override {
         if (in_provider_callback())
             return failed<ir::NavigationReportResp>(mel::ErrorCode::InvalidState, "submit navigation outside provider callbacks");
@@ -69,6 +94,9 @@ public:
         invoke(callback, reply, nullptr, true);
         return result;
     }
+    /// With explicit known-empty defect-map support, install the slot and
+    /// reserve one empty snapshot for inline dispatch after unlocking. No
+    /// calibration or recurring defect detection; otherwise NotSupported.
     ir::Return registerMetadataCallback(Callback<ir::BadPixelList> callback) override {
         if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
@@ -88,14 +116,20 @@ public:
         invoke(bad_pixel_callback_, snapshot, nullptr, true);
         return ir::Return::Success;
     }
+    /// Install the source-qualified azimuth/elevation report slot; no initial
+    /// callback or replay. Dispatch is on the enabled LOS worker only.
     ir::Return registerMetadataCallback(Callback<ir::LineOfSightReport> callback) override {
         return register_los(report_callback_, std::move(callback), runtime_->los_support.report);
     }
+    /// Install the independently qualified Euler attitude/rates slot for enabled
+    /// worker publication; NotSupported without this LOS declaration.
     ir::Return registerMetadataCallback(Callback<ir::LineOfSightEuler> callback) override {
         return register_los(euler_callback_, std::move(callback), runtime_->los_support.euler);
     }
     GIGE_UNSUPPORTED_CALLBACK(ir::OpticalDistortionMap)
     GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightQuaternion)
+    /// Serialize installation of the single receipt slot with submission and
+    /// detach; no replay of previously accepted navigation.
     ir::Return registerMetadataCallback(Callback<ir::NavigationReportResp> callback) override {
         if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
@@ -107,14 +141,18 @@ public:
     GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectMessage)
     GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectPreProcMessage)
     GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)
+    /// Reject LOS3D kinematics registration without retaining the callable.
     ir::Return registerMetadataCallback(const std::function<void(ir::Channel&, const ir::LOS3D_KinematicsType* const)>&) override {
         return ir::Return::NotSupported;
     }
+    /// Install the slot for typed Image camera responses, including C2-originated
+    /// responses. No initial dispatch or callback for error-only outcomes.
     ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const ir::CameraCommandResp* const)> callback) override {
         return register_callback(camera_callback_, std::move(callback));
     }
 
 private:
+    /// Serialize capability-gated LOS slot installation with lifecycle via operations.
     template<class T> ir::Return register_los(Callback<T>& slot, Callback<T> callback, bool supported) {
         if (in_provider_callback()) return ir::Return::Fail;
         const auto control_pin = runtime_->control.load().lock();
@@ -124,6 +162,8 @@ private:
         if (!supported) return ir::Return::NotSupported;
         return register_callback(slot, std::move(callback));
     }
+    /// If either LOS family is advertised, open a fresh subscription with a
+    /// nonzero clock generation. Failure prevents Image enable even without a subscriber.
     bool start_auxiliary_locked() override {
         if (!runtime_->los_support.euler && !runtime_->los_support.report) return true;
         if (runtime_->los_subscription == std::numeric_limits<std::uint64_t>::max()) return false;
@@ -142,6 +182,7 @@ private:
         los_worker_ = std::thread([state, weak = weak_from_this()] { run_los(state, weak); });
         return true;
     }
+    /// Close LOS worker admission, wake receive and join (or detach self).
     void stop_auxiliary_locked() override {
         if (los_publisher_) {
             los_publisher_->running = false;
@@ -153,12 +194,18 @@ private:
         }
         los_publisher_.reset();
     }
+    /// Check every Euler component before copying source values to MEL.
     static bool finite(const backend::LosEulerAngles& v) noexcept {
         return std::isfinite(v.roll) && std::isfinite(v.pitch) && std::isfinite(v.yaw);
     }
+    /// Reject nonfinite azimuth or elevation, for angles or rates.
     static bool finite(const backend::LosAzEl& v) noexcept {
         return std::isfinite(v.azimuth) && std::isfinite(v.elevation);
     }
+    /// Accept matching source/frame/epoch/subscription observations at strictly
+    /// increasing positive source-relative nanoseconds per family. Copy finite
+    /// values without transforms; report needs angles, rates and rotation, with
+    /// no platform attitude, validity bits or at-speed/in-tolerance claims.
     void publish_los(LosPublisher& state, const backend::LosObservation& v) {
         const auto& support = runtime_->los_support;
         if (!v.time || v.time->count() <= 0 || v.time_domain != support.time_domain ||
@@ -197,6 +244,8 @@ private:
             invoke(callback, message, &state.running);
         }
     }
+    /// Receive on a separate worker, pin Control/channel only for dispatch.
+    /// Terminal source/preparation failure retires LOS publication, not Image.
     static void run_los(const std::shared_ptr<LosPublisher>& state,
                         const std::weak_ptr<ChannelCore>& weak) noexcept {
         try {
@@ -224,6 +273,7 @@ private:
     Callback<ir::LineOfSightReport> report_callback_;
     std::shared_ptr<LosPublisher> los_publisher_; // operations only
     std::thread los_worker_;
+    /// Snapshot the Image response slot, then attempt inline admission and delivery.
     void on_camera_reply(const ir::CameraCommandResp& reply) override {
         Callback<ir::CameraCommandResp> callback;
         { std::lock_guard lock(callback_mutex_); callback = camera_callback_; }

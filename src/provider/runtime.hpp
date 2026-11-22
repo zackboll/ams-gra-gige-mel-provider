@@ -18,14 +18,34 @@ class C2ChannelImpl;
 class HostBuffer;
 struct StreamState;
 
+/** @brief Shared state of one provider manager session, not one Control attachment.
+ *
+ * The manager, Control, attached or retained channels, and active worker state
+ * can all pin this object. A successfully initialized device stays open across
+ * channel detach and Control replacement. Host buffers retain only the affinity
+ * token, not this object or the device. Weak publications of Control, channels,
+ * acquisition and registered buffers avoid ownership cycles.
+ *
+ * State | Synchronization
+ * ----- | ---------------
+ * Settings, backend identity, backend and affinity | Fixed before publication by the manager
+ * Device, camera capabilities and optional LOS/Stack/task declarations | Published at initialization, then fixed
+ * Attachment and acquisition ownership changes, memory reservations, LOS subscription IDs, task session and duplicate history | operations
+ * Initialization, actual configuration/validity/generation, acquisition publication, tasking flag, diagnostics and retained BIT/subsystem state | state_mutex for snapshots and updates; lifecycle/configuration writers also serialize via operations
+ * Control publication, counters | Atomic; counters are sampled individually, not as one atomic tuple
+ *
+ * The backend task session is uniquely owned here; C2 establishes it and
+ * Scheduling uses it. Its presence excludes Image/Stack enable and camera
+ * configuration. The published tasking flag is ownership, not physical activity.
+ */
 struct Runtime {
     ProviderSettings settings;
     std::shared_ptr<backend::ICameraBackend> backend;
     std::string backend_id; // immutable, acquired before any publisher exists
     std::shared_ptr<backend::ICameraDevice> device;
     std::shared_ptr<const int> affinity{std::make_shared<const int>(0)};
-    // Mutations serialize here. A worker never takes this lock. Callbacks run
-    // outside it; their reentrant mutations are rejected before acquiring it.
+    /// Serializes provider mutations. Workers do not acquire it for delivery;
+    /// consumer dispatch does not hold it, and lock-taking reentry is rejected.
     std::mutex operations;
     mutable std::mutex state_mutex;
     backend::CameraConfiguration configuration;
@@ -58,8 +78,12 @@ struct Runtime {
     std::uint32_t bit_revision{0};
     std::uint32_t subsystem_sequence{0};
 
+    /// At last owner release, retire a residual task session and attempt device
+    /// close. Neither the close result nor an exception from close is propagated.
     ~Runtime();
 
+    /// Replace diagnostic history under state_mutex; this is not current Health
+    /// state. Do not call with state_mutex held. Preparing the message may throw.
     void report(std::string message);
 };
 

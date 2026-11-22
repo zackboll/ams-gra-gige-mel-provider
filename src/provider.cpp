@@ -10,8 +10,10 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
+/// @brief Opaque manager handle that pins the common Runtime, independent of Control.
 class Manager final : public API_Manager {
 public:
+    /// Take a strong reference to the session initialized by make_api_manager.
     explicit Manager(std::shared_ptr<Runtime> value) : runtime(std::move(value)) {}
     std::shared_ptr<Runtime> runtime;
 };

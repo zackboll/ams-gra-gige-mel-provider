@@ -3,8 +3,7 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
-// Stack frames live on the callback's stack: admission cannot be stranded by
-// allocation failure, and nested callbacks retain every runtime in the chain.
+// Stack frames require no allocation between admission and consumer entry.
 constinit thread_local const CallbackGuard* callback_context = nullptr;
 // Sink execution holds operations; same-thread reentry must be rejected.
 constinit thread_local bool in_navigation_submission = false;
