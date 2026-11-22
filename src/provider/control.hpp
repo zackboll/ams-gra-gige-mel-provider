@@ -17,18 +17,22 @@ public:
     /// Retained detached handles and delivered buffers are not revoked.
     ~ControlImpl() override;
 
-    /** @brief Open and validate the device once per Runtime, then populate discovery for this Control.
+    /** @brief Open and validate the device, then publish complete discovery for this Control.
      * @param aperture_config_id Empty or `mono8-bootstrap`; any other ID is unsupported.
      * @return Success, NotSupported for another ID, or Fail for callback
      * reentry, failed bootstrap or a caught standard exception.
      * @note Acquires operations. Initial readback must fit the supported layout;
      * optional metadata and channel declarations are qualified before discovery.
-     * Failure after publication need not undo the device or discovery work already
-     * done. Nonstandard exceptions and failures while reporting can escape.
+     * Discovery is published only after successful construction of the entire
+     * snapshot. Failure during discovery leaves the previous vector unchanged;
+     * the initialized Runtime and device remain available for retry. Repeated
+     * success preserves the snapshot. Nonstandard exceptions and failures while
+     * reporting can escape.
      */
     ir::Return init(const std::string& aperture_config_id) override;
     /// Borrow this Control's discovery vector for its lifetime after successful
-    /// init. It is not updated by configuration commands; use
+    /// init. Do not race reads with initialization. Configuration commands do
+    /// not update this snapshot; use
     /// ChannelCore::getCapabilities for a current by-value snapshot.
     const std::vector<ir::ChannelCapability>& getCapabilities() const override;
     /// Return the fixed API/library fields and experimental provider software identity.

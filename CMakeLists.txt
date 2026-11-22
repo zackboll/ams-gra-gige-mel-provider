@@ -243,6 +243,10 @@ if(BUILD_TESTING)
     PRIVATE GIGE_MEL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} GIGE_MEL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     GIGE_MEL_VERSION_PATCH=${PROJECT_VERSION_PATCH})
   add_dependencies(gige_mel_provider_test_seams verify_upstream)
+  add_executable(provider_discovery_tests tests/provider_discovery_tests.cpp)
+  target_link_libraries(provider_discovery_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
+    gige_mel_build_options Threads::Threads)
+  add_test(NAME provider_discovery_publication COMMAND provider_discovery_tests)
   add_executable(provider_task_admission_tests tests/provider_task_tests.cpp)
   target_link_libraries(provider_task_admission_tests PRIVATE gige_mel_provider_test_seams gige_mel_backend
     gige_mel_build_options Threads::Threads)

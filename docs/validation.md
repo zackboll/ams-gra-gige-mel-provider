@@ -3661,3 +3661,52 @@ No physical camera or hardware/timestamp qualification was performed. Only
 `scripts/aravis_evidence.py`, its existing unittest file and these two docs
 changed. Final-head hosted R1 results are recorded on PR #13, separately from
 the prior-head historical results above.
+
+## Control discovery publication (2026-11-22)
+
+`ControlImpl::init()` now constructs the entire discovery vector before swapping
+it into the Control. A failure during construction leaves discovery unchanged;
+the device already initialized in the Runtime is retained for retry. This is
+not a rollback of device initialization and does not make discovery reads safe
+to race with `init()`.
+
+The public-interface CTest `provider_discovery_publication` uses a per-thread
+throwing hook in the uninstalled provider test build. Its negative control built
+the actual `ControlImpl::init()` with the original in-place `capabilities_`
+appends, the same two injection points, and the unchanged test. GCC Debug CTest
+failed as expected (exit 8): `discovery visible after failed init: 1 entries`
+after the first append on plain synthetic, and `discovery visible after failed
+init: 5 entries` just before returning on the combined recording task/stack
+fixture. The test reached both selected boundaries, received `Fail`, and counted
+one camera backend `open()` in each case before rejecting the visible discovery.
+
+With the correction, both failures left discovery empty. On the same Control,
+retry advertised exactly Image, C2 and Health for synthetic, plus Scheduling
+then Stack for the combined fixture, in the expected order and with the exact
+unique UUIDs and labels. All advertised types could be attached and detached;
+repeated successful init preserved the snapshot. Each case observed zero backend
+device opens before init and exactly one after failure, retry and repeat init.
+The counting wrapper returns the concrete device unchanged; it does not count
+task-session or stack-stream opens.
+
+Executed on Debian 13 x86-64, Linux `6.12.117+deb13-amd64`, source commit
+`14cca63a178e1fe36326f483f68de15926d3e45c`, tree
+`4cee629759b96111a7b776598177daf61b41d629` (the follow-up evidence commit changes
+only these records):
+
+- GCC 14.2.0 Debug SDK-free: `cmake --preset dev`,
+  `cmake --build --preset dev --parallel 2`, `ctest --preset dev`: **53/53**.
+- Clang 19.1.7 Debug SDK-free, in a separate `dev`-derived tree: built the
+  production provider, the shared test-seam library and `provider_discovery_tests`;
+  focused CTest **1/1**. The discovery TLS state is local to the seam library and
+  needs no dynamic-init thunk.
+- GCC 14.2.0 `asan` preset: built `provider_discovery_tests` and its instrumented
+  dependencies; `ctest --preset asan -R '^provider_discovery_publication$'` with
+  ASan leak detection and ASan/UBSan halt-on-error: **1/1**, no startup limit or
+  sanitizer diagnostic.
+- Production ELF symbol inspection (GCC and Clang) found no discovery hook.
+  A fresh GCC install contained no seam library, header or CMake target. The
+  standalone installed consumer built, captured and released one synthetic frame.
+
+This regression does not execute acquisition or task scheduling, change the
+advertised capabilities, or qualify any new camera, SDK, firmware or clock.

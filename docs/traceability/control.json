@@ -74,7 +74,7 @@
           "symbol": "ControlImpl::init"
         }
       ],
-      "behavior": "Accepts empty or mono8-bootstrap identifier, admits exact configured device and profile, then snapshots declarations; repeat init does not reopen.",
+      "behavior": "Accepts empty or mono8-bootstrap identifier, admits exact configured device and profile, then publishes only complete discovery. A failed discovery attempt leaves the snapshot unchanged and retry reuses the initialized device; repeat success does not reopen.",
       "evidence": [
         {
           "path": "tests/provider_tests.cpp",
@@ -89,6 +89,13 @@
           "result": "positive",
           "level": "SDK-free",
           "demonstrates": "Checks exact selected device ID, one open, and no I/O during manager/Control construction."
+        },
+        {
+          "path": "tests/provider_discovery_tests.cpp",
+          "scenario": "discovery_publication",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Injects early and late discovery failures; retry and repeat success on the same Control keep the backend device open count at one."
         }
       ],
       "gap": null,
@@ -141,7 +148,7 @@
           "symbol": "capability"
         }
       ],
-      "behavior": "Empty before init, then immutable channel discovery snapshot; not current image geometry after reconfiguration.",
+      "behavior": "Empty until successful publication of complete discovery, then immutable; neither failed discovery construction nor reconfiguration alters the snapshot. Reads must not race initialization.",
       "evidence": [
         {
           "path": "tests/provider_tests.cpp",
@@ -163,6 +170,13 @@
           "result": "positive",
           "level": "SDK-free",
           "demonstrates": "Checks conditional stack discovery and rejection of invalid support declarations."
+        },
+        {
+          "path": "tests/provider_discovery_tests.cpp",
+          "scenario": "discovery_publication",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks empty discovery after failure and exact ordered identities, attachability and snapshot stability after success for three- and five-channel profiles."
         }
       ],
       "gap": null,

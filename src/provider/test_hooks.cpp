@@ -8,6 +8,8 @@ constinit thread_local test_seams::UnsupportedStatusHook unsupported_status_hook
 constinit thread_local void* unsupported_status_hook_context = nullptr;
 constinit thread_local test_seams::TaskHook task_hook = nullptr;
 constinit thread_local void* task_hook_context = nullptr;
+constinit thread_local test_seams::DiscoveryHook discovery_hook = nullptr;
+constinit thread_local void* discovery_hook_context = nullptr;
 std::atomic<test_seams::StackHook> stack_hook{nullptr};
 std::atomic<void*> stack_hook_context{nullptr};
 
@@ -27,6 +29,10 @@ void set_stack_hook(StackHook hook, void* context) noexcept {
 void set_task_hook(TaskHook hook, void* context) noexcept {
     task_hook = hook;
     task_hook_context = context;
+}
+void set_discovery_hook(DiscoveryHook hook, void* context) noexcept {
+    discovery_hook = hook;
+    discovery_hook_context = context;
 }
 } // namespace test_seams
 #endif
