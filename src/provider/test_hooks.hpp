@@ -8,7 +8,7 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
-// GIGE-MEL-042-R1 synchronization points for the uninstalled test build only.
+// Injection points for the uninstalled test build only.
 // The installed provider compiles them to nothing.
 #if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
 /// Per-thread C2 seam; constinit at both declaration and sole definition keeps
@@ -22,6 +22,12 @@ extern constinit thread_local test_seams::TaskHook task_hook;
 extern constinit thread_local void* task_hook_context;
 /// Pause test submissions between reservation and ack dispatch; production no-op.
 #define GIGE_MEL_TASK_SEAM() do { if (task_hook) task_hook(task_hook_context); } while (false)
+/// Per-thread discovery injection with the same constant-initialization contract.
+extern constinit thread_local test_seams::DiscoveryHook discovery_hook;
+/// Borrowed context paired with the discovery hook on this thread.
+extern constinit thread_local void* discovery_hook_context;
+#define GIGE_MEL_DISCOVERY_SEAM(point) \
+    do { if (discovery_hook) discovery_hook(test_seams::DiscoveryPoint::point, discovery_hook_context); } while (false)
 /// Stack worker hook, set/cleared outside the worker lifetime (see set_stack_hook).
 extern std::atomic<test_seams::StackHook> stack_hook;
 /// Separately atomic borrowed context; do not replace while a worker can invoke it.
@@ -37,6 +43,7 @@ extern std::atomic<void*> stack_hook_context;
     } while (false)
 #else
 #define GIGE_MEL_TASK_SEAM() do {} while (false)
+#define GIGE_MEL_DISCOVERY_SEAM(point) do {} while (false)
 #define GIGE_MEL_UNSUPPORTED_STATUS_SEAM(point) do {} while (false)
 #define GIGE_MEL_STACK_SEAM(point) do {} while (false)
 #endif
