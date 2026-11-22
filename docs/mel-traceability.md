@@ -86,6 +86,10 @@ different device/firmware.
 [`ControlImpl::init`](../src/provider/control.cpp) and
 [`capability`](../src/provider/capabilities.cpp) build the immutable
 `Control::getCapabilities()` discovery snapshot at first successful init.
+Failed discovery construction leaves that vector unchanged; a retry can finish
+discovery without reopening the initialized device. This is covered by the
+[SDK-free discovery regression](qualification-evidence.md#sdk-free-provider-and-profiles)
+and does not change which channels or metadata are advertised.
 [`ChannelCore::getCapabilities()`](../src/provider/channel_core.cpp) recomputes current attached configuration from
 the same helper. Metadata flags describe registration/delivery, not command
 support. Attach requires an advertised identity/type and the proper listener on

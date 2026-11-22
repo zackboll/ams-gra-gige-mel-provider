@@ -279,9 +279,14 @@ the live Control for that manager; a mismatched instance, foreign manager, or
 null manager is rejected. `getBuffer` creates an uninitialized buffer associated
 with the manager's identity.
 
-`Control::init("")` and `init("mono8-bootstrap")` open `synthetic-0`; repeated
-initialization is successful. Other aperture profile names return NotSupported.
-Initialize on a control thread before sharing the discovery capability reference.
+`Control::init("")` and `init("mono8-bootstrap")` accept the same bootstrap
+profile, which opens `synthetic-0` in the default manager. Other aperture profile
+names return NotSupported. Only a fully constructed discovery snapshot is
+published. If discovery construction fails, the prior snapshot is unchanged
+(empty before the first success). Retrying on the same Control reuses the
+already initialized device; repeated successful initialization preserves the
+snapshot. Initialize on a control thread before sharing the discovery capability
+reference; do not race discovery reads with initialization.
 
 Three discovery entries are returned: `IRSTImage`, `CommandAndControl`, and
 `HealthAndStatus`. The partial Health surface and its state/sampling semantics

@@ -4,6 +4,7 @@
 #include "capabilities.hpp"
 #include "software_identity.hpp"
 #include "tasking.hpp"
+#include "test_hooks.hpp"
 #include <irmel/library/stacked-image/StackedImageListener.h>
 #include <algorithm>
 
@@ -67,6 +68,7 @@ ir::Return ControlImpl::init(const std::string& aperture_config_id) {
             }
         }
         if (capabilities_.empty()) {
+            std::vector<ir::ChannelCapability> candidate;
             mel::UCI_ID image_id, c2_id, health_id;
             std::array<std::uint8_t, mel::UUID_SIZE> image_uuid{}, c2_uuid{};
             image_uuid.back() = 1;
@@ -79,21 +81,24 @@ ir::Return ControlImpl::init(const std::string& aperture_config_id) {
             health_uuid.back() = 3;
             health_id.setUUID(health_uuid);
             health_id.setDescriptiveLabel(runtime_->settings.instance + "/health");
-            capabilities_.push_back(capability(*runtime_, ir::ChannelType::IRSTImage, image_id));
-            capabilities_.push_back(capability(*runtime_, ir::ChannelType::CommandAndControl, c2_id));
-            capabilities_.push_back(capability(*runtime_, ir::ChannelType::HealthAndStatus, health_id));
+            candidate.push_back(capability(*runtime_, ir::ChannelType::IRSTImage, image_id));
+            GIGE_MEL_DISCOVERY_SEAM(after_first_entry);
+            candidate.push_back(capability(*runtime_, ir::ChannelType::CommandAndControl, c2_id));
+            candidate.push_back(capability(*runtime_, ir::ChannelType::HealthAndStatus, health_id));
             if (runtime_->task_support.virtual_stare) {
                 auto uuid = health_uuid;
                 uuid.back() = 5;
-                capabilities_.push_back(capability(*runtime_, ir::ChannelType::Scheduling,
+                candidate.push_back(capability(*runtime_, ir::ChannelType::Scheduling,
                     mel::UCI_ID(uuid, runtime_->settings.instance + "/scheduling")));
             }
             if (runtime_->stack_support.supported) {
                 auto uuid = health_uuid;
                 uuid.back() = 4;
-                capabilities_.push_back(capability(*runtime_, ir::ChannelType::StackedImage,
+                candidate.push_back(capability(*runtime_, ir::ChannelType::StackedImage,
                     mel::UCI_ID(uuid, runtime_->settings.instance + "/stacked-image")));
             }
+            GIGE_MEL_DISCOVERY_SEAM(before_publication);
+            capabilities_.swap(candidate);
         }
         return ir::Return::Success;
     } catch (const std::exception& error) {

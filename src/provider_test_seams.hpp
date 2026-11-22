@@ -1,6 +1,6 @@
 #pragma once
 
-// GIGE-MEL-042-R1 test-only synchronization seam. Never installed, never part of
+// Test-only provider seams. Never installed, never part of
 // the provider library: provider components omit these points unless
 // GIGE_MEL_PROVIDER_TEST_SEAMS is defined, which only the uninstalled
 // gige_mel_provider_test_seams test build does.
@@ -39,5 +39,13 @@ void set_stack_hook(StackHook hook, void* context) noexcept;
 using TaskHook = void (*)(void*) noexcept;
 /// Set the per-thread task hook and borrowed context, or clear with a null hook.
 void set_task_hook(TaskHook hook, void* context) noexcept;
+
+/// Boundaries in construction of the Control discovery snapshot.
+enum class DiscoveryPoint { after_first_entry, before_publication };
+/// Called under the operation lock on the initializing thread. May throw a
+/// standard exception to fail discovery; must not reenter the provider.
+using DiscoveryHook = void (*)(DiscoveryPoint, void* context);
+/// Set the per-thread discovery hook and borrowed context, or clear both with nulls.
+void set_discovery_hook(DiscoveryHook hook, void* context) noexcept;
 
 } // namespace gige_mel::test_seams
