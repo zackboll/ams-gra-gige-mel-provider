@@ -261,6 +261,13 @@
           "result": "positive",
           "level": "SDK-free",
           "demonstrates": "Asserts successful future and correlated Image callback from each command channel, with exact backend readback."
+        },
+        {
+          "path": "tests/profile_policy_mel_tests.cpp",
+          "scenario": "selected_profile_camera_commands",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "The same C2 CameraCommand at 6 Hz succeeds with the default profile and fails with the loaded Cognex profile (ordinary response, CapabilityUnavailable status, no writes). A 5 Hz Cognex command recovers from actual 16 Hz; both successful commands verify native write and readback."
         }
       ],
       "gap": "Qualify allowed feature names, units, grids and readback on each device/firmware.",

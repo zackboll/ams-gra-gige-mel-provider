@@ -61,8 +61,14 @@ readback is never clamped to the policy: e.g. 16 Hz remains readable and can be
 explicitly corrected. A fractional native rate cannot fit the existing integer
 configuration type and returns its actual value in the shared diagnostic.
 
-The owned state retains native facts only. All operations dispatch through it.
-Shared SDK-free algorithms retain fresh bounds, complete-request validation,
+The owned state inherits capabilities and readback from
+[`MonoFreeRunningProfileState`](../../src/profiles/mono_free_running_profile.hpp),
+which keeps the native admission facts distinct from the advertised bounds.
+The profile constructs the Cognex state explicitly after model admission.
+Cognex adds native checks before the default write transaction, admits the
+already-read snapshot in its own preflight sequence, and retains model-specific
+diagnostics and the Mono8-only frame gate. Shared SDK-free algorithms retain
+fresh bounds, complete-request validation,
 ROI/exposure conversion, ordered writes, authoritative readback and partial-write
 diagnostics with **no rollback**. No pixel-format, trigger, exposure-auto,
 persistence, transport or host-network writes are added. Native frame IDs and

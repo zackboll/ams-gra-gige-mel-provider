@@ -38,6 +38,25 @@ which admits @ref gige_mel::backend::profiles::NativeFrameFacts with a checked
 source span. Neither a pool size nor a retained owner proves arbitrary pointer
 provenance. See @ref src/profiles/frame_policy.hpp "frame facts and layout source".
 
+@subsection extension_monochrome Reusing the default monochrome policy
+
+@ref gige_mel::backend::profiles::MonoFreeRunningProfile and
+@ref gige_mel::backend::profiles::MonoFreeRunningProfileState implement the
+untriggered Continuous, manual-exposure Mono8 and unpacked little-endian Mono12
+assumptions. For a derived model, override
+@ref gige_mel::backend::profiles::MonoFreeRunningProfile::open to construct the
+derived state. The @ref gige_mel::backend::profiles::MonoFreeRunningProfileState::MonoFreeRunningProfileState
+constructor owns the native snapshot separately from the advertised capabilities.
+The inherited @ref gige_mel::backend::profiles::MonoFreeRunningProfileState::configuration
+therefore reports actual representable values, not clamped policy values. Add
+request checks before delegating to
+@ref gige_mel::backend::profiles::MonoFreeRunningProfileState::apply, or use
+@ref gige_mel::backend::profiles::MonoFreeRunningProfileState::native_admission
+with the snapshot helper when the order of preflight checks differs. See the
+Cognex walkthrough in @ref md_docs_2camera-profile-tutorial "Create a Camera Profile".
+Composition and independent implementations remain supported. None of these
+defaults implements optional interfaces or replaces common MEL channel mechanics.
+
 @section extension_modules Module loading and selection
 
 @ref gige_mel::selection::BackendCatalog owns the factories. Use
@@ -53,7 +72,8 @@ and @ref gige_mel::selection::LoadedProfile describe validation, creation and
 lifetime pins. Discovery uses C linkage, but virtual objects, STL types and
 shared ownership cross a matched-C++ boundary. Versions and build identity do
 not prove toolchain/ABI parity or hardware compatibility. The existing identity
-hashes header bytes, so even comment-only edits in that closure require a host
+hashes header bytes (including the default bases and native snapshot layout),
+so even comment-only edits in that closure require a host
 and module rebuild from matching inputs. See
 @ref md_docs_2runtime-selection "runtime selection and explicit module loading".
 

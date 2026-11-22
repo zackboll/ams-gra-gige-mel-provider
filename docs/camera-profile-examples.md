@@ -8,8 +8,8 @@ line-numbered source. The CMake links go to the exact source revision on GitHub.
 
 | Reference implementation | Profile source | Module entry point and descriptor | Standalone build |
 | --- | --- | --- | --- |
-| Cognex CIC-5000R (real-camera policy, fixture-qualified) | [Cognex profile implementation](../camera_profiles/cognex_cic_5000r/profile.cpp), [Cognex profile declaration](../camera_profiles/cognex_cic_5000r/profile.hpp) | [Cognex module entry point](../camera_profiles/cognex_cic_5000r/module.cpp) | [Cognex CMakeLists.txt](../camera_profiles/cognex_cic_5000r/CMakeLists.txt) |
-| Rate-limited (teaching and contract-test policy) | [Rate-limited profile implementation](../examples/profile_module/rate_limited_policy.hpp) | [Rate-limited module descriptor](../examples/profile_module/module.cpp) | [Rate-limited CMakeLists.txt](../examples/profile_module/CMakeLists.txt) |
+| Cognex CIC-5000R (real-camera policy, fixture-qualified; inherits [monochrome defaults](../src/profiles/mono_free_running_profile.hpp)) | [Cognex profile implementation](../camera_profiles/cognex_cic_5000r/profile.cpp), [Cognex profile declaration](../camera_profiles/cognex_cic_5000r/profile.hpp) | [Cognex module entry point](../camera_profiles/cognex_cic_5000r/module.cpp) | [Cognex CMakeLists.txt](../camera_profiles/cognex_cic_5000r/CMakeLists.txt) |
+| Rate-limited (teaching and contract-test policy; uses composition) | [Rate-limited profile implementation](../examples/profile_module/rate_limited_policy.hpp) | [Rate-limited module descriptor](../examples/profile_module/module.cpp) | [Rate-limited CMakeLists.txt](../examples/profile_module/CMakeLists.txt) |
 | Navigation record (optional navigation handler, fictional test record) | [Navigation record profile implementation](../examples/profile_module/navigation_record_policy.hpp) | [Navigation record module descriptor](../examples/profile_module/navigation_module.cpp) | Same project as rate-limited |
 
 Start with the [profile and state interfaces](../src/profiles/camera_profile.hpp),

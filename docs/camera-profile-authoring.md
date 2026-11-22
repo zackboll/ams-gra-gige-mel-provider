@@ -12,7 +12,7 @@ implement every required MEL channel or operation.
 
 The [Cognex CIC-5000R profile](../camera_profiles/cognex_cic_5000r/README.md)
 is a real-camera-specific module using this unchanged interface: exact identity,
-owned state, discrete-rate policy and shared representation algorithms without
+owned state and discrete-rate policy layered on the monochrome defaults without
 SDK dependencies. Its qualification record distinguishes fixtures from hardware.
 
 This is an **internal, uninstalled C++20 interface** for statically linked or
@@ -44,13 +44,40 @@ Implement the state operations:
 | `validate_frame(facts, frozen, format)` | Admit only valid selected representations, geometry and checked spans inside received bytes/capacity; return accept/incomplete/reject with diagnostic |
 | `native_diagnostics()` (optional) | Owned read-only feature text for internal inspection |
 
-Each concrete state privately stores its own native snapshot type. There is no
-universal monochrome snapshot, `void*`, unchecked downcast or state exchange
-between implementations. The default implementation wraps the existing
-`mono_free_running` functions rather than duplicating their algorithms. Those
-functions retain first-implemented alias rules, checked units/conversions,
-dynamic constraints, ROI/timing ordering, partial-write diagnostics, native
-readback, Mono8 and little-endian unpacked Mono12 admission.
+## Reusing the monochrome defaults
+
+[`MonoFreeRunningProfile` and `MonoFreeRunningProfileState`](../src/profiles/mono_free_running_profile.hpp)
+implement these interfaces for untriggered Continuous acquisition, manual
+exposure, integer-Hz rate control, and single Mono8 or explicitly little-endian
+unpacked Mono12 images. The existing factory returns the default profile. It
+uses the existing `mono_free_running` algorithms: first-implemented aliases,
+checked units/conversions, dynamic constraints, ordered ROI/timing writes,
+partial-write diagnostics and truthful readback.
+
+If those assumptions fit your camera, inherit the state and override only the
+operations whose policy differs. Override the profile's `open()` to construct
+the derived state explicitly: the default `open()` always builds a default
+state. Move the validated native snapshot and the advertised capabilities into
+the base constructor. Keep native admission facts separate from advertised
+limits. For example, Cognex advertises at most 10 Hz, inherits `configuration()`
+unchanged, and can read an actual 16 Hz setting and explicitly apply 5 Hz to
+recover. The base never validates readback against virtual `capabilities()`.
+
+Cognex checks its discrete request rate and required modes before calling the
+base `apply()`. Its `preflight()` admits the already-read snapshot using the
+protected `native_admission()` accessor and the shared acquisition helper;
+calling the full base preflight would read again and check acquisition mode in
+a different order. Preserve native error precedence when selecting what to
+reuse. Snapshot access is const and valid only while the state lives. Do not
+retain the feature service, connection guard or before-write callback passed to
+an operation; the state must outlive its parent profile without their help.
+
+For different native representations, sequencing or ownership needs, implement
+the interfaces independently or compose a delegate (as the rate-limited example
+does). No common snapshot layout is required. Neither default implements any
+optional capability interface. Camera policy can reuse defaults while one common
+MEL implementation owns the provider mechanics; it cannot replace arbitrary
+unsupported MEL operations.
 
 `IDeviceFeatures` in `src/device_features.hpp` supplies project-owned typed
 scalar values, fresh numeric bounds/increments/units, implementation queries,
