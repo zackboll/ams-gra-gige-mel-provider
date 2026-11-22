@@ -84,8 +84,10 @@ UTC/PTP, navigation, production reliability or full MEL conformance.
   and does not extend profile module v1.
 - GenTL probe/supervisor/wire tooling adds no camera capability. In the merged
   [GENTL-003 results](tasks/GIGE-MEL-GENTL-003-validation.md), Balluff 3.7.2
-  initializes then crashes during isolated interface update; Euresys 26.10 was
-  unavailable without authenticated access. The
+  initializes then crashes during isolated interface update. Euresys 26.10 was
+  unavailable at that time; the later [GENTL-003B record](tasks/GIGE-MEL-GENTL-003B-validation.md)
+  reports successful native initialization but no exposed interface in the
+  isolated loopback topology, so no device was opened. The
   [GENTL-003A wire harness](tasks/GIGE-MEL-GENTL-003A-validation.md) self-tests
   are not real-producer passes. Neither producer's read-only camera behavior is
   qualified by these records.
