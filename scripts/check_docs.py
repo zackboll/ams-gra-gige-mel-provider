@@ -87,8 +87,9 @@ SECTIONS = {
         "provider.cpp", "runtime.cpp", "control.cpp", "callback_context.cpp", "channel_core.cpp",
         "capabilities.cpp", "host_buffer.cpp", "frame_delivery.cpp", "image_channel.cpp",
         "stacked_image_channel.cpp", "c2_channel.cpp", "health_channel.cpp", "scheduling_channel.cpp",
-        "factories.cpp", "synthetic.cpp", "aravis_backend.cpp",
-        "pleora_backend.cpp", "gentl_backend.cpp", "config_parser.cpp", "gvcp_control_owner.cpp",
+        "factories.cpp", "synthetic_backend.cpp", "aravis_backend.cpp", "aravis_features.cpp", "aravis_stream.cpp",
+        "pleora_backend.cpp", "pleora_features.cpp", "pleora_stream.cpp", "gentl_backend.cpp", "config_parser.cpp",
+        "gvcp_control_owner.cpp",
     )),
     PROFILE_EXAMPLES: ("internal development references", tuple(EXAMPLE_SOURCES)),
 }

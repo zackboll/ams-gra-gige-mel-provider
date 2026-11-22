@@ -329,7 +329,7 @@ All of these targets are internal and are not installed or exported:
 
 | Target | Purpose |
 | --- | --- |
-| `gige_mel_aravis` (static) | `src/backends/aravis/`: SDK mechanics and typed feature-service implementation (`aravis_backend.cpp`), adapter resource budgets (`acquisition_policy.hpp`), and the shared capture (`aravis_capture.cpp`) and time-probe (`aravis_time_probe.cpp`) routines; links the SDK-free profile policy and snapshot/configuration orchestration in `gige_mel_camera_profiles` (`src/profiles/`) |
+| `gige_mel_aravis` (static) | `src/backends/aravis/`: discovery and device ownership (`aravis_backend.cpp`), typed native feature access (`aravis_features.cpp`), native acquisition and leases (`aravis_stream.cpp`), resource budgets (`acquisition_policy.hpp`), and the separate capture and time-probe routines; links the SDK-free policy in `gige_mel_camera_profiles` (`src/profiles/`) |
 | `gige_mel_aravis_test_support` | `tests/support/aravis_fake_support.*`: test-only Fake interface selection |
 | `aravis_adapter_tests` → CTest `aravis_adapter` | Direct adapter scenarios against the real SDK |
 | `aravis_embedding_probe` → CTest `aravis_mel_embedding` | Private common-provider configuration and negative timestamp-admission probe |

@@ -41,7 +41,7 @@ succeeds whenever the doubled grant is at least the request, which happens at
 up to twice `rmem_max`. **A successful property setter, and even the SDK's own
 check, are not evidence that the requested bytes were granted.**
 
-## Adapter behaviour (`src/backends/aravis/aravis_backend.cpp`)
+## Adapter behaviour (`src/backends/aravis/aravis_stream.cpp`)
 
 1. **Where it is applied.** In `start()`, after `arv_device_create_stream()`
    succeeds and before any pool buffer is queued, with the device lock held.

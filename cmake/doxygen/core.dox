@@ -67,9 +67,9 @@ Host buffers and frame delivery | @ref src/provider/host_buffer.cpp "host_buffer
 Image and Stack channels | @ref src/provider/image_channel.cpp "image_channel.cpp" and @ref src/provider/stacked_image_channel.cpp "stacked_image_channel.cpp"
 C2, Health and Scheduling channels | @ref src/provider/c2_channel.cpp "c2_channel.cpp", @ref src/provider/health_channel.cpp "health_channel.cpp" and @ref src/provider/scheduling_channel.cpp "scheduling_channel.cpp"
 Native MEL factory and default selection | @ref src/factories.cpp "factories.cpp"
-SDK-free capture path | @ref src/backends/synthetic.cpp "synthetic.cpp"
-Optional Aravis implementation | @ref src/backends/aravis/aravis_backend.cpp "aravis_backend.cpp" and @ref src/backends/aravis/aravis_capture.cpp "aravis_capture.cpp"
-Optional Pleora implementation | @ref src/backends/pleora/pleora_backend.cpp "pleora_backend.cpp" and @ref src/backends/pleora/pleora_stream.cpp "pleora_stream.cpp"
+SDK-free capture path | @ref src/backends/synthetic/synthetic_backend.cpp "synthetic_backend.cpp"
+Optional Aravis implementation | @ref src/backends/aravis/aravis_backend.cpp "aravis_backend.cpp", @ref src/backends/aravis/aravis_features.cpp "aravis_features.cpp", @ref src/backends/aravis/aravis_stream.cpp "aravis_stream.cpp", @ref src/backends/aravis/aravis_capture.cpp "aravis_capture.cpp" and @ref src/backends/aravis/aravis_time_probe.cpp "aravis_time_probe.cpp"
+Optional Pleora implementation | @ref src/backends/pleora/pleora_backend.cpp "pleora_backend.cpp", @ref src/backends/pleora/pleora_features.cpp "pleora_features.cpp" and @ref src/backends/pleora/pleora_stream.cpp "pleora_stream.cpp"
 Optional GenTL implementation | @ref src/backends/gentl/gentl_backend.cpp "gentl_backend.cpp" and @ref src/gentl/gentl_consumer.cpp "gentl_consumer.cpp"
 Configuration and transport | @ref src/config_parser.cpp "config_parser.cpp", @ref src/device_registers.hpp "device_registers.hpp" and @ref src/transport/gvcp_control_owner.cpp "gvcp_control_owner.cpp"
 

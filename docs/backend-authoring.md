@@ -34,7 +34,27 @@ immutable per-device format. The old Mono8 default is unchanged. PFNC alone
 does not establish word endianness. Historical Mono8-only references below
 describe the original profile, not a limitation of the current provider.
 
-The internal source contract is [`include/gige_mel/backend.hpp`](../include/gige_mel/backend.hpp), in namespace `gige_mel::backend`. The first implementation is [`src/backends/synthetic.cpp`](../src/backends/synthetic.cpp).
+The project-owned source contract is [`include/gige_mel/backend.hpp`](../include/gige_mel/backend.hpp), in namespace `gige_mel::backend`. The SDK-free implementation is [`synthetic/synthetic_backend.cpp`](../src/backends/synthetic/synthetic_backend.cpp).
+
+## Source layout
+
+Give each backend a directory under `src/backends/`. Keep discovery, exact
+selection, and open-device composition in `*_backend.cpp`, typed native feature
+access in `*_features.cpp`, and stream execution, frame admission dispatch and
+lease mechanics in `*_stream.cpp` when those roles warrant separate files.
+Use private headers for the minimum state and operations shared across units.
+For example, Aravis shares device/stream lifecycle state but does not expose its
+concrete stream, native run or lease types. Pleora's stream wraps a native source;
+the eBUS device and pipeline coordination remain together. Synthetic needs no
+private feature service or factory header. See the [responsibility matrix](tasks/GIGE-MEL-048-design.md#baseline-review).
+
+Return project-owned `Error` values from native failures without erasing the
+SDK-specific diagnosis. The device must retain the selected profile and its
+admitted state for all operations that need them. A source lease owns what is
+needed to preserve its bytes, which is not necessarily the stream or profile.
+Keep fixture setup under `tests/support/` and vendor dependencies confined to
+optional internal targets. Shared source organization does not imply identical
+device IDs, transport behavior, or hardware qualification.
 
 Keep these evidence categories distinct:
 

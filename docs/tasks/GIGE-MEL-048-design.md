@@ -29,3 +29,29 @@ GenTL organized port-backed GenApi separately from its backend. The internal
 [selection catalog](../../src/selection/) constructs configured factories and
 selects compatible policies explicitly; registration does not discover devices.
 The optional SDK CMake modules own vendor dependencies, not the common provider.
+
+## Final boundaries
+
+- Move the synthetic source byte-for-byte into `backends/synthetic/`. Keep the
+  same factory declaration and installed CMake target.
+- Keep Aravis discovery, exact open, register access, ownership reservation,
+  control-loss subscription/drain and logical close in `aravis_backend.cpp`.
+  Move borrowed typed access and native identity reads into `aravis_features.cpp`.
+  A small `aravis_native.hpp` shares native RAII and error plumbing.
+- Move Aravis commands, uncertainty handling, run allocation and retirement,
+  timed receive, native frame decoding, receive-buffer observation and popped
+  buffer leases into `aravis_stream.cpp`. `aravis_stream.hpp` shares the same
+  per-device state and lock and forward-declares the native run; the concrete
+  stream and lease stay private to the source file. Device close calls the
+  existing stream retirement before releasing its native device/reservation.
+  The device-to-run lock order and receive/retirement rendezvous are unchanged.
+  Capture and time-probe drivers and their entry points stay separate.
+- Keep Pleora's existing native source/pipeline coordination alongside device
+  state, shared by close and the `NativeSource` implementation. Retain the
+  separate feature adapter and stream wrapper. Align identity, factory and
+  borrowed/retained ownership conventions, not the SDK operations.
+- Leave the selected profile, owned per-device state, module compatibility,
+  GenTL implementation, provider, and all installed declarations unchanged by
+  this refactor. Aravis native buffer retention and Pleora host-copy retention
+  both implement `FrameLease`; neither implies equivalent transport behavior or
+  completed hardware qualification.
