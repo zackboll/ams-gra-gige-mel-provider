@@ -1,5 +1,17 @@
 # Camera profiles across SDK backends
 
+## Adapter boundaries (GIGE-MEL-048)
+
+Aravis and Pleora both construct a borrowed typed feature service for each
+serialized configuration operation (or exclusive open). Their device logic
+invokes the same selected `ICameraProfile` and retains its per-device
+`ICameraProfileState`. Acquisition preflight calls that state on fresh native
+facts; receive passes decoded SDK buffer facts to its frame validator. The
+service does not choose feature aliases, order writes, or decide which frames
+the profile admits. The structural split moves none of that shared policy and
+does not change the module interface, compatibility declarations, or lifetime
+requirements. See [backend boundaries](tasks/GIGE-MEL-048-design.md).
+
 ## GenTL as a third backend (GIGE-MEL-GENTL-002)
 
 The unchanged `mono_free_running_v1` profile and the unchanged dynamically

@@ -1,8 +1,8 @@
 #pragma once
 
-// PRIVATE seams for the adapter's own SDK tests. Not used by the provider,
-// the diagnostic tool or any production path; never installed. Fake-interface
-// selection lives in tests/support/aravis_fake_support.cpp, not here.
+// Private interface source and optional test hooks; never installed. The
+// production factory supplies only the GigE source and leaves hooks empty.
+// Fake selection and native test arrangements live under tests/support and tests.
 
 #include "aravis_backend.hpp"
 #include "profiles/frame_policy.hpp"

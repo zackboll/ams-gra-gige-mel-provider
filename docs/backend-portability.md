@@ -4,6 +4,15 @@ This is the historical GIGE-MEL-007 SDK-free experiment. Native Aravis and
 Pleora adapters were added in later milestones; see [Current Status](status.md)
 and [Qualification Evidence](qualification-evidence.md) for their separate scope.
 
+GIGE-MEL-048 reorganizes backend sources without changing this provider suite
+or its fixtures. The [adapter validation record](tasks/GIGE-MEL-048-validation.md)
+tracks the direct contracts separately: Aravis uses SDK Fake and GigE loopback;
+Pleora uses native local feature fixtures and controlled SDK buffers, not a
+substitute for a successfully connected eBUS camera. In particular, Aravis pins
+a popped native buffer, whereas Pleora requeues the native buffer and leases
+owned host bytes. Both guarantee source-byte retention; neither guarantees
+identical transport or timestamp qualification.
+
 ## Purpose
 
 `provider_backend_contract_tests` (CTest `provider_backend_portability`) shows

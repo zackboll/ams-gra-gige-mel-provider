@@ -205,6 +205,8 @@ void start_and_commands() {
     CHECK(acquisition_register(*device) == 0);
     // receive before start is a terminal stopped result, not a wait.
     CHECK(stream->receive(10ms).error().code == backend::ErrorCode::stopped);
+    CHECK(aravis::receive_with_native_timestamps(*stream, 10ms).error().code == backend::ErrorCode::stopped);
+    CHECK(aravis::receive_buffer_observation(*stream).error().code == backend::ErrorCode::stopped);
 
     CHECK(stream->start(7));
     CHECK(seen.streams_created == 1 && seen.live_streams() == 1);
@@ -244,6 +246,8 @@ void start_and_commands() {
     CHECK(seen.command_log().size() == 2);
     CHECK(stream->receive(50ms).error().code == backend::ErrorCode::stopped);
     CHECK(device->close());
+    CHECK(stream->start(10).error().code == backend::ErrorCode::disconnected);
+    CHECK(device->create_stream().error().code == backend::ErrorCode::disconnected);
 }
 
 // B. Genuine SDK pixels and descriptors through an actual ArvStream.

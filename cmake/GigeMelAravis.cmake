@@ -27,6 +27,8 @@ message(STATUS "Aravis ${GIGE_MEL_QUALIFIED_ARAVIS_VERSION} (internal camera-con
 # package never see Aravis, GLib or this target.
 add_library(gige_mel_aravis STATIC
   src/backends/aravis/aravis_backend.cpp
+  src/backends/aravis/aravis_features.cpp
+  src/backends/aravis/aravis_stream.cpp
   src/backends/aravis/aravis_capture.cpp
   src/backends/aravis/aravis_time_probe.cpp)
 target_include_directories(gige_mel_aravis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/aravis)

@@ -260,13 +260,19 @@ An SDK adapter answers “how do I perform this operation with this library?” 
 
 The internal device interface uses a typed `CameraConfiguration`. GIGE-MEL-024 extracts SDK-free policy into `src/profiles/mono_free_running.hpp/.cpp`, compiled by the internal `gige_mel_camera_profiles` target. GIGE-MEL-025 adds `src/device_features.hpp` and shared orchestration in `mono_free_running_device.hpp/.cpp`: feature aliases, fresh snapshots, configuration write plans and actual readback now use typed, owned values without SDK handles. Pure profile and recording-service tests run in the default build.
 
-Aravis implements native feature operations, current type/access/range enforcement,
-SDK error translation and native frame decoding in
-`src/backends/aravis/aravis_backend.cpp`. Its device lock and native lifetime
+The SDK-free synthetic implementation is in
+[`src/backends/synthetic/`](../src/backends/synthetic/synthetic_backend.cpp).
+The optional adapters have separate backend, typed feature, and stream units
+under `src/backends/aravis/` and `src/backends/pleora/`. For Aravis,
+[`aravis_backend.cpp`](../src/backends/aravis/aravis_backend.cpp) owns discovery,
+device ownership and close; [`aravis_features.cpp`](../src/backends/aravis/aravis_features.cpp)
+implements native typed access and SDK error translation, and
+[`aravis_stream.cpp`](../src/backends/aravis/aravis_stream.cpp) executes native
+runs, decodes buffers and manages leases. The device lock and native lifetime
 cover each complete shared transaction. Explicit synchronous guards preserve
 connection checks around readback and before each write. Native command-attempt
 tracking, acquisition uncertainty, stream cancellation and buffer ownership stay
-with the adapter. Adapter pool budgets live in `acquisition_policy.hpp` and are
+with the adapter. Aravis pool budgets live in `acquisition_policy.hpp` and are
 explicit inputs to common planning. Pleora implements the same feature and
 profile contracts with native GenApi access and bounded host-copy acquisition;
 see [camera-profile portability](camera-profile-portability.md) and
