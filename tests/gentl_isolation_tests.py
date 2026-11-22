@@ -34,6 +34,8 @@ class GenTLIsolation(unittest.TestCase):
 
     def test_no_provider_selection_or_factory_reference(self):
         for path in ["src/provider.cpp", "src/factories.cpp", "src/config_parser.cpp",
+                     *[str(p.relative_to(ROOT)) for p in sorted((ROOT / "src/provider").rglob("*"))
+                       if p.suffix in (".cpp", ".hpp")],
                      *[str(p.relative_to(ROOT)) for p in (ROOT / "src/selection").glob("*")],
                      *[str(p.relative_to(ROOT)) for p in (ROOT / "include").rglob("*.hpp")],
                      "examples/select_session.cpp"]:

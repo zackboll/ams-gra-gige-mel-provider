@@ -117,7 +117,8 @@ and the header is part of the build identity.
 Only an SDK-free recording port exercises this path. No production adapter,
 authority grant, register write, GVCP transfer or detector protocol is connected.
 Transport ACKs, detector processing, navigation-to-image correlation and transfer
-alignment remain unqualified; do not put vendor addresses into `src/provider.cpp`.
+alignment remain unqualified; keep vendor addresses out of the common provider
+components in `src/provider/` and `src/provider.cpp`.
 See @ref md_docs_2camera-profile-authoring "camera-profile authoring",
 @ref md_docs_2navigation-backend-forwarding "navigation forwarding" and
 @ref md_docs_2qualification-evidence "qualification evidence".

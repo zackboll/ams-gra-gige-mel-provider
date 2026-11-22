@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::~ChannelCore"
         }
       ],
@@ -78,7 +78,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/stacked_image_channel.cpp",
           "symbol": "StackedImageChannelImpl::registerMetadataCallback(LOS3D_KinematicsType)"
         }
       ],
@@ -124,7 +124,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::~ChannelCore"
         }
       ],
@@ -202,7 +202,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/frame_delivery.cpp",
           "symbol": "ChannelCore::run_stacks"
         },
         {

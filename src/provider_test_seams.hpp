@@ -1,7 +1,7 @@
 #pragma once
 
 // GIGE-MEL-042-R1 test-only synchronization seam. Never installed, never part of
-// the provider library: src/provider.cpp compiles these points to nothing unless
+// the provider library: provider components omit these points unless
 // GIGE_MEL_PROVIDER_TEST_SEAMS is defined, which only the uninstalled
 // gige_mel_provider_test_seams test build does.
 #if !defined(GIGE_MEL_PROVIDER_TEST_SEAMS)

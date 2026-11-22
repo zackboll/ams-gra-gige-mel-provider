@@ -218,6 +218,42 @@ The runtime also owns stream lifecycle, bounded publication, configuration gener
 
 The bootstrap uses configuration changes while acquisition is disabled. A future automatic stop/configure/restart operation should remain a shared runtime transaction. It must stop publication, quiesce the native stream, apply changes in the required order, read back the actual configuration, validate destination buffers, advance the generation, and then restart. It must also define what happens if restoration fails after a partial device write.
 
+### Private provider source organization
+
+The common MEL implementation is split into private components under
+`src/provider/`. Each manager session still has one shared `Runtime`; channels
+use that same state and its existing locks. The split preserves the public
+interfaces, advertised capabilities and lifecycle contracts. It introduces no
+provider inheritance API or new camera-profile extension interface.
+
+Paths below are relative to `src/`:
+
+| Source | Responsibility |
+| --- | --- |
+| `provider.cpp`, `factories.cpp` | Manager/session construction, project diagnostics and the existing upstream factory entry points |
+| `provider/runtime.hpp/.cpp`, `provider/control.hpp/.cpp` | Shared session state, Control initialization, discovery and channel attachment |
+| `provider/channel_core.hpp/.cpp` | Common channel operations, configuration transactions, acquisition lifecycle and callback admission/draining |
+| `provider/host_buffer.hpp/.cpp`, `provider/stream_state.hpp`, `provider/frame_delivery.cpp` | Registered host-buffer and acquisition state, validated Image/Stack delivery and frame-header construction |
+| `provider/image_channel.cpp`, `provider/stacked_image_channel.cpp`, `provider/c2_channel.cpp`, `provider/health_channel.cpp`, `provider/scheduling_channel.cpp` | Concrete MEL channel implementations and their channel-specific operations |
+| `provider/channels.hpp` | Private channel factories that keep concrete channel classes local to their implementations |
+| `provider/callback_context.hpp/.cpp` | Shared callback ancestry and submission context for reentry and teardown guards |
+| `provider/capabilities.hpp/.cpp`, `provider/results.hpp/.cpp`, `provider/health_snapshot.hpp/.cpp`, `provider/navigation_translation.hpp/.cpp`, `provider/tasking.hpp/.cpp`, `provider/software_identity.hpp` | Focused capability, result, health, navigation, tasking and software-identity helpers |
+| `provider/mel_types.hpp`, `provider/unsupported_callbacks.hpp` | Private MEL includes/type aliases and shared unsupported-callback definitions |
+| `provider/test_hooks.hpp/.cpp` | Private synchronization hooks enabled only in the dedicated test build |
+
+`callback_context.cpp` owns the thread-local context shared by all provider
+components. A callback entered through one channel must remain visible to guards
+in another component or manager session on that thread; file boundaries do not
+create separate callback contexts.
+
+The production `gige_mel_provider` and uninstalled
+`gige_mel_provider_test_seams` targets compile the same
+`gige_mel_provider_sources` CMake list. Only the latter defines
+`GIGE_MEL_PROVIDER_TEST_SEAMS`; production compiles the
+test synchronization points away. The component headers are uninstalled and
+remain implementation details, separate from the installed project headers and
+the camera-profile/module contracts.
+
 ### SDK adapter and camera profile
 
 An SDK adapter answers “how do I perform this operation with this library?” A camera profile answers “which features, units, constraints, and ordering does this camera model require?” Those concerns should remain separate as real cameras are added.

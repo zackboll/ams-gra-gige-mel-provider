@@ -8,7 +8,12 @@ the default SDK-free build.
 
 Area | Start reading
 ---- | -------------
-Shared runtime (sessions, callbacks, buffers and MEL channels) | @ref src/provider.cpp "provider.cpp" and @ref src/provider_internal.hpp "provider_internal.hpp"
+Manager sessions and project diagnostics | @ref src/provider.cpp "provider.cpp" and @ref src/provider_internal.hpp "provider_internal.hpp"
+Shared runtime and Control | @ref src/provider/runtime.cpp "runtime.cpp", @ref src/provider/control.cpp "control.cpp" and @ref src/provider/callback_context.cpp "callback_context.cpp"
+Common channel operations and capabilities | @ref src/provider/channel_core.cpp "channel_core.cpp" and @ref src/provider/capabilities.cpp "capabilities.cpp"
+Host buffers and frame delivery | @ref src/provider/host_buffer.cpp "host_buffer.cpp" and @ref src/provider/frame_delivery.cpp "frame_delivery.cpp"
+Image and Stack channels | @ref src/provider/image_channel.cpp "image_channel.cpp" and @ref src/provider/stacked_image_channel.cpp "stacked_image_channel.cpp"
+C2, Health and Scheduling channels | @ref src/provider/c2_channel.cpp "c2_channel.cpp", @ref src/provider/health_channel.cpp "health_channel.cpp" and @ref src/provider/scheduling_channel.cpp "scheduling_channel.cpp"
 Native MEL factory and default selection | @ref src/factories.cpp "factories.cpp"
 SDK-free capture path | @ref src/backends/synthetic.cpp "synthetic.cpp"
 Optional Aravis implementation | @ref src/backends/aravis/aravis_backend.cpp "aravis_backend.cpp" and @ref src/backends/aravis/aravis_capture.cpp "aravis_capture.cpp"

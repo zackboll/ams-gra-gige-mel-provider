@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::~ChannelCore"
         }
       ],
@@ -82,7 +82,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::sendKeepAliveRep"
         }
       ],
@@ -137,7 +137,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::send(ChannelCommsTestReq)"
         }
       ],
@@ -196,7 +196,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::registerBuffer"
         }
       ],
@@ -265,7 +265,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::unregisterBuffer"
         }
       ],
@@ -325,7 +325,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::enable"
         }
       ],
@@ -389,7 +389,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::disable"
         }
       ],
@@ -462,11 +462,11 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::getCapabilities"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/capabilities.cpp",
           "symbol": "capability"
         }
       ],
@@ -524,7 +524,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::registerMetadataCallback(ChannelCommsTestRep)"
         }
       ],

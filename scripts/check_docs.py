@@ -50,7 +50,10 @@ QUALIFICATION_RECORDS = (
     "docs/provider-thread-exit-tsan.md#qualification",
 )
 TRACE_LINKS = (
-    "src/provider.cpp", "tests/provider_standby_tests.inc", "tests/install_consumer/main.cpp",
+    "src/provider.cpp", "src/provider/control.cpp", "src/provider/channel_core.cpp",
+    "src/provider/capabilities.cpp", "src/provider/frame_delivery.cpp", "src/provider/host_buffer.cpp",
+    "src/provider/image_channel.cpp", "src/provider/c2_channel.cpp", "src/provider/health_channel.cpp",
+    "src/provider/scheduling_channel.cpp", "tests/provider_standby_tests.inc", "tests/install_consumer/main.cpp",
     "tests/provider_task_tests.cpp",
 )
 EXAMPLE_SOURCES = {
@@ -80,7 +83,10 @@ SECTIONS = {
         "IProfileNavigationHandler", "navigation_handler", "ProfileNavigationBridge",
     )),
     "api_core.html": ("Core implementation reference", (
-        "provider.cpp", "factories.cpp", "synthetic.cpp", "aravis_backend.cpp",
+        "provider.cpp", "runtime.cpp", "control.cpp", "callback_context.cpp", "channel_core.cpp",
+        "capabilities.cpp", "host_buffer.cpp", "frame_delivery.cpp", "image_channel.cpp",
+        "stacked_image_channel.cpp", "c2_channel.cpp", "health_channel.cpp", "scheduling_channel.cpp",
+        "factories.cpp", "synthetic.cpp", "aravis_backend.cpp",
         "pleora_backend.cpp", "gentl_backend.cpp", "config_parser.cpp", "gvcp_control_owner.cpp",
     )),
     PROFILE_EXAMPLES: ("internal development references", tuple(EXAMPLE_SOURCES)),

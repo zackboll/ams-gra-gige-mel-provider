@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::~ChannelCore"
         }
       ],
@@ -79,7 +79,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(BIT_Command)"
         }
       ],
@@ -131,7 +131,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(CalibrationConfigurationCmd)"
         }
       ],
@@ -181,7 +181,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(CalibrationStatusCmd)"
         }
       ],
@@ -231,11 +231,11 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(CameraCommand)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::camera_command"
         }
       ],
@@ -299,7 +299,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(CameraProtectCmd)"
         }
       ],
@@ -349,7 +349,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(EraseCommand)"
         }
       ],
@@ -399,7 +399,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(SystemTrackDataResponse)"
         }
       ],
@@ -449,7 +449,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(ModeCmd)"
         }
       ],
@@ -521,7 +521,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::send(ConfigSetCommand)"
         }
       ],
@@ -590,7 +590,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::registerMetadataCallback(BIT_Configuration)"
         }
       ],
@@ -644,7 +644,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::registerMetadataCallback(CommandStatus)"
         }
       ],
@@ -718,7 +718,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationConfiguration)"
         }
       ],
@@ -772,7 +772,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::CameraProtectCmdResp)"
         }
       ],
@@ -829,7 +829,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationStatus)"
         }
       ],
@@ -887,7 +887,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/c2_channel.cpp",
           "symbol": "C2ChannelImpl::registerMetadataCallback(BIT_Status)"
         }
       ],
