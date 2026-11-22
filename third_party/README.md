@@ -14,11 +14,11 @@ provider, plus the declarations their include graph requires.
 
 | Directory | Commit | Headers |
 | --- | --- | ---: |
-| `ir-mel/` | `8d9224519f12b44e0b28815755c56a32a28d24a0` | 61 |
+| `ir-mel/` | `8d9224519f12b44e0b28815755c56a32a28d24a0` | 84 |
 | `common-mel/` | `f6908437d8fd2f7fb69896f9eb9cfd272d10c439` | 28 |
 | `ams-math/` | `00be45190f0e47d268cece8b8c2f8fb58b5418d2` | 2 |
 
-Each component also includes its original `LICENSE` and `INTENT.md`. The 97
+Each component also includes its original `LICENSE` and `INTENT.md`. The 120
 files are listed in `manifest.json`, with source paths, Git blob IDs, SHA-256
 checksums, and byte counts. No RF MEL, AMS VITA, Boost, commercial GigE SDK,
 or upstream implementation binary is needed for this declaration slice.

@@ -17,6 +17,11 @@ Start with the **[documentation index](docs/index.md)**, the
 [capability and evidence status](docs/status.md), and the
 [implementation profile](docs/implementation-profile.md).
 
+The [virtual stare TaskSched foundation](docs/task-scheduling-provider.md) is
+available only with an explicitly selected SDK-free recording executor. Default
+synthetic and production backends do not advertise tasking. This does not qualify
+physical pointing or sensor scheduling.
+
 ## SDK-free quick start
 
 Prerequisites: Linux, a C++20 compiler (GCC or Clang), CMake **3.24+**, Ninja,
@@ -123,8 +128,8 @@ See [current status](docs/status.md) for merged capabilities and
 experiments and their limits. The provider also has bounded C2/Health software
 behavior, navigation receipt/optional forwarding, and source-conditional LOS and stacked
 image foundations. LOS/stack positive sources are recording fixtures only;
-default synthetic and production adapters do not advertise them. Scheduling,
-tracking, calibration, protection and several required MEL surfaces remain
+default synthetic and production adapters do not advertise them. General
+scheduling, tracking, calibration, protection and several required surfaces remain
 unsupported. The [MEL traceability inventory](docs/mel-traceability.md)
 tracks required, conditional and optional work; channel stubs are not conformance.
 
@@ -176,8 +181,10 @@ comment guidance, see [Contributing: documentation](CONTRIBUTING.md#documentatio
 
 Pinned upstream revisions, measured include closure and original notices are in
 [upstream provenance](docs/upstream-provenance.md) and the
-[dependency manifest](third_party/manifest.json). Normal builds verify vendored
-MEL and private JSON bytes; SDKs are external and optional. To verify explicitly:
+[dependency manifest](third_party/manifest.json). The pinned MEL/AMS Math
+closure is 114 unchanged headers and six original license/intent files. Normal
+builds verify vendored MEL and private JSON bytes; SDKs are external and optional.
+To verify explicitly:
 
 ```sh
 python3 scripts/vendor_upstream.py --verify

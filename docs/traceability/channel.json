@@ -23,7 +23,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {
@@ -78,7 +78,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {
@@ -133,7 +133,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {
@@ -321,7 +321,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {
@@ -385,7 +385,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {
@@ -458,7 +458,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {
@@ -517,7 +517,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2 and Health attachable; Stack requires a valid source; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2 and Health attachable; Stack requires a valid source; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": {
         "enumerator": "ChannelCommsTestRep",
         "advertisement": "advertised"

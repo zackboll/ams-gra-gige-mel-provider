@@ -195,7 +195,7 @@
       "component": "ir-mel",
       "path": "include/irmel/library/scheduling/SchedulingChannel.h",
       "blob": "f11932ac09f2644aa47b00ed7623bb3b8ca9ddf2",
-      "vendored": null
+      "vendored": "third_party/ir-mel/include/irmel/library/scheduling/SchedulingChannel.h"
     },
     {
       "component": "ir-mel",

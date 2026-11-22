@@ -1,12 +1,26 @@
 # Bounded C2 ModeCmd: commanded Standby (GIGE-MEL-014 / GIGE-MEL-017)
 
+## Conditional operational extension (GIGE-MEL-045)
+
+An explicitly qualified task source additionally permits Operate/TaskSched only
+after opening/observing a genuine owned admission session. Its exact upstream
+future contains TaskSched; correlated terminal C2 status is Accepted. Standby
+cancels/retires the session; source failure rejects and retains recoverable
+ownership. No source continues returning Unsupported/CapabilityUnavailable.
+Mode statuses reserve delivery before command admission is released, so detach
+drains them. See the [task profile](task-scheduling-provider.md) for exact inputs,
+capacity-zero replacement, current-only abort, lifecycle and conformance gaps.
+The Standby-only statements below describe the original/default image-stream
+profile, not this explicitly selected conditional extension.
+
 This is a **partial implementation of a required MEL operation**, not complete
-ModeCmd conformance or an operational task-scheduling contract. It uses the
+ModeCmd conformance. The original image-stream profile below is not an operational
+task-scheduling contract. It uses the
 unchanged IR MEL `8d9224519f12b44e0b28815755c56a32a28d24a0` and Common MEL
 `f6908437d8fd2f7fb69896f9eb9cfd272d10c439` declarations. The response is
 `RequestFor<irmel::MFA_Mode>`, not a new provider-specific response type.
 
-## The one supported request
+## Original/default profile: Standby request
 
 ```cpp
 ams::iface::irmel::ModeCmd command;
@@ -24,7 +38,8 @@ An enabled C2 is not required, consistent with the other synchronous commands.
 
 ### Idle: idempotent acknowledgement
 
-When no Image acquisition is owned, the provider is already in observed Standby.
+When no Image/Stack acquisition or virtual task session is owned, the provider is
+already in observed Standby.
 The preserved GIGE-MEL-014 acknowledgement:
 
 - performs **no backend/device I/O**, connectivity probe or readback;
@@ -99,9 +114,10 @@ require Unused. Operate/Unused and Standby/TaskSched are structurally invalid.
 Unknown is a defined upstream value but unsupported as a requested state;
 NotSet is an incomplete request. Defined but unsupported combinations include
 Off, Not_Installed, Pre_initialization, Initialization, Maintenance, Calibration,
-Initiated_BIT, Shutdown and Degraded with Unused, and all operational states
-with each operational mode. Nothing is powered off, calibrated, scanned or
-tracked. In particular, returning TaskSched would **not** implement scheduling.
+Initiated_BIT, Shutdown and Degraded with Unused, and operational pairs outside
+the qualified virtual `Operate/TaskSched` path above. Nothing is powered off,
+calibrated, scanned or tracked. Returning TaskSched without an owned executor
+session would not implement scheduling.
 
 ### Exact ScanParam rule
 

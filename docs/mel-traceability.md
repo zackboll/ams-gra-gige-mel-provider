@@ -19,7 +19,7 @@ Identifiers such as `C2Channel.ModeCmd` are **project-local**, not AMS-GRA requi
   is `a11071ba2b8a10ee75eb81dc3a3d7715b6a6545e` (PR #53).
 - Reconciled all virtual/destructor and delivery declarations on the listed IR
   provider and listener interfaces, the native factory functions and the
-  alternate loader/registry seams (including out-of-closure scheduling, track
+  alternate loader/registry seams (including out-of-closure track
   and instrumentation). Common MEL supplies types such as `RequestFor`,
   `VersionInfo`, BIT and navigation/error payloads, not a second channel graph.
   Payload accessors, constructors, copy/move operations, enum helpers, and
@@ -97,7 +97,8 @@ and [capability contract](https://github.com/open-arsenal/ams-gra-hello-world-sk
 | `CommandAndControl` | `CommandStatus`, `BITConfiguration`, `BITStatus` | Discovery also contains camera layout facts, but C2 is not a frame channel. Status includes typed rejections of five unsupported commands; BIT is software only. |
 | `HealthAndStatus` | `MFAStatus`, `MFAStatusDetailed`, `BITStatus`, `SubsystemStatusResp` | No image geometry; software observations, not physical health, reachability or hardware BIT. Required `DiscreteStatus` and `MFA_SecurityAuditRecord` cannot be represented in the pinned enum and remain `NotSupported`; audit events also lack a genuine source. |
 | `StackedImage` | None beyond communications | Discovery/attachment only with a valid pre-formed volume declaration; in-tree recording fixture only. Optional LOS3D is not delivered. |
-| Scheduling, Track, Instrumentation | No channel, no advertisement | The default `TaskScheduleDepth` of zero is not a scheduling implementation. |
+| `Scheduling` | `ExecuteTaskAck` for the qualified recording fixture | Admission only, not completion. Depth zero means one active task with Immediate replacement and no queue on this channel; a default zero does not advertise tasking. [Virtual stare profile](task-scheduling-provider.md). |
+| Track, Instrumentation | No channel, no advertisement | Their conditional product and reporting contracts remain unimplemented. |
 
 `DiscreteStatus`, `MFA_SecurityAuditRecord`, C2 `CalibrationConfiguration`/
 `CalibrationStatus`, and Image/Health `NUC_TempData` have no exact metadata
@@ -131,7 +132,7 @@ and [LOS](image-los-metadata.md).
 | `NavigationReport` acceptance | Sensor transport + backend sink | Provide a typed `INavigationSink`, distinguish receipt, rejection and uncertainty; separate association/processing and timing qualification. |
 | LOS, defect maps, NUC and stack products | Actual sensor/product source + provider mapping | Deliver observations, calibration and provenance; provider maps only implemented products and gates advertisement. |
 | Health/BIT and security | Detector/backend + external event owner | Supply real status, hardware BIT results and genuine audit events; agree enum/interface changes with upstream. |
-| Task execution/tracking | Mission-specific sensor + provider | Agree predicates and task state machine with the target service; no scheduler, tracker or candidate producer is supplied by the common provider. |
+| Task execution/tracking | Mission-specific sensor + provider | The recording fixture exercises virtual admission only. Agree predicates and task state machine with the target service before physical execution; no tracker or candidate producer is supplied by the common provider. |
 
 A custom Ethernet detector can implement project-owned
 [`ICameraBackend`, `ICameraDevice` and `IFrameStream`](../include/gige_mel/backend.hpp)

@@ -247,7 +247,7 @@
         "current": "applies"
       },
       "status": "supported",
-      "availability": "Image, C2, Health; Stack only if declared valid; no Scheduling, Track or Instrumentation",
+      "availability": "Image, C2, Health; Stack only if declared valid; Scheduling requires a qualified task source; no Track or Instrumentation",
       "metadata": null,
       "implementation": [
         {

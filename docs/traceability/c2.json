@@ -453,7 +453,7 @@
           "symbol": "C2ChannelImpl::send(ModeCmd)"
         }
       ],
-      "behavior": "Standby/Unused only, stops current image or stack acquisition; no operational scan/stare/track command execution.",
+      "behavior": "Standby/Unused retires owned acquisition or task sessions. Operate/TaskSched admits an owned virtual session only for the explicitly qualified recording source.",
       "evidence": [
         {
           "path": "tests/provider_standby_tests.inc",
@@ -475,6 +475,13 @@
           "result": "positive",
           "level": "native SDK fixture",
           "demonstrates": "Fake SDK source stops on accepted Standby and restarts under the virtual clock."
+        },
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "positive",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks accepted virtual mode and return to Standby after source-observed completion."
         }
       ],
       "gap": "Agree operational modes and transition/task mapping, then implement and qualify execution for target MFA.",

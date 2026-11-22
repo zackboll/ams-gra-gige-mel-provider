@@ -64,6 +64,11 @@ jobs:
           cmake -S tests/install_stack_consumer -B build/install-stack-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
           cmake --build build/install-stack-consumer --parallel 2
           build/install-stack-consumer/installed_stack_consumer
+      - name: Installed MEL-only virtual task consumer (SDK-free recording)
+        run: |
+          cmake -S tests/install_task_consumer -B build/install-task-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
+          cmake --build build/install-task-consumer --parallel 2
+          build/install-task-consumer/installed_task_consumer
       # ---- Optional Aravis integration: explicit provisioning, separate build ----
       # The SDK-free checks above are unchanged and complete before this point.
       - name: Install Aravis build prerequisites

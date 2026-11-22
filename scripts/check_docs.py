@@ -51,6 +51,7 @@ QUALIFICATION_RECORDS = (
 )
 TRACE_LINKS = (
     "src/provider.cpp", "tests/provider_standby_tests.inc", "tests/install_consumer/main.cpp",
+    "tests/provider_task_tests.cpp",
 )
 EXAMPLE_SOURCES = {
     "Cognex profile implementation": "camera_profiles/cognex_cic_5000r/profile.cpp",
@@ -71,6 +72,7 @@ SECTIONS = {
         "ICameraDevice", "IFrameStream", "FrameLease", "FrameDescriptor", "CameraConfiguration",
         "CameraCapabilities", "NavigationReport", "INavigationSink", "ILineOfSightSource",
         "ILineOfSightStream", "IStackedImageSource", "IStackedImageStream", "StackLease",
+        "ITaskExecutionSource", "ITaskExecutionSession",
     )),
     "api_extensions.html": ("Internal, uninstalled extension interfaces", (
         "ICameraProfile", "ICameraProfileState", "IDeviceFeatures", "BackendCatalog",
@@ -146,7 +148,7 @@ HIERARCHY = {
     BACKEND_AUTHORING: (guide("backend-portability"),),
     PROFILE_TUTORIAL: (guide("camera-profile-authoring"), PROFILE_EXAMPLES, guide("camera-profile-portability")),
     MEL: (MEL_PROFILE, *map(guide, ("image-frame-metadata", "configuration", "health-status",
-                                   "navigation-los", "stacked-image-provider"))),
+                                   "navigation-los", "stacked-image-provider", "task-scheduling-provider"))),
     guide("image-frame-metadata"): (guide("mono12-image-profile"),),
     guide("configuration"): (guide("mode-command"),),
     guide("health-status"): (guide("software-bit"), guide("subsystem-status")),

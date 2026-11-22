@@ -1,5 +1,18 @@
 # Partial provider Health and diagnostic snapshots
 
+## Virtual task session ownership (GIGE-MEL-045)
+
+For the explicitly recording-qualified [virtual task profile](task-scheduling-provider.md),
+MFA_Status reports Operate while a genuine task-admission session is owned,
+including between tasks. It never asserts physical sensor activity or task
+completion. Standby/detach retirement unpublishes that ownership; rejected mode
+commands do not publish Operate. Existing acquisition_state/counters remain
+Image/Stack-only and the 12-field detailed schema is unchanged. Subsystem CSCI
+uses Operational for a task session, not Imaging. Ordinary cancellation leaves
+diagnostic history, retained BIT completions and revision untouched; normal
+Health/BIT sampling still observes existing configuration/acquisition faults.
+No source calls run under Health state locks.
+
 This is a **partial Health implementation** for the experimental Mono8
 image-stream profile, not full Health or MEL conformance. It reports observed
 software-provider facts, not physical-health certification. No hardware/SDK

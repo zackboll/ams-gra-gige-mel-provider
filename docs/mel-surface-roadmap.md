@@ -227,6 +227,18 @@ is absent or only partial across factories, Channel/Buffer, C2, Image, Health,
 Scheduling, Track, Instrumentation and Stack. The [implementation profile](implementation-profile.md)
 retains ownership, memory, command and callback details.
 
+## P1 profile decision / P5 implementation: SchedulingChannel
+
+GIGE-MEL-045 implements a conditional, recording-qualified virtual-stare subset:
+an owned TaskSched session, Immediate-only no-queue replacement, current abort
+and ExecuteTaskAck. TaskExecutingRep stays unsupported because the pinned Task
+enum lacks an unambiguous stare mapping. AbortTask has no public TaskInfo
+accessor, so targeted abort cannot be claimed. The [task profile](task-scheduling-provider.md)
+defines time, coordinates, capacity-zero and lifecycle contracts. The
+[Scheduling operation inventory](traceability/scheduling.json) records remaining
+required and conditional gaps. Default and production backends remain unsupported;
+this is not complete scheduling conformance.
+
 ## P1 profile decision / P5 implementation: stacked imagery
 
 [StackedImageChannel][stacked] is class-annotated **Required**, while [StackedImageListener][stacked-listener] and its `onImageStack` operation are conditional on image-stack support. The channel's additional `LOS3D_KinematicsType` callback is optional. Record and resolve that distinction for the target profile; do not describe the whole channel as unconditionally optional.

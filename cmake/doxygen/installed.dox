@@ -1,6 +1,6 @@
 /** @page api_installed Installed C++ interfaces
 
-The four project headers under `include/gige_mel/` are installed by
+The five project headers under `include/gige_mel/` are installed by
 `GigeMelProvider`. Start with @ref md_docs_2consumer-integration "Integrating a MEL Consumer"
 for installation and capture, then see @ref md_docs_2architecture "architecture"
 and the @ref md_docs_2implementation-profile "MEL implementation profile".
@@ -17,6 +17,7 @@ Header | Entry points
 @ref include/gige_mel/backend.hpp "backend.hpp" | @ref installed_backend_contracts
 @ref include/gige_mel/navigation.hpp "navigation.hpp" | @ref gige_mel::backend::NavigationReport
 @ref include/gige_mel/line_of_sight.hpp "line_of_sight.hpp" | @ref gige_mel::backend::LosSupport and @ref gige_mel::backend::LosObservation
+@ref include/gige_mel/task_execution.hpp "task_execution.hpp" | @ref gige_mel::backend::ITaskExecutionSource and @ref gige_mel::backend::ITaskExecutionSession
 
 @section installed_backend_contracts Backend Contracts
 
@@ -39,8 +40,13 @@ Follow @ref gige_mel::backend::IFrameStream from start through
 for admission and timing, and @ref gige_mel::backend::FrameLease for native
 ownership versus explicit MEL buffer release.
 
-@subsection installed_optional_capabilities Optional Navigation, LOS and Stack Capabilities
+@subsection installed_optional_capabilities Optional Navigation, LOS, Stack and Task Capabilities
 
+- Virtual tasking: @ref gige_mel::backend::ITaskExecutionSource opens an owned
+  @ref gige_mel::backend::ITaskExecutionSession. The
+  @ref md_docs_2task-scheduling-provider "virtual stare profile" specifies
+  admission, replacement, cancellation and retirement. Only a recording fixture
+  qualifies it; it does not grant physical control authority.
 - Navigation input: @ref gige_mel::backend::INavigationSink and
   @ref gige_mel::backend::INavigationSink::submit_navigation "submit_navigation()".
 - LOS output: @ref gige_mel::backend::ILineOfSightSource,

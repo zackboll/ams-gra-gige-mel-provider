@@ -1,8 +1,7 @@
 # Current capability and evidence status
 
-This summary describes merged `main` **as of** audited source revision
-`a31ec7e1eab514e82678028479dc4c2a0ac4ecdf` (PR #54 merge). It does not track
-later revisions automatically or include features from open PRs. See the
+This summary is maintained with the documented source tree; it does not
+automatically track later revisions. See the
 [Qualification Evidence](qualification-evidence.md) index for historical runs,
 the [documentation index](index.md), the detailed
 [implementation profile](implementation-profile.md), and the
@@ -56,17 +55,18 @@ UTC/PTP, navigation, production reliability or full MEL conformance.
 | --- | --- | --- |
 | Loading and buffers | Exact upstream manager/control/buffer factories; independent sessions; copy-first registered host memory and explicit consumer release | Factory instance is exactly `synthetic`; unknown names return null. Held bytes must survive stop/close until release. [Architecture](architecture.md), [profile](implementation-profile.md). |
 | Image | Mono8 and explicitly selected unpacked little-endian Mono12; camera command/readback and bounded publication | Format admission is per device/profile, not a CameraCommand format switch. Aravis/Pleora require independently established byte order for Mono12; physical Cognex Mono12 is unqualified. [Mono12 contract](mono12-image-profile.md). |
-| C2 | CameraCommand, complete ConfigSet v1, communications and bounded BIT/ModeCmd subsets | [Configuration](configuration.md), [BIT](software-bit.md), [Standby-only ModeCmd subset](mode-command.md). Not full operational C2/tasking. |
+| C2 | CameraCommand, complete ConfigSet v1, communications and bounded BIT/ModeCmd subsets | [Configuration](configuration.md), [BIT](software-bit.md), [ModeCmd subset](mode-command.md). Not full operational C2/tasking. |
 | Health | Software MFA_Status, MFA_StatusDetailed, BIT_Status and SubsystemStatusResp | Observed provider-software state, not camera health or hardware BIT. [Health](health-status.md), [subsystem profile](subsystem-status.md). |
 | BadPixelList | Known-empty metadata for the synthetic generator's explicitly declared defect-map evidence | No physical defect-map source, correction or calibration. [Profile](implementation-profile.md#synthetic-known-empty-badpixellist-gige-mel-016). |
 | Navigation | Structural receipt validation/acknowledgement; optional typed backend sink forwarding when supplied; optional camera-profile handler behind a sink (internal, recording fixture only) | No production navigation transport, detector protocol, image association or navigation-quality claim. [Reception](navigation-reception.md), [forwarding](navigation-backend-forwarding.md). |
 | Image LOS | Conditional Euler/Report support from a validated optional source, declared before discovery | Only an explicitly selected SDK-free recording fixture supplies qualified observations. Default synthetic and production adapters remain unsupported/unadvertised; no inferred pointing or physical time alignment. [LOS contract](image-los-metadata.md). |
 | StackedImage | Conditional delivery of source-provided, pre-formed contiguous Mono8 volumes; explicit release and acquisition exclusion | Recording fixture only, not ordinary-frame concatenation. Default synthetic/production adapters unsupported/unadvertised; no sensor TSI/time qualification. [Stack contract](stacked-image-provider.md), [fixture validation](tasks/GIGE-MEL-044-validation.md). |
+| Scheduling | Virtual stare admission, current abort and correlated admission acknowledgements | [Recording fixture only](task-scheduling-provider.md); no physical tasking or MEL completion reports. |
 
 ### Unsupported and planned work
 
-- Scheduling, Track, Instrumentation and the alternate direct-channel
-  factory/registry path are unimplemented on this audited `main`.
+- Track, Instrumentation and the alternate direct-channel
+  factory/registry path are unimplemented.
 - Calibration, protection, erase and tracking commands remain unsupported.
   Five unsupported C2 commands also issue correlated rejected CommandStatus;
   rejection reporting does not advertise support.
@@ -84,8 +84,10 @@ UTC/PTP, navigation, production reliability or full MEL conformance.
   and does not extend profile module v1.
 - GenTL probe/supervisor/wire tooling adds no camera capability. In the merged
   [GENTL-003 results](tasks/GIGE-MEL-GENTL-003-validation.md), Balluff 3.7.2
-  initializes then crashes during isolated interface update; Euresys 26.10 was
-  unavailable without authenticated access. The
+  initializes then crashes during isolated interface update. Euresys 26.10 was
+  unavailable at that time; the later [GENTL-003B record](tasks/GIGE-MEL-GENTL-003B-validation.md)
+  reports successful native initialization but no exposed interface in the
+  isolated loopback topology, so no device was opened. The
   [GENTL-003A wire harness](tasks/GIGE-MEL-GENTL-003A-validation.md) self-tests
   are not real-producer passes. Neither producer's read-only camera behavior is
   qualified by these records.

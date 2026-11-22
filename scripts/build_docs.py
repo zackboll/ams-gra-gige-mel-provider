@@ -26,7 +26,7 @@ GUIDES = {
         "camera-profile-examples", "backend-authoring",
         "camera-profile-portability", "backend-portability", "runtime-selection",
         "mel-surface-roadmap", "mel-traceability", "mel-traceability-evidence",
-        "upstream-provenance", "stacked-image-provider",
+        "upstream-provenance", "stacked-image-provider", "task-scheduling-provider",
         "image-los-metadata", "mono12-image-profile", "mode-command", "health-status",
         "software-bit", "subsystem-status", "navigation-reception",
         "navigation-backend-forwarding", "device-register-transport", "documentation-warnings",

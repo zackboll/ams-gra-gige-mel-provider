@@ -373,7 +373,10 @@ enabled, failed stream does not restart it. An embedding application can use
   adapter timestamps are invalid for MEL admission. A successful SDK grab does
   not demonstrate validated integration-start time, truthful frame metadata or
   production-qualified MEL delivery. See [status and evidence](status.md).
-- Scheduling, Track, Instrumentation and the alternate direct channel
+- The [virtual stare Scheduling subset](task-scheduling-provider.md) requires an
+  explicitly composed recording source; it is unavailable through the default
+  synthetic factory path.
+- Track, Instrumentation and the alternate direct channel
   factory/registry are not implemented. Most MEL commands (including
   calibration, protection, erase and tracking) and several required metadata
   surfaces remain unsupported; consult the [requirements traceability](mel-traceability.md).
