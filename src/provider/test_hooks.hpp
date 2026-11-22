@@ -11,10 +11,12 @@ namespace [[gnu::visibility("hidden")]] provider_detail {
 // GIGE-MEL-042-R1 synchronization points for the uninstalled test build only.
 // The installed provider compiles them to nothing.
 #if defined(GIGE_MEL_PROVIDER_TEST_SEAMS)
-extern thread_local test_seams::UnsupportedStatusHook unsupported_status_hook;
-extern thread_local void* unsupported_status_hook_context;
-extern thread_local test_seams::TaskHook task_hook;
-extern thread_local void* task_hook_context;
+// Expose constant initialization across translation units so hidden TLS state
+// never requires a dynamic-initialization thunk in a consuming component.
+extern constinit thread_local test_seams::UnsupportedStatusHook unsupported_status_hook;
+extern constinit thread_local void* unsupported_status_hook_context;
+extern constinit thread_local test_seams::TaskHook task_hook;
+extern constinit thread_local void* task_hook_context;
 #define GIGE_MEL_TASK_SEAM() do { if (task_hook) task_hook(task_hook_context); } while (false)
 extern std::atomic<test_seams::StackHook> stack_hook;
 extern std::atomic<void*> stack_hook_context;

@@ -5,9 +5,9 @@ namespace [[gnu::visibility("hidden")]] provider_detail {
 
 // Stack frames live on the callback's stack: admission cannot be stranded by
 // allocation failure, and nested callbacks retain every runtime in the chain.
-thread_local const CallbackGuard* callback_context = nullptr;
+constinit thread_local const CallbackGuard* callback_context = nullptr;
 // Sink execution holds operations; same-thread reentry must be rejected.
-thread_local bool in_navigation_submission = false;
+constinit thread_local bool in_navigation_submission = false;
 
 CallbackGuard::CallbackGuard(const Runtime* value) noexcept
     : runtime(value), previous(callback_context) { callback_context = this; }

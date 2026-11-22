@@ -4,10 +4,10 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
-thread_local test_seams::UnsupportedStatusHook unsupported_status_hook = nullptr;
-thread_local void* unsupported_status_hook_context = nullptr;
-thread_local test_seams::TaskHook task_hook = nullptr;
-thread_local void* task_hook_context = nullptr;
+constinit thread_local test_seams::UnsupportedStatusHook unsupported_status_hook = nullptr;
+constinit thread_local void* unsupported_status_hook_context = nullptr;
+constinit thread_local test_seams::TaskHook task_hook = nullptr;
+constinit thread_local void* task_hook_context = nullptr;
 std::atomic<test_seams::StackHook> stack_hook{nullptr};
 std::atomic<void*> stack_hook_context{nullptr};
 
