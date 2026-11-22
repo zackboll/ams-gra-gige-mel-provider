@@ -1,0 +1,25 @@
+/** @page api_core Core implementation reference (internal)
+
+This is the **internal implementation reference**. Search and the Files and
+Namespaces trees expose private helpers and classes where Doxygen can extract
+them. Being indexed does not make a symbol public or installed. Each file page
+links to the line-numbered source, including implementations not compiled into
+the default SDK-free build.
+
+Area | Start reading
+---- | -------------
+Shared runtime (sessions, callbacks, buffers and MEL channels) | @ref src/provider.cpp "provider.cpp" and @ref src/provider_internal.hpp "provider_internal.hpp"
+Native MEL factory and default selection | @ref src/factories.cpp "factories.cpp"
+SDK-free capture path | @ref src/backends/synthetic.cpp "synthetic.cpp"
+Optional Aravis implementation | @ref src/backends/aravis/aravis_backend.cpp "aravis_backend.cpp" and @ref src/backends/aravis/aravis_capture.cpp "aravis_capture.cpp"
+Optional Pleora implementation | @ref src/backends/pleora/pleora_backend.cpp "pleora_backend.cpp" and @ref src/backends/pleora/pleora_stream.cpp "pleora_stream.cpp"
+Optional GenTL implementation | @ref src/backends/gentl/gentl_backend.cpp "gentl_backend.cpp" and @ref src/gentl/gentl_consumer.cpp "gentl_consumer.cpp"
+Configuration and transport | @ref src/config_parser.cpp "config_parser.cpp", @ref src/device_registers.hpp "device_registers.hpp" and @ref src/transport/gvcp_control_owner.cpp "gvcp_control_owner.cpp"
+
+Use @ref md_docs_2architecture "architecture and lifecycle" to understand
+ownership, @ref api_extensions for profile/backend composition, and the
+@ref md_docs_2mel-traceability "Requirements Traceability" for upstream obligations.
+Continue to @ref md_docs_2mel-traceability-evidence "Tests/Evidence" for operation-level
+assertions and gaps before adding a capability. Vendor and upstream headers are
+intentionally not part of the source browser.
+*/

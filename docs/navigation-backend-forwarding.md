@@ -12,6 +12,9 @@ The separate [register/memory foundation](device-register-transport.md) now exis
 on both optional SDK devices. It is not connected to this forwarding path and
 implements no navigation sink or wire protocol. Its SDK retry/deadline limitations
 must be resolved before production bounded submission can use it.
+The [SDK-free control-authority design](tasks/GIGE-MEL-046-design.md#future-navigation-boundary-not-implemented)
+shows the future boundary; no SDK or ordinary GVCP executor is admitted for
+physical navigation and existing forwarding behavior is unchanged.
 
 The existing MEL ImageChannel NavigationReport entry point optionally forwards
 validated navigation reports to a backend navigation sink. The MEL declarations,
@@ -25,6 +28,37 @@ Devices without that interface retain the existing [receipt-only contract](navig
 The default synthetic backend does not implement a sink. An implemented sink's
 `unsupported` result is returned as MEL `Unsupported`, not silently downgraded
 to successful receipt. No production backend navigation transport is provided.
+
+## Optional camera-profile navigation handler (GIGE-MEL-047)
+
+A backend can now delegate its sink to the selected camera profile without any
+change to the common provider:
+
+```text
+MEL ImageChannel::send(NavigationReport)   -- unchanged validation and ordering
+  -> existing INavigationSink dispatch     -- only if the device exposes a sink
+  -> ProfileNavigationBridge               -- admission, drain, conservative mapping
+  -> IProfileNavigationHandler             -- profile policy, owned NavigationOperation
+  -> backend-owned INavigationOperationPort
+```
+
+The device exposes `INavigationSink` only when the selected profile state
+implements the optional handler. A profile without it keeps the receipt-only
+contract above; no sink returns `unsupported` merely because the extension is
+absent. Profile preparation alone is never reported as success. Success still
+means backend acceptance: in this task, acceptance by an SDK-free recording
+port. Preparation errors are definite and never reach the port. An uncertain
+port outcome, a port exception, or acceptance reported together with control
+loss is returned as `timeout` (MEL `InvalidState`, "uncertain"). The bridge then
+refuses further submissions instead of retrying. The full mapping table and
+lifetime rules are in the [GIGE-MEL-047 design](tasks/GIGE-MEL-047-design.md#bridge-and-backend-port),
+the authoring contract is in [camera-profile authoring](camera-profile-authoring.md#optional-navigation-handler-gige-mel-047),
+and executed evidence is in the [validation record](tasks/GIGE-MEL-047-validation.md).
+
+No production Aravis, Pleora or GenTL device uses the bridge. No transport,
+detector protocol, control-authority grant, image association or transfer
+alignment is added. The example record is a fictional test layout, not a
+detector or GigE Vision format.
 
 ## Data and acceptance
 
@@ -47,7 +81,8 @@ the selected backend implementation determines the behavior.
 
 There are four distinct boundaries: MEL receipt, backend submission acceptance,
 physical transport delivery, and downstream navigation processing. Only the
-first two are implemented or asserted here. Navigation solution state is copied
+first two are implemented or asserted here (profile preparation, where
+present, sits between them and is not success on its own). Navigation solution state is copied
 as a label distinct from numeric accuracy or covariance; no quality is inferred.
 
 The callback snapshot and response allocation precede submission. Backend

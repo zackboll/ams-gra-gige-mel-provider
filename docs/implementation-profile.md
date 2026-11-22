@@ -3,7 +3,7 @@
 ## Virtual stare tasking foundation (GIGE-MEL-045)
 
 The common provider conditionally advertises Scheduling for qualified
-ITaskExecutionSource declarations. Only the SDK-free recording fixture supplies
+`ITaskExecutionSource` declarations. Only the SDK-free recording fixture supplies
 owned Operate/TaskSched admission, single-active/no-queue immediate replacement,
 current-task cancellation and genuine ExecuteTaskAck correlation. Default
 synthetic and production adapters remain unsupported. TaskExecutingRep has no
@@ -12,8 +12,13 @@ source-observed, not fabricated as MEL metadata. Image/Stack and task sessions
 are exclusive. Health Operate means virtual session ownership, not physical
 operation. See [exact conventions](task-scheduling-provider.md),
 [design](tasks/GIGE-MEL-045-design.md) and [validation](tasks/GIGE-MEL-045-validation.md).
-This is not complete TaskSched/MEL conformance; older unsupported-tasking
-statements below apply to the default/production image-stream profile.
+This is not complete TaskSched/MEL conformance.
+
+For method-by-method obligations, implementation and evidence, start at
+[Requirements Traceability](mel-traceability.md). This profile describes
+behavior and limits alongside the milestone notes below, not a conformance
+determination. Use [Current Status](status.md) for the audited merged snapshot
+and [Qualification Evidence](qualification-evidence.md) for executed results.
 
 ## Isolated GenTL wire qualification tooling (GIGE-MEL-GENTL-003A)
 
@@ -45,7 +50,7 @@ The uninstalled offline supervisor adds no backend or MEL capability. It runs
 only producer load/interface diagnostics in bounded network-isolated children.
 Balluff Impact Acquire 3.7.2.4495 (GenTL 1.6) initialized/closed in three children,
 then crashed in `TLUpdateInterfaceList` in the isolated no-camera environment.
-Euresys Gigelink 26.10 was not obtained (authenticated download required).
+Euresys Gigelink 26.10 was not obtained in GENTL-003 (authenticated download required).
 No real-producer GenApi, read-only wire behavior or physical-camera operation is
 qualified. Existing backend/profile qualification remains fixture-only; all
 ownership, XML limits and admission policies are unchanged. See
@@ -224,7 +229,7 @@ and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
 This document is the contract implemented by the bootstrap. It describes a
 useful development subset against the pinned IR/Common MEL 4.0 declarations.
 It is **not full MEL conformance**. Required functionality outside this subset
-remains explicitly unsupported; see [the complete inventory](mel-surface-roadmap.md).
+remains explicitly unsupported; see [the operation inventory](mel-traceability.md).
 
 GIGE-MEL-024 extracts the existing camera-profile policy into an internal,
 SDK-free module. GIGE-MEL-025 adds a typed feature service and shared snapshot,
@@ -562,8 +567,12 @@ Absent sinks preserve receipt-only behavior; sink errors, including unsupported,
 return typed failures without callback or retained-report update. No production
 navigation transport is implemented. It is **PARTIAL required
 navigation support**, not full navigation integration or MEL conformance.
+An internal [optional profile navigation handler](navigation-backend-forwarding.md#optional-camera-profile-navigation-handler-gige-mel-047)
+(GIGE-MEL-047) lets a selected camera profile prepare an owned operation behind
+such a sink. It is exercised only with an SDK-free recording backend; no
+production adapter exposes it, and MEL behavior and advertisement are unchanged.
 
-[ModeCmd's bounded subset](mode-command.md) synchronously accepts only
+[ModeCmd's bounded standby subset](mode-command.md) synchronously accepts
 `Standby/Unused/default-ScanParam` with initialized Control and known-valid actual
 configuration. Idle requests retain the idempotent no-I/O/no-Health-or-BIT-change
 acknowledgement. Active requests reuse Image disable's cancellation, worker join,
@@ -577,7 +586,8 @@ backend stop. Configuration/generation, navigation receipt and BadPixelList
 registration are unchanged. No commanded state variable, worker, queue, timer,
 calibration or NUC state is added by ModeCmd. Standby also retires an enabled
 qualified LOS subscription through Image's auxiliary shutdown. Health retains its observed-state model.
-All other requests are rejected without stopping acquisition. This is logical
+Except for the opt-in virtual `Operate/TaskSched` path described
+above, other requests are rejected without stopping acquisition. This is logical
 provider state, not physical camera standby/power/health or full ModeCmd/task
 scheduling. The pinned metadata enum separately lacks DiscreteStatus and
 MFA_SecurityAuditRecord entries; these remain unimplemented and unadvertised
@@ -597,8 +607,9 @@ BIT-state revision (`BIT_report`) and a prepared-report sequence
 (`statusSeqNum`). `connectionEstablished` reports the in-process software
 association, not camera reachability.
 
-Image, C2, partial Health and source-qualified StackedImage are attachable.
-Scheduling, Track, Instrumentation, and the alternate direct-channel factory/registry path remain
+Image, C2, partial Health, source-qualified StackedImage and fixture-qualified
+Scheduling are attachable. Track, Instrumentation and the alternate
+direct-channel factory/registry path remain
 unimplemented. C2 commands other than CameraCommand, ConfigSetCommand and the
 documented BIT_Command and ModeCmd subsets, and metadata other than communications,
 Image camera/navigation receipt responses, qualified source-backed LOS Euler/Report

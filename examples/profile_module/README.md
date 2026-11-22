@@ -58,6 +58,14 @@ module-defined but are released while the module is still pinned. Entry returns
 a static borrowed descriptor valid until unload. There are no module worker
 threads or asynchronous callbacks.
 
+The same project also builds `libnavigation_record_profile.so` (GIGE-MEL-047):
+`test_navigation_record_v1`, whose state additionally implements the optional
+`IProfileNavigationHandler` ([policy](navigation_record_policy.hpp),
+[descriptor](navigation_module.cpp)). It encodes a **fictional test record**, not
+a detector, AMS-GRA or GigE Vision format, and makes no device I/O. It uses the
+same v1 descriptor and discovery symbol. Because the handler header is part of
+the build identity, modules from an earlier checkout are refused by this host.
+
 `GIGE_MEL_MODULE_NEGATIVE_TESTS=ON` builds deliberately invalid modules for the
 host tests; never distribute these. The example's `GIGE_MEL_TEST_UNLOAD_LOG`
 environment variable is test instrumentation: its ELF finalizer appends one line

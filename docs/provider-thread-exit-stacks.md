@@ -2,6 +2,9 @@
 
 Companion to [analysis and qualification](provider-thread-exit-tsan.md).
 Runtime build IDs and all inlined frames are retained. No SDK source is included.
+These stacks are historical GIGE-MEL-028/029 diagnostics, not results from the
+current source tree. See [lifetime and sanitizer evidence](qualification-evidence.md#sanitizers-lifetime-and-package-isolation)
+for the original failure, corrected fixture scope and independent native gates.
 
 ## Original provider_contract, GIGE-MEL-028
 

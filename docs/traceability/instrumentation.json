@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "family": "Instrumentation",
+  "operations": [
+    {
+      "id": "InstrumentationChannel.destroy",
+      "family": "Instrumentation",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+        "declaring": "InstrumentationChannel",
+        "signature": "~InstrumentationChannel() override = default",
+        "line": 26,
+        "annotations": [
+          "@RequiredIfInstrumentation"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing InstrumentationChannel: MFA supports instrumentation; MFA supports instrumentation",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Instrumentation channel; not advertised or attachable",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Specify telemetry publisher teardown.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "InstrumentationChannel.InstrumentationLevelCmd",
+      "family": "Instrumentation",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+        "declaring": "InstrumentationChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<InstrumentationReport> send(InstrumentationLevelCmd instrumentationLevelCmd) = 0",
+        "line": 32,
+        "annotations": [
+          "@RequiredIfInstrumentation"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing InstrumentationChannel: MFA supports instrumentation; MFA supports instrumentation",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Instrumentation channel; not advertised or attachable",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Define instrumentation level/response semantics; local statistics are not MEL instrumentation.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "InstrumentationChannel.cb-InstrumentationReport",
+      "family": "Instrumentation",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/instrumentation/InstrumentationChannel.h",
+        "declaring": "InstrumentationChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const InstrumentationReport* const)> callback) = 0",
+        "line": 40,
+        "annotations": [
+          "@RequiredIfInstrumentation"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing InstrumentationChannel: MFA supports instrumentation; MFA supports instrumentation",
+        "current": "not-current"
+      },
+      "status": "unavailable",
+      "availability": "No Instrumentation channel; not advertised or attachable",
+      "metadata": {
+        "enumerator": "InstrumentationReport",
+        "advertisement": "not advertised"
+      },
+      "implementation": [],
+      "behavior": "No implementation or attachable channel.",
+      "evidence": [],
+      "gap": "Supply the selected telemetry and publish through the channel.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    }
+  ]
+}

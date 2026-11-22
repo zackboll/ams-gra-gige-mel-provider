@@ -1,0 +1,595 @@
+{
+  "schema": 1,
+  "family": "Scheduling",
+  "operations": [
+    {
+      "id": "SchedulingChannel.destroy",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "~SchedulingChannel() override = default",
+        "line": 42,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking",
+        "current": "fixture-only"
+      },
+      "status": "partial",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::destroy"
+        }
+      ],
+      "behavior": "Detachment retires the owned session and drains reserved or entered callbacks.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "lifecycle",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks forced retirement and callback drain on the attached Scheduling channel."
+        }
+      ],
+      "gap": "Qualify lifecycle for any future non-fixture task source.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.PrioritizedTrackListCmd",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<TrackListResponse> send(PrioritizedTrackListCmd prioritizedTrackListCmd) = 0",
+        "line": 47,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "SchedulingChannelImpl::send(PrioritizedTrackListCmd)"
+        }
+      ],
+      "behavior": "Returns a ready Unsupported error; no task action.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "negatives",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks rejection by the fixture-qualified Scheduling channel."
+        }
+      ],
+      "gap": "Define ordered track-list admission, revision and correlated response.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.cb-TaskExecutingRep",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const TaskExecutingRep* const)> callback) = 0",
+        "line": 55,
+        "annotations": [
+          "@RequiredIfIRSTTrackTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports IRST track tasking",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": {
+        "enumerator": "TaskExecutingRep",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::TaskExecutingRep)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no advertisement or delivery.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "negatives",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks rejection by the fixture-qualified Scheduling channel."
+        }
+      ],
+      "gap": "Resolve the missing unambiguous stare value in the pinned Task enum before reporting execution.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.cb-ExecuteTaskAck",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ExecuteTaskAck* const)> callback) = 0",
+        "line": 63,
+        "annotations": [
+          "@RequiredIfIRSTTrackTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports IRST track tasking",
+        "current": "fixture-only"
+      },
+      "status": "supported",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": {
+        "enumerator": "ExecuteTaskAck",
+        "advertisement": "source-gated"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "SchedulingChannelImpl::registerMetadataCallback(ExecuteTaskAck)"
+        }
+      ],
+      "behavior": "Genuine admission publishes one correlated command ID and request ID, not completion.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "positive",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks independent IDs, acknowledgement count, and separation from execution and completion."
+        }
+      ],
+      "gap": null,
+      "responsibility": "detector/sensor",
+      "gap_groups": []
+    },
+    {
+      "id": "SchedulingChannel.cb-SchedCreatedRep",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const SchedCreatedRep* const)> callback) = 0",
+        "line": 71,
+        "annotations": [
+          "@RequiredIfIRSTTrackTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports IRST track tasking",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": {
+        "enumerator": "SchedCreatedRep",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::SchedCreatedRep)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no advertisement or delivery.",
+      "evidence": [],
+      "gap": "Report actual created schedules and correlation.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.cb-UpdateTrackListResponse",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const UpdateTrackListResponse* const)> callback) = 0",
+        "line": 79,
+        "annotations": [
+          "@RequiredIfTrack"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports tracking; class wording says implementations supporting this channel; Class/method or task capability wording needs deployment decision",
+        "current": "unresolved"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": {
+        "enumerator": "UpdateTrackListResponse",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::UpdateTrackListResponse)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no advertisement or delivery.",
+      "evidence": [],
+      "gap": "Correlate actual track-list updates.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.cb-TaskEvents",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const TaskEvents* const)> callback) = 0",
+        "line": 86,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": {
+        "enumerator": "TaskEvents",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::TaskEvents)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no advertisement or delivery.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "negatives",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks rejection by the fixture-qualified Scheduling channel."
+        }
+      ],
+      "gap": "Define and publish actual task events.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.cb-ScanPerformanceReport",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ScanPerformanceReport* const)> callback) = 0",
+        "line": 94,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": {
+        "enumerator": "ScanPerformanceReport",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::ScanPerformanceReport)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no advertisement or delivery.",
+      "evidence": [],
+      "gap": "Publish measured scan performance.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.AbortTask",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> exec(AbortTask abortTask) = 0",
+        "line": 106,
+        "annotations": [
+          "@RequiredIfIRSTScanTasking",
+          "@RequiredIfIRSTStareTasking",
+          "@RequiredIfIRSTTrackTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; Any supported IRST scan, stare or track tasking; reconcile scan/stare-only against enclosing class tag; Class/method or task capability wording needs deployment decision",
+        "current": "fixture-only"
+      },
+      "status": "partial",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "SchedulingChannelImpl::exec(AbortTask)"
+        }
+      ],
+      "behavior": "Cancels the current task; pinned AbortTask exposes no request ID for targeted cancellation.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "negatives",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks cancellation failure retains ownership and successful cancellation ignores inaccessible target identity."
+        }
+      ],
+      "gap": "Resolve upstream identity semantics and qualify physical cancellation.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.IRSTScanTask",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> exec(IRSTScanTask irstScanTask) = 0",
+        "line": 114,
+        "annotations": [
+          "@RequiredIfIRSTScanTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports IRST scanning; Class/method or task capability wording needs deployment decision",
+        "current": "unresolved"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "SchedulingChannelImpl::exec(IRSTScanTask)"
+        }
+      ],
+      "behavior": "Returns a ready Unsupported error; no task action.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "negatives",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks rejection by the fixture-qualified Scheduling channel."
+        }
+      ],
+      "gap": "Define pointing trajectory, bounds and timing before implementing scan.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.IRSTStareTask",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> exec(IRSTStareTask irstStareTask) = 0",
+        "line": 122,
+        "annotations": [
+          "@RequiredIfIRSTStareTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports IRST staring; Class/method or task capability wording needs deployment decision",
+        "current": "fixture-only"
+      },
+      "status": "partial",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "SchedulingChannelImpl::exec(IRSTStareTask)"
+        }
+      ],
+      "behavior": "Immediate-only virtual stare admits one active task into the source-owned session; no queue.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "positive",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Observes admission, execution and completion in virtual time; checks correlated admission ack."
+        }
+      ],
+      "gap": "Qualify physical coordinates, timing and execution. No MEL completion report.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "SchedulingChannel.IRSTTrackTask",
+      "family": "Scheduling",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/scheduling/SchedulingChannel.h",
+        "declaring": "SchedulingChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> exec(IRSTTrackTask irstTrackTask) = 0",
+        "line": 130,
+        "annotations": [
+          "@RequiredIfIRSTTrackTasking"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "Enclosing SchedulingChannel: MFA supports IRST track tasking; MFA supports IRST track tasking",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Scheduling attachable only with a qualified task source (recording fixture); default and production adapters unavailable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "SchedulingChannelImpl::exec(IRSTTrackTask)"
+        }
+      ],
+      "behavior": "Returns a ready Unsupported error; no task action.",
+      "evidence": [
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "negatives",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks rejection by the fixture-qualified Scheduling channel."
+        }
+      ],
+      "gap": "Integrate qualified tracking/pointing and task lifecycle.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    }
+  ]
+}

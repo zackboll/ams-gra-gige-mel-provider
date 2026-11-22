@@ -39,7 +39,7 @@ jobs:
             python3 scripts/check_proprietary.py --history "$(git rev-list --max-parents=0 HEAD | head -1)"
           fi
       - name: Configure without SDKs or network downloads
-        run: cmake --preset "${{ matrix.preset }}"
+        run: cmake --preset "${{ matrix.preset }}" -DGIGE_MEL_TEST_CONTROL_AUTHORITY=ON
       - name: Build
         run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
       - name: Test contracts and native loading
@@ -52,6 +52,13 @@ jobs:
           cmake -S tests/install_consumer -B build/install-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
           cmake --build build/install-consumer
           build/install-consumer/installed_consumer
+      - name: Build and capture with the standalone installed example
+        run: |
+          cp -R examples/installed_consumer "$RUNNER_TEMP/installed-example-source"
+          cmake -S "$RUNNER_TEMP/installed-example-source" -B "$RUNNER_TEMP/installed-example-build" -G Ninja \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
+          cmake --build "$RUNNER_TEMP/installed-example-build"
+          timeout 10s "$RUNNER_TEMP/installed-example-build/capture_one"
       - name: Installed MEL-only stacked-image consumer (SDK-free recording)
         run: |
           cmake -S tests/install_stack_consumer -B build/install-stack-consumer -G Ninja -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gige-mel-install"
@@ -110,7 +117,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
         with:
           persist-credentials: false
-      - run: cmake --preset "${{ matrix.preset }}"
+      - run: cmake --preset "${{ matrix.preset }}" -DGIGE_MEL_TEST_CONTROL_AUTHORITY=ON
       - run: cmake --build --preset "${{ matrix.preset }}" --parallel 2
       - run: ctest --preset "${{ matrix.preset }}"
       # ---- Optional Aravis integration (sanitizers instrument the project's

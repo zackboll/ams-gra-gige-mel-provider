@@ -1,0 +1,913 @@
+{
+  "schema": 1,
+  "family": "C2",
+  "operations": [
+    {
+      "id": "C2Channel.destroy",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "~C2Channel() override = default",
+        "line": 35,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::~ChannelCore"
+        }
+      ],
+      "behavior": "Concrete channel shares ChannelCore teardown; family-specific publishers retire with attachment.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "destroying_control_detaches_retained_channels",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resets Control during an auto-release session; checks quiescence, detached handles and a failed second release."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "C2Channel.BIT_Command",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> send(BIT_Command bit_Command) = 0",
+        "line": 40,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        },
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/BIT_Command.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(BIT_Command)"
+        }
+      ],
+      "behavior": "One synchronous observed-software test (ID 1), accepted and completed with software fault data; no hardware BIT.",
+      "evidence": [
+        {
+          "path": "tests/provider_bit_tests.inc",
+          "scenario": "bit_commands",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks accepted command, completion and current faults; invalid/unsupported requests are separate."
+        }
+      ],
+      "gap": "Define detector BIT catalogue, hardware results and asynchronous execution profile before expanding.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source",
+        "hardware-qualification"
+      ]
+    },
+    {
+      "id": "C2Channel.CalibrationConfigurationCmd",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<ams::iface::mel::CalibrationConfiguration> send( CalibrationConfigurationCmd calibrationConfigurationCmd) = 0",
+        "line": 45,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "@Optional contradicts prose “must be provided … for all IR MEL implementations”",
+        "current": "unresolved"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(CalibrationConfigurationCmd)"
+        }
+      ],
+      "behavior": "Ready typed Unsupported error; admitted requests publish one correlated Rejected/CapabilityUnavailable CommandStatus; no command executed.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks all five typed Unsupported responses and correlated Rejected/CapabilityUnavailable; no success payload."
+        }
+      ],
+      "gap": "Define a sensor calibration configuration contract and matching metadata.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.CalibrationStatusCmd",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<ams::iface::mel::CalibrationStatus> send(CalibrationStatusCmd calibrationStatusCmd) = 0",
+        "line": 51,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "@Optional contradicts prose “must be provided … for all IR MEL implementations”",
+        "current": "unresolved"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(CalibrationStatusCmd)"
+        }
+      ],
+      "behavior": "Ready typed Unsupported error; admitted requests publish one correlated Rejected/CapabilityUnavailable CommandStatus; no command executed.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks all five typed Unsupported responses and correlated Rejected/CapabilityUnavailable; no success payload."
+        }
+      ],
+      "gap": "Supply device calibration state and map response.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.CameraCommand",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<CameraCommandResp> send(CameraCommand cameraCommand) = 0",
+        "line": 57,
+        "annotations": [
+          "@RequiredIfCameraCtrl"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA supports programmable camera control",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(CameraCommand)"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::camera_command"
+        }
+      ],
+      "behavior": "Applies camera snapshot through common camera_command and backend/profile; typed response and actual readback. Image response callback goes to an attached Image channel.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "camera_commands_validate_full_snapshots",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks acknowledged applied configuration and rejection without changes."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "metadata_callbacks_are_bounded_and_reentry_is_rejected",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks exact request and command IDs, duplicate registration failure, and successful Image and C2 camera reply callback."
+        },
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "configuration_and_capabilities",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts successful future and correlated Image callback from each command channel, with exact backend readback."
+        }
+      ],
+      "gap": "Qualify allowed feature names, units, grids and readback on each device/firmware.",
+      "responsibility": "camera profile",
+      "gap_groups": [
+        "hardware-qualification"
+      ]
+    },
+    {
+      "id": "C2Channel.CameraProtectCmd",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<CameraProtectCmdResp> send(CameraProtectCmd cameraProtectCmd) = 0",
+        "line": 63,
+        "annotations": [
+          "@RequiredIfCameraProtect"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA supports camera self-protection",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(CameraProtectCmd)"
+        }
+      ],
+      "behavior": "Ready typed Unsupported error; admitted requests publish one correlated Rejected/CapabilityUnavailable CommandStatus; no command executed.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks all five typed Unsupported responses and correlated Rejected/CapabilityUnavailable; no success payload."
+        }
+      ],
+      "gap": "Implement a qualified camera self-protection contract with state and feedback if the MFA supports it.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.EraseCommand",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<EraseCommandType> send(EraseCommand eraseCommand) = 0",
+        "line": 68,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "@Optional contradicts prose “must be provided … for all IR MEL implementations”",
+        "current": "unresolved"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(EraseCommand)"
+        }
+      ],
+      "behavior": "Ready typed Unsupported error; admitted requests publish one correlated Rejected/CapabilityUnavailable CommandStatus; no command executed.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks all five typed Unsupported responses and correlated Rejected/CapabilityUnavailable; no success payload."
+        }
+      ],
+      "gap": "Define authorized erase target, confirmation and outcome before implementing.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.SystemTrackDataResponse",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<CommandStatus> send(SystemTrackDataResponse systemTrackDataResponse) = 0",
+        "line": 73,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "@Optional contradicts prose “must be provided … for all IR MEL implementations”",
+        "current": "unresolved"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(SystemTrackDataResponse)"
+        }
+      ],
+      "behavior": "Ready typed Unsupported error; admitted requests publish one correlated Rejected/CapabilityUnavailable CommandStatus; no command executed.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks all five typed Unsupported responses and correlated Rejected/CapabilityUnavailable; no success payload."
+        }
+      ],
+      "gap": "Agree external track/pointing consumer, association and request correlation.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.ModeCmd",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<MFA_Mode> send(ModeCmd modeCmd) = 0",
+        "line": 78,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(ModeCmd)"
+        }
+      ],
+      "behavior": "Standby/Unused retires owned acquisition or task sessions. Operate/TaskSched admits an owned virtual session only for the explicitly qualified recording source.",
+      "evidence": [
+        {
+          "path": "tests/provider_standby_tests.inc",
+          "scenario": "mode_active_cancel_join_and_repeat",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts Accepted status only after receive cancellation and join; repeated Standby is idempotent and explicit Image restart succeeds."
+        },
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "commanded_standby",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks correlated acceptance, cancellation and explicit release/restart on both SDK-free backends."
+        },
+        {
+          "path": "tests/aravis_timestamp_contract.cpp",
+          "scenario": "commanded_standby",
+          "result": "positive",
+          "level": "native SDK fixture",
+          "demonstrates": "Fake SDK source stops on accepted Standby and restarts under the virtual clock."
+        },
+        {
+          "path": "tests/provider_task_tests.cpp",
+          "scenario": "positive",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks accepted virtual mode and return to Standby after source-observed completion."
+        }
+      ],
+      "gap": "Agree operational modes and transition/task mapping, then implement and qualify execution for target MFA.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "C2Channel.ConfigSetCommand",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual ams::iface::mel::RequestFor<Return> send(ConfigSetCommand config) = 0",
+        "line": 83,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/c2/ConfigSetCommand.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "C2 attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::send(ConfigSetCommand)"
+        }
+      ],
+      "behavior": "Validates complete gige-mel.camera-config v1, serializes transaction and reports actual state/status.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "config_transaction_status_and_ordering",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Validates accepted status ordering, transactions and actual readback."
+        },
+        {
+          "path": "tests/install_consumer/main.cpp",
+          "scenario": "main",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks accepted ConfigSet v1 correlated to command 42."
+        },
+        {
+          "path": "tests/pleora_contract_tests.cpp",
+          "scenario": "unchanged_profile_prevalidation_and_truthful_readback",
+          "result": "indirect",
+          "level": "native SDK fixture",
+          "demonstrates": "Verifies native camera-profile prevalidation and readback with GenApi and PvBuffer fixtures; does not send a MEL command."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "C2Channel.cb-BIT_Configuration",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::BIT_Configuration* const)> callback) = 0",
+        "line": 90,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        },
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/BIT_Configuration.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "C2 attachable",
+      "metadata": {
+        "enumerator": "BITConfiguration",
+        "advertisement": "advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::registerMetadataCallback(BIT_Configuration)"
+        }
+      ],
+      "behavior": "Immediate software test catalogue with one entry.",
+      "evidence": [
+        {
+          "path": "tests/provider_bit_tests.inc",
+          "scenario": "bit_surface",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks synchronous replay of catalogue ID, type, expected duration and diagnostic names."
+        }
+      ],
+      "gap": "Advertise actual supported hardware BIT entries only once available.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "C2Channel.cb-CommandStatus",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CommandStatus* const)> callback) = 0",
+        "line": 97,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "C2 attachable",
+      "metadata": {
+        "enumerator": "CommandStatus",
+        "advertisement": "advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::registerMetadataCallback(CommandStatus)"
+        }
+      ],
+      "behavior": "Correlated status for C2 CameraCommand, ConfigSet, BIT, Standby and explicit unsupported rejections; only one subscriber.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "config_transaction_status_and_ordering",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts successful ConfigSet Accepted status with exact order and correlation."
+        },
+        {
+          "path": "tests/provider_standby_tests.inc",
+          "scenario": "mode_active_cancel_join_and_repeat",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts Accepted status only after receive cancellation and join; repeated Standby is idempotent and explicit Image restart succeeds."
+        },
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks all five typed Unsupported responses and correlated Rejected/CapabilityUnavailable; no success payload."
+        },
+        {
+          "path": "tests/provider_status_admission_tests.cpp",
+          "scenario": "admission_wins",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "All five unsupported commands reserve one correlated rejection; detach drains that reservation. Not successful command execution."
+        }
+      ],
+      "gap": "Extend status semantics with actual command coverage; Rejected is not positive execution evidence.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "required-incomplete"
+      ]
+    },
+    {
+      "id": "C2Channel.cb-CalibrationConfiguration",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual Return registerMetadataCallback( std::function<void(Channel& channel, const ams::iface::mel::CalibrationConfiguration* const)> callback) = 0",
+        "line": 105,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": {
+        "enumerator": null,
+        "advertisement": "missing enumerator"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationConfiguration)"
+        }
+      ],
+      "behavior": "Typed registration returns NotSupported; no callback delivery.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Calls check_unadvertised; checks absence and NotSupported for all three metadata stubs."
+        }
+      ],
+      "gap": "Implement and test real CalibrationConfiguration delivery only with agreed device behavior; resolve missing enum before advertising.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.cb-CameraProtectCmdResp",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CameraProtectCmdResp* const)> callback) = 0",
+        "line": 114,
+        "annotations": [
+          "@RequiredIfCameraProtect"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA supports camera self-protection",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": {
+        "enumerator": "CameraProtectCmdResp",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::CameraProtectCmdResp)"
+        }
+      ],
+      "behavior": "Typed registration returns NotSupported; no callback delivery.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Calls check_unadvertised; checks absence and NotSupported for all three metadata stubs."
+        }
+      ],
+      "gap": "Implement and test real CameraProtectCmdResp delivery only with agreed device behavior.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.cb-CalibrationStatus",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::CalibrationStatus* const)> callback) = 0",
+        "line": 122,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        },
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CalibrationStatus.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "C2 attachable",
+      "metadata": {
+        "enumerator": null,
+        "advertisement": "missing enumerator"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationStatus)"
+        }
+      ],
+      "behavior": "Typed registration returns NotSupported; no callback delivery.",
+      "evidence": [
+        {
+          "path": "tests/provider_c2_unsupported_tests.inc",
+          "scenario": "c2_unsupported_correlation_and_futures",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Calls check_unadvertised; checks absence and NotSupported for all three metadata stubs."
+        }
+      ],
+      "gap": "Implement and test real CalibrationStatus delivery only with agreed device behavior; resolve missing enum before advertising.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "C2Channel.cb-BIT_Status",
+      "family": "C2",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/c2/C2Channel.h",
+        "declaring": "C2Channel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const ams::iface::mel::BIT_Status* const)> callback) = 0",
+        "line": 129,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        },
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/BIT_Status.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "C2 attachable",
+      "metadata": {
+        "enumerator": "BITStatus",
+        "advertisement": "advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "C2ChannelImpl::registerMetadataCallback(BIT_Status)"
+        }
+      ],
+      "behavior": "Immediate registration replay and current software BIT completion/fault updates.",
+      "evidence": [
+        {
+          "path": "tests/provider_bit_tests.inc",
+          "scenario": "bit_commands",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks latest synchronous completion and software fault state."
+        }
+      ],
+      "gap": "Map actual device BIT results and fault provenance.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source",
+        "hardware-qualification"
+      ]
+    }
+  ]
+}

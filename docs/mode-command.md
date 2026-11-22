@@ -114,9 +114,10 @@ require Unused. Operate/Unused and Standby/TaskSched are structurally invalid.
 Unknown is a defined upstream value but unsupported as a requested state;
 NotSet is an incomplete request. Defined but unsupported combinations include
 Off, Not_Installed, Pre_initialization, Initialization, Maintenance, Calibration,
-Initiated_BIT, Shutdown and Degraded with Unused, and all operational states
-with each operational mode. Nothing is powered off, calibrated, scanned or
-tracked. In particular, returning TaskSched would **not** implement scheduling.
+Initiated_BIT, Shutdown and Degraded with Unused, and operational pairs outside
+the qualified virtual `Operate/TaskSched` path above. Nothing is powered off,
+calibrated, scanned or tracked. Returning TaskSched without an owned executor
+session would not implement scheduling.
 
 ### Exact ScanParam rule
 

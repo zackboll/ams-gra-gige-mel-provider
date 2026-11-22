@@ -1,0 +1,942 @@
+{
+  "schema": 1,
+  "family": "Image",
+  "operations": [
+    {
+      "id": "ImageChannel.destroy",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "~ImageChannel() override = default",
+        "line": 34,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::~ImageChannelImpl"
+        }
+      ],
+      "behavior": "Concrete channel shares ChannelCore teardown; family-specific publishers retire with attachment.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "destroying_control_detaches_retained_channels",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Resets Control during an auto-release session; checks quiescence, detached handles and a failed second release."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "ImageChannel.CameraCommand",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<CameraCommandResp> send(CameraCommand cameraCommand) = 0",
+        "line": 40,
+        "annotations": [
+          "@RequiredIfCameraCtrl"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA supports programmable camera control",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::send(CameraCommand)"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::camera_command"
+        }
+      ],
+      "behavior": "Applies camera snapshot through common camera_command and backend/profile; typed response and actual readback. Image response callback goes to an attached Image channel.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "camera_commands_validate_full_snapshots",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks acknowledged applied configuration and rejection without changes."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "metadata_callbacks_are_bounded_and_reentry_is_rejected",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks exact request and command IDs, duplicate registration failure, and successful Image and C2 camera reply callback."
+        },
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "configuration_and_capabilities",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts successful future and correlated Image callback from each command channel, with exact backend readback."
+        }
+      ],
+      "gap": "Qualify allowed feature names, units, grids and readback on each device/firmware.",
+      "responsibility": "camera profile",
+      "gap_groups": [
+        "hardware-qualification"
+      ]
+    },
+    {
+      "id": "ImageChannel.NavigationReport",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual ams::iface::mel::RequestFor<NavigationReportResp> send(NavigationReport navigationReport) = 0",
+        "line": 46,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/NavigationReport.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/NavigationReportResp.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Image attachable",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::send(NavigationReport)"
+        }
+      ],
+      "behavior": "Validates finite fields and increasing time per attachment; only receipt without a sink; installed adapters have no production sensor sink.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "navigation_acceptance_and_sessions",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks structural acceptance, session-scoped time and exact echoed time."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "navigation_backend_forwarding",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Recording sink receives all validated fields and acceptance is required when the sink exists."
+        },
+        {
+          "path": "tests/profile_navigation_tests.cpp",
+          "scenario": "mel_profile_b_dispatch",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Selected camera-profile handler prepares an owned fictional test record from the unchanged report behind the existing sink; recording-port acceptance only."
+        }
+      ],
+      "gap": "Define sensor wire/SDK protocol and acknowledgement contract; integrate INavigationSink; qualify image/time association separately.",
+      "responsibility": "backend",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source",
+        "hardware-qualification"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-BadPixelList",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const BadPixelList* const)> callback) = 0",
+        "line": 53,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Image attachable; BadPixelList only if known_empty_defect_map (synthetic default)",
+      "metadata": {
+        "enumerator": "BadPixelList",
+        "advertisement": "source-gated"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::registerMetadataCallback(BadPixelList)"
+        }
+      ],
+      "behavior": "One immediate known-empty list only when backend capability explicitly declares defect-map evidence; not a hardware map.",
+      "evidence": [
+        {
+          "path": "tests/provider_bad_pixel_tests.inc",
+          "scenario": "bad_pixels_sessions",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks one empty list, duplicate rejection and session isolation."
+        },
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "identity_and_discovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks discovery and attached capability gated by known-empty source fact."
+        }
+      ],
+      "gap": "Implement an actual sensor/profile defect-map source; distinguish unknown from known empty.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-OpticalDistortionMap",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const OpticalDistortionMap* const)> callback) = 0",
+        "line": 61,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "OpticalDistortionMap",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::OpticalDistortionMap)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no product published.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "unsupported_surfaces_return_real_errors",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Registers ODM and expects NotSupported."
+        }
+      ],
+      "gap": "Supply calibrated optical distortion data and qualify image mapping.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-LineOfSightReport",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LineOfSightReport* const)> callback) = 0",
+        "line": 68,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Image attachable; LineOfSightReport advertised only with validated pre-init ILineOfSightSource declaration (recording fixture only in-tree)",
+      "metadata": {
+        "enumerator": "LineOfSightReport",
+        "advertisement": "source-gated"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::registerMetadataCallback(LineOfSightReport)"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::publish_los"
+        }
+      ],
+      "behavior": "Maps an independent validated source observation (sensor FRD, intrinsic ZYX, source-relative declared epoch); not inferred from navigation.",
+      "evidence": [
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "payload_and_time",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts exact payload/time, separates malformed representations, and discards invalid observations."
+        },
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "capabilities",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks independent source predicates and missing/invalid source NotSupported."
+        }
+      ],
+      "gap": "Supply actual time-provenanced pointing observations and qualify frame/clock mapping; do not turn the required annotation into a conditional one.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source",
+        "hardware-qualification"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-LineOfSightQuaternion",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LineOfSightQuaternion* const)> callback) = 0",
+        "line": 76,
+        "annotations": [
+          "@RequiredIfLOSQuaternion"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA provides quaternion LOS",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "LineOfSightQuaternion",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightQuaternion)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no product published.",
+      "evidence": [
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "capabilities",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Quaternion registration returns NotSupported and capability is absent."
+        }
+      ],
+      "gap": "Declare quaternion LOS only with a qualified source and mapping.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-LineOfSightEuler",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LineOfSightEuler* const)> callback) = 0",
+        "line": 83,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Image attachable; LineOfSightEuler advertised only with validated pre-init ILineOfSightSource declaration (recording fixture only in-tree)",
+      "metadata": {
+        "enumerator": "LineOfSightEuler",
+        "advertisement": "source-gated"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::registerMetadataCallback(LineOfSightEuler)"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::publish_los"
+        }
+      ],
+      "behavior": "Maps an independent validated source observation (sensor FRD, intrinsic ZYX, source-relative declared epoch); not inferred from navigation.",
+      "evidence": [
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "payload_and_time",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts exact payload/time, separates malformed representations, and discards invalid observations."
+        },
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "capabilities",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks independent source predicates and missing/invalid source NotSupported."
+        }
+      ],
+      "gap": "Supply actual time-provenanced pointing observations and qualify frame/clock mapping; do not turn the required annotation into a conditional one.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "required-incomplete",
+        "sensor-source",
+        "hardware-qualification"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-CameraCommandResp",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CameraCommandResp* const)> callback) = 0",
+        "line": 91,
+        "annotations": [
+          "@RequiredIfCameraCtrl"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA supports programmable camera control",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "CameraCommandResp",
+        "advertisement": "advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::registerMetadataCallback(CameraCommandResp)"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::on_camera_reply"
+        }
+      ],
+      "behavior": "Single Image subscriber receives response, including acknowledged C2-origin reply when Image is attached.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "metadata_callbacks_are_bounded_and_reentry_is_rejected",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks exact request and command IDs, duplicate registration failure, and successful Image and C2 camera reply callback."
+        },
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "configuration_and_capabilities",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Asserts successful future and correlated Image callback from each command channel, with exact backend readback."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "ImageChannel.cb-NavigationReportResp",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const NavigationReportResp* const)> callback) = 0",
+        "line": 98,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/NavigationReport.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/image/NavigationReportResp.h"
+        },
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "NavigationReportResp",
+        "advertisement": "advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::registerMetadataCallback(NavigationReportResp)"
+        },
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::send(NavigationReport)"
+        }
+      ],
+      "behavior": "Single synchronous callback mirrors accepted response; exact time echo, zero/unassigned IDs, no replay and no association.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "navigation_acceptance_and_sessions",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks callback/future echo and no callback for rejected reports."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "ImageChannel.cb-LOS3D_KinematicsType",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const LOS3D_KinematicsType* const)> const& callback) = 0",
+        "line": 105,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "LOS3DKinematicsType",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::registerMetadataCallback(LOS3D_KinematicsType)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no product published.",
+      "evidence": [
+        {
+          "path": "tests/provider_los_tests.cpp",
+          "scenario": "capabilities",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "LOS3D registration returns NotSupported."
+        }
+      ],
+      "gap": "Provide calibrated 3D kinematics, clocks and provider mapping.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-CandidateObjectMessage",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectMessage* const)> callback) = 0",
+        "line": 113,
+        "annotations": [
+          "@RequiredIfDetectCandidateObjects"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "conditional",
+      "applicability": {
+        "condition": "MFA provides candidate-object detections (not the same as track tasking)",
+        "current": "not-current"
+      },
+      "status": "unsupported stub",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "CandidateObjectMessage",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectMessage)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no product published.",
+      "evidence": [],
+      "gap": "Decide candidate detection independently of tracking and implement real detections.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "conditional-decision",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-CandidateObjectPreProcMessage",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const CandidateObjectPreProcMessage* const)> callback) = 0",
+        "line": 121,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": "CandidateObjectPreProcMessage",
+        "advertisement": "not advertised"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectPreProcMessage)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no product published.",
+      "evidence": [],
+      "gap": "Provide mission-specific candidate preprocessing products if selected.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "sensor-source"
+      ]
+    },
+    {
+      "id": "ImageChannel.cb-NUC_TempData",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/image/ImageChannel.h",
+        "declaring": "ImageChannel",
+        "signature": "virtual Return registerMetadataCallback(std::function<void(Channel& channel, const NUC_TempData* const)> callback) = 0",
+        "line": 129,
+        "annotations": [
+          "@Optional"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h"
+        }
+      ],
+      "obligation": "optional",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "unsupported stub",
+      "availability": "Image attachable",
+      "metadata": {
+        "enumerator": null,
+        "advertisement": "missing enumerator"
+      },
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)"
+        }
+      ],
+      "behavior": "Registration returns NotSupported; no product published.",
+      "evidence": [],
+      "gap": "Supply real NUC temperatures and resolve missing enum before advertising.",
+      "responsibility": "detector/sensor",
+      "gap_groups": [
+        "optional-unimplemented",
+        "sensor-source",
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "ImageListener.destroy",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/ImageListener.h",
+        "declaring": "ImageListener",
+        "signature": "virtual ~ImageListener() = default",
+        "line": 30,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image attachable with a listener",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::~ChannelCore"
+        }
+      ],
+      "behavior": "Listener destructor is supplied by upstream/service; provider holds the listener while dispatch is admitted.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Image listener receives frames; holder and provider graph retire before dlclose."
+        }
+      ],
+      "gap": null,
+      "responsibility": "external system",
+      "gap_groups": []
+    },
+    {
+      "id": "ImageListener.onImage",
+      "family": "Image",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/ImageListener.h",
+        "declaring": "ImageListener",
+        "signature": "virtual void onImage(const Channel& channel, const FrameHeader& header, std::shared_ptr<Buffer> buffer) = 0",
+        "line": 42,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [
+        {
+          "component": "ir-mel",
+          "path": "include/irmel/library/irmel-types/FrameHeader.h"
+        },
+        {
+          "component": "common-mel",
+          "path": "include/mel/library/CommonMEL.h"
+        }
+      ],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Image attachable with a listener",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "ChannelCore::run"
+        },
+        {
+          "path": "include/gige_mel/backend.hpp",
+          "symbol": "FrameDescriptor"
+        }
+      ],
+      "behavior": "Provider invokes service listener with packed host buffer and FrameHeader after admission and copy; receiver must release. Hardware timestamp validity and calibrated optics are separate. Header carries integration-start time, configured exposure/ROI/FOV, Mono storage bits, one band, modulo-32-bit frame ID, staring snapshot flags and configured sensor location; navigation/inertial vectors remain empty.",
+      "evidence": [
+        {
+          "path": "tests/provider_backend_contract_tests.cpp",
+          "scenario": "publication_and_repacking",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks Mono8 storage bits, geometry, ROI, time, FOV and repacked pixel bytes for both SDK-free backends."
+        },
+        {
+          "path": "tests/aravis_timestamp_contract.cpp",
+          "scenario": "positive_publication",
+          "result": "positive",
+          "level": "native SDK fixture",
+          "demonstrates": "Aravis Fake pixels reach MEL listener using test-only timestamp injection."
+        },
+        {
+          "path": "tests/aravis_physical_camera.cpp",
+          "scenario": "delivery_standby_restart",
+          "result": "positive",
+          "level": "physical-camera observation",
+          "demonstrates": "Historical Cognex Mono8 MEL delivery, Standby and restart with virtual test timestamps; not native time qualification."
+        },
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "mono12_delivery_and_lifecycle",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks significant depth in capability vs storage depth and pixels in Mono12 publication."
+        },
+        {
+          "path": "tests/aravis_gige_loopback_contract.cpp",
+          "scenario": "positive_publication_in",
+          "result": "positive",
+          "level": "simulated transport",
+          "demonstrates": "Loopback GVSP pixels reach MEL buffers; exact time is supplied by test-only clock."
+        },
+        {
+          "path": "tests/pleora_hardware_contract.cpp",
+          "scenario": "mel_admission",
+          "result": "positive",
+          "level": "native SDK fixture",
+          "demonstrates": "Controlled SDK-memory build uses native Mono8/Mono12 copies; virtual clock permits callbacks, native invalid time produces zero callbacks."
+        }
+      ],
+      "gap": "Qualify native integration-start mapping, real optics and physical Mono12. No production time claim.",
+      "responsibility": "backend",
+      "gap_groups": [
+        "hardware-qualification"
+      ]
+    }
+  ]
+}

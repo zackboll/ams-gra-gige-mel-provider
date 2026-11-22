@@ -13,6 +13,18 @@ find_package(Threads REQUIRED)
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 option(GIGE_MEL_BUILD_EXAMPLES "Build the native dynamically loaded capture example" ON)
+option(GIGE_MEL_TEST_CONTROL_AUTHORITY "Build the uninstalled SDK-free control authority experiment" OFF)
+option(GIGE_MEL_BUILD_DOCS "Enable the SDK-free Doxygen documentation target" OFF)
+if(GIGE_MEL_BUILD_DOCS)
+  find_package(Doxygen 1.14.0 EXACT REQUIRED COMPONENTS doxygen dot)
+  add_custom_target(docs
+    COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_docs.py"
+      --doxygen "$<TARGET_FILE:Doxygen::doxygen>" --dot "$<TARGET_FILE:Doxygen::dot>"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/docs" --version "${PROJECT_VERSION}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Generating and validating SDK-free C++ documentation"
+    VERBATIM)
+endif()
 option(GIGE_MEL_WARNINGS_AS_ERRORS "Treat warnings in project code as errors" ON)
 option(GIGE_MEL_BUILD_ARAVIS "Build the optional, internal Aravis 0.8.36 camera-control adapter, its SDK tests and diagnostic tool" OFF)
 option(GIGE_MEL_BUILD_PLEORA "Build the optional Pleora eBUS backend" OFF)
@@ -55,6 +67,14 @@ if(BUILD_TESTING)
   target_link_libraries(gvcp_control_owner_tests PRIVATE gige_mel_controlled_gvcp gige_mel_build_options Threads::Threads)
   add_test(NAME gvcp_single_owner COMMAND gvcp_control_owner_tests)
   set_tests_properties(gvcp_single_owner PROPERTIES TIMEOUT 90)
+  if(GIGE_MEL_TEST_CONTROL_AUTHORITY)
+    add_executable(control_authority_tests src/control/authority.cpp tests/control_authority_tests.cpp)
+    target_include_directories(control_authority_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(control_authority_tests PRIVATE gige_mel_build_options Threads::Threads)
+    add_test(NAME control_authority_contract COMMAND control_authority_tests)
+    add_test(NAME control_authority_stale_gvcp_ack COMMAND controlled_gvcp_tests stale_session)
+    set_tests_properties(control_authority_contract control_authority_stale_gvcp_ack PROPERTIES TIMEOUT 15)
+  endif()
 endif()
 
 # Never fetch dependencies at configure/build time. The manifest is reviewed
@@ -97,6 +117,13 @@ target_include_directories(gige_mel_camera_profiles PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(gige_mel_camera_profiles PRIVATE gige_mel_build_options)
+
+# GIGE-MEL-047 host-side bridge from INavigationSink to an optional profile
+# navigation handler. Uninstalled and linked by no production adapter or the
+# MEL provider; only explicit compositions (currently tests) use it.
+add_library(gige_mel_profile_navigation STATIC src/profiles/navigation_bridge.cpp)
+target_link_libraries(gige_mel_profile_navigation PUBLIC gige_mel_camera_profiles Threads::Threads
+  PRIVATE gige_mel_build_options)
 
 add_library(gige_mel_provider SHARED src/provider.cpp src/factories.cpp src/config_parser.cpp)
 target_include_directories(gige_mel_provider SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
@@ -146,7 +173,6 @@ if(BUILD_TESTING)
   target_link_options(provider_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach -Wl,--export-dynamic-symbol=clock_gettime)
   add_test(NAME provider_contract COMMAND provider_tests)
 
-  add_executable(provider_los_tests tests/provider_los_tests.cpp tests/join_observer.cpp)
   add_executable(provider_task_tests tests/provider_task_tests.cpp)
   target_link_libraries(provider_task_tests PRIVATE gige_mel_provider gige_mel_backend gige_mel_build_options Threads::Threads)
   add_test(NAME provider_task_scheduling COMMAND provider_task_tests)
@@ -161,6 +187,7 @@ if(BUILD_TESTING)
   target_link_options(provider_stack_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach)
   add_test(NAME provider_stacked_image COMMAND provider_stack_tests)
   set_tests_properties(provider_stacked_image PROPERTIES TIMEOUT 45)
+  add_executable(provider_los_tests tests/provider_los_tests.cpp tests/join_observer.cpp)
   target_link_libraries(provider_los_tests PRIVATE gige_mel_provider gige_mel_backend
     gige_mel_build_options Threads::Threads ${CMAKE_DL_LIBS})
   target_link_options(provider_los_tests PRIVATE -Wl,--export-dynamic-symbol=pthread_join -Wl,--export-dynamic-symbol=pthread_detach)
@@ -334,6 +361,29 @@ if(BUILD_TESTING)
     GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
     GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile")
   add_dependencies(device_feature_tests gige_mel_external_test_profile)
+  # GIGE-MEL-047: optional profile navigation handler through the bridge, the
+  # unchanged MEL entry point and separately built modules. SDK-free.
+  add_executable(profile_navigation_tests tests/profile_navigation_tests.cpp)
+  target_include_directories(profile_navigation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/examples/profile_module)
+  target_compile_definitions(profile_navigation_tests PRIVATE
+    GIGE_MEL_TEST_PROFILE_MODULE="${profile_test_module}"
+    GIGE_MEL_TEST_NAVIGATION_MODULE="${CMAKE_CURRENT_BINARY_DIR}/external-profile/libnavigation_record_profile.so"
+    GIGE_MEL_TEST_PROFILE_DIR="${CMAKE_CURRENT_BINARY_DIR}/external-profile")
+  target_link_libraries(profile_navigation_tests PRIVATE gige_mel_profile_navigation gige_mel_selection
+    gige_mel_provider gige_mel_build_options Threads::Threads)
+  add_dependencies(profile_navigation_tests gige_mel_external_test_profile)
+  foreach(scenario bridge_capability_discovery bridge_preparation_and_mapping bridge_signed_zero_representation
+      bridge_uncertainty_and_control_loss
+      bridge_concurrency_and_teardown mel_profile_a_receipt_only mel_profile_b_dispatch mel_profile_b_uncertainty
+      mel_profile_b_lifecycle dynamic_module_navigation)
+    add_test(NAME profile_navigation_${scenario} COMMAND profile_navigation_tests ${scenario})
+    set_tests_properties(profile_navigation_${scenario} PROPERTIES TIMEOUT 60)
+  endforeach()
+  add_test(NAME profile_identity_closure COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/identity-closure-check -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/profile_identity_closure.cmake)
+  set_tests_properties(profile_identity_closure PROPERTIES TIMEOUT 30)
   add_test(NAME dynamic_profile_module_contract COMMAND device_feature_tests --dynamic-module-only)
   add_test(NAME cognex_profile_contract COMMAND device_feature_tests --cognex-only)
   set_tests_properties(cognex_profile_contract PROPERTIES TIMEOUT 30)
