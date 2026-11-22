@@ -79,9 +79,12 @@ access overlapping privilege or the fixture identity window is rejected, includi
 memory-range overlap. No bypass API is exposed on the owner.
 
 After acquisition, one owned `jthread` schedules privilege + identity checks on
-that same client. No separate heartbeat socket or command engine. Heartbeat
-failure fences the session. Success refreshes conservative local lease evidence
-from before the privilege request, never ACK arrival. Operations use the minimum
+that same client. No separate heartbeat socket or command engine. Once heartbeat
+refresh enters its privilege/identity checks, failed readback fences the session,
+including a pre-send refusal of a refresh read. This is distinct from ordinary
+register/memory pre-send cancellation or timeout, which need not fence it.
+Successful refresh updates conservative local lease evidence from before the
+privilege request, never ACK arrival. Operations use the minimum
 of their original caller deadline, command-policy budget and local lease end.
 Acquisition/heartbeat sequences share one unchanged absolute deadline. Pending
 ACKs cannot extend it. Caller and shutdown stop tokens are combined.
@@ -120,6 +123,11 @@ ACK can then match endpoint, command and ID of a new request; register ACKs do
 not echo address. Fixture identity also identifies only the reused endpoint,
 not a session epoch. Magic is constant and cannot fence old sessions. Cross-session
 fencing is **not solved**, and uncertain operations are never replayed.
+
+[GIGE-MEL-046](tasks/GIGE-MEL-046-validation.md#cross-session-loopback-result)
+reproduces false acknowledgement on a forced same-port rebind using the 038
+client. It does not change this owner's matcher or qualify wire fencing. Its
+separate SDK-free authority accepts only fixture-declared generation evidence.
 
 Without sensor-defined identity/idempotence/reconciliation, readback cannot prove
 which generation owns control, whether an uncertain write applied, or whether a

@@ -1,11 +1,17 @@
-# MEL surface inventory and implementation order
+# MEL surface roadmap and implementation history
+
+Use [Requirements Traceability](mel-traceability.md) for the authoritative
+operation-by-operation status and evidence. This roadmap keeps milestone history
+and sequencing; see [current status](status.md) for audited backend boundaries
+and [Qualification Evidence](qualification-evidence.md) for original runs.
 
 GIGE-MEL-GENTL-003A adds isolated simulated-camera wire qualification tooling,
 **no MEL surface** ([design](tasks/GIGE-MEL-GENTL-003A-design.md)). Independent
 observation now detects writes, privilege changes, unknown/repeated commands and
 post-close traffic; offline harness self-tests do not qualify a real producer.
-Authenticated Euresys evaluation remains next; Balluff's GENTL-003 crash is not
-resolved. Physical-camera authorization and GENTL-004 remain separate gates.
+At GENTL-003A, access to Euresys still required an authenticated download and
+Balluff's earlier crash remained unresolved. See the [producer evidence matrix](qualification-evidence.md#gentl-producers-and-consumer)
+for the audited records. Physical-camera authorization and GENTL-004 are separate gates.
 
 GIGE-MEL-GENTL-003 adds only bounded offline qualification tooling
 ([evidence](tasks/GIGE-MEL-GENTL-003-validation.md)), **no MEL surface**.
@@ -47,6 +53,14 @@ pinned capability enumeration (and, for security audit, by a missing provider
 event source). Both remain NotSupported and unadvertised, under executable
 classification tests. `HealthStatusChannel` remains partial. See the
 [design](tasks/GIGE-MEL-041-design.md).
+
+GIGE-MEL-047 adds an internal, optional camera-profile
+[navigation handler](navigation-backend-forwarding.md#optional-camera-profile-navigation-handler-gige-mel-047)
+and a reusable bridge to the existing navigation sink, preserved through module
+loading. The MEL surface, advertisement and provider dispatch are unchanged.
+Only an SDK-free recording backend is wired. There is no production adapter,
+transport, detector protocol or authority grant
+(`PROFILE_NAVIGATION_FIXTURE_QUALIFIED`; [design](tasks/GIGE-MEL-047-design.md)).
 
 GIGE-MEL-039 adds a [loopback-only single-owner authority](gvcp-single-owner.md),
 not a MEL capability. Shared control/heartbeat and retirement evidence does not
@@ -135,7 +149,7 @@ internal SDK-free typed feature interface. Aravis implements native access;
 recording-service tests cover orchestration without an SDK. Device locking,
 control loss, acquisition-command uncertainty and stream ownership remain
 adapter responsibilities. The optional Pleora implementation above consumes
-the same service and acquisition contracts but remains unqualified. See
+the same service and acquisition contracts; production use remains unqualified. See
 [camera-profile portability](camera-profile-portability.md).
 
 ## Shared camera-profile foundation (GIGE-MEL-024)
@@ -170,11 +184,10 @@ unsupported; these are not implied by successful image delivery.
 
 ## How to read this plan
 
-The API in scope is **AMS-GRA IR MEL**, with its Common MEL dependencies. This repository provides that API to Skills; it does not merely call an existing provider through a consumer bridge.
-
-This inventory uses the annotations in the pinned IR MEL commit `8d9224519f12b44e0b28815755c56a32a28d24a0` and Common MEL commit `f6908437d8fd2f7fb69896f9eb9cfd272d10c439`. “Required,” “conditional,” and “optional” below describe those header annotations. They are separate from implementation priority and from what the bootstrap currently supports. Annotation inconsistencies are called out explicitly; the table is not a substitute for an agreed deployment conformance profile.
-
-**Current release boundary:** an experimental, native C++ image-stream provider using the synthetic backend. The manager/control/buffer path, selected common channel operations, image delivery, and camera commands form the implemented subset. Unimplemented overloads on attachable channels return an explicit unsupported result; absent channel families are not advertised or attachable. Completing a pure virtual class with unsupported methods does not fulfill its required behaviors.
+The API in scope is **AMS-GRA IR MEL** and its Common MEL dependencies.
+The original P0–P5 order below is planning history, not a deployment compliance
+profile or a list of operations currently supported. Resolve applicable
+requirements and sensor/adapter qualification before claiming support.
 
 ## Priority order
 
@@ -187,7 +200,7 @@ This inventory uses the annotations in the pinned IR MEL commit `8d9224519f12b44
 | P4 — requested capabilities | Additional formats, direct registered-memory acquisition, calibration, protection, richer navigation, and instrumentation | Add only capabilities needed by the selected sensor and Skill | Capability advertisement, command semantics, metadata, and tests expand together |
 | P5 — specialized products | IRST tasking/tracking, candidate detection, TSI image stacks, advanced bands/scan modes | These require sensor/product semantics beyond acquiring GigE frames | Sensor, coordinate, timing, scheduling, and data contracts are defined and qualified end to end |
 
-**P2/P3 status.** P2 has started but is not complete. An optional, internal Aravis 0.8.36 camera-control foundation (discovery, exact selection, ownership, capabilities, configuration, truthful readback) is implemented and exercised through the real SDK's Fake device ([Aravis integration](aravis-integration.md)). GIGE-MEL-009 adds bounded Mono8 source acquisition (SDK buffers, leases, cancellation, direct capture), also exercised only through the Fake device; its frames carry an invalid timestamp, so the common provider rejects them and no Aravis MEL Image is published. GIGE-MEL-010 has three parts. It adds **read-only observation** of the raw SDK timestamps (adapter path and `time-probe` diagnostic). It records their source-backed provenance: on the pinned Fake both are host wall-clock fill time, and on GigE the value is a leader tick conversion with a host-time fallback. It also **test-qualifies** positive MEL Image publication of genuine Aravis pixels, but only under a **test-only virtual integration-start clock**. That is not timestamp qualification. A real Aravis integration-start timestamp is **not qualified**, and production Aravis-backed MEL Image publication is **not enabled**. The physical-camera timing gate stays open until every item of the [camera-timing qualification checklist](aravis-integration.md#camera-timing-qualification-checklist) is established for a selected camera. GIGE-MEL-011 exercises the unchanged production GigE backend over **simulated** GVCP/GVSP transport: the pinned SDK's `ArvGvFakeCamera` on IPv4 loopback (real discovery, control, UDP image transfer, cancellation, diagnostics, simulated packet loss, and virtual-clock MEL publication of network pixels). It qualifies no physical camera, NIC or timing. Its client traffic is loopback-only, but the pinned simulator also binds a global GVCP discovery listener to 255.255.255.255:3956, which is effectively wildcard on Linux. The simulator process is therefore not strictly confined to loopback. The test runs under an explicitly documented test-only exception (GIGE-MEL-011-R1), not under network isolation, and owner acceptance is pending. GIGE-MEL-018 adds the first physical-camera evidence: a Cognex CIC-5000R was discovered, inspected and captured (Mono8) through the unchanged GigE backend, and its genuine pixels reached MEL Image callbacks, with Standby, held-buffer release and restart, in an opt-in test that uses only the test-only virtual clock. Two narrow adapter compatibility fixes were needed (legacy `AcquisitionFrameRateAbs`, Integer identity nodes). The camera's power-on configuration is unsupported, and the tests used a documented temporary arrangement ([record](cognex-cic-5000r.md)). Physical-camera and timestamp qualification have not been performed. P3, a second real SDK implementation, has not started.
+**Historical P2 observations (through GIGE-MEL-018).** An optional, internal Aravis 0.8.36 camera-control foundation (discovery, exact selection, ownership, capabilities, configuration, truthful readback) is implemented and exercised through the real SDK's Fake device ([Aravis integration](aravis-integration.md)). GIGE-MEL-009 adds bounded Mono8 source acquisition (SDK buffers, leases, cancellation, direct capture), also exercised only through the Fake device; its frames carry an invalid timestamp, so the common provider rejects them and no Aravis MEL Image is published. GIGE-MEL-010 has three parts. It adds **read-only observation** of the raw SDK timestamps (adapter path and `time-probe` diagnostic). It records their source-backed provenance: on the pinned Fake both are host wall-clock fill time, and on GigE the value is a leader tick conversion with a host-time fallback. It also **test-qualifies** positive MEL Image publication of genuine Aravis pixels, but only under a **test-only virtual integration-start clock**. That is not timestamp qualification. A real Aravis integration-start timestamp is **not qualified**, and production Aravis-backed MEL Image publication is **not enabled**. The physical-camera timing gate stays open until every item of the [camera-timing qualification checklist](aravis-integration.md#camera-timing-qualification-checklist) is established for a selected camera. GIGE-MEL-011 exercises the unchanged production GigE backend over **simulated** GVCP/GVSP transport: the pinned SDK's `ArvGvFakeCamera` on IPv4 loopback (real discovery, control, UDP image transfer, cancellation, diagnostics, simulated packet loss, and virtual-clock MEL publication of network pixels). It qualifies no physical camera, NIC or timing. Its client traffic is loopback-only, but the pinned simulator also binds a global GVCP discovery listener to 255.255.255.255:3956, which is effectively wildcard on Linux. The simulator process is therefore not strictly confined to loopback. The test runs under an explicitly documented test-only exception (GIGE-MEL-011-R1), not under network isolation, and owner acceptance is pending. GIGE-MEL-018 adds the first physical-camera evidence: a Cognex CIC-5000R was discovered, inspected and captured (Mono8) through the unchanged GigE backend, and its genuine pixels reached MEL Image callbacks, with Standby, held-buffer release and restart, in an opt-in test that uses only the test-only virtual clock. Two narrow adapter compatibility fixes were needed (legacy `AcquisitionFrameRateAbs`, Integer identity nodes). The camera's power-on configuration is unsupported, and the tests used a documented temporary arrangement ([record](cognex-cic-5000r.md)). That milestone recorded limited physical pixels with virtual time, not production qualification.
 
 | P2 milestone | Status |
 | --- | --- |
@@ -200,181 +213,19 @@ This inventory uses the annotations in the pinned IR MEL commit `8d9224519f12b44
 | Simulated GigE transport (loopback `ArvGvFakeCamera`: discovery, GVCP, GVSP) | Exercised (GIGE-MEL-011); simulator only |
 | Confirmed Aravis camera-control loss (`ArvDevice::control-lost`) | Terminal backend failure, blocked configuration/start, safe leases/close and explicit reopen exercised with real simulator privilege revocation (GIGE-MEL-012); existing MEL stream-failure path, no new MEL surface; **not physical unplug detection** |
 | Network isolation of the loopback test | **Not established**: the simulator's wildcard 255.255.255.255:3956 discovery listener is a documented test-only exception (GIGE-MEL-011-R1); owner acceptance pending |
-| Physical-camera / NIC qualification | **Not performed** |
+| Physical camera / NIC | Limited Cognex Mono8 observation; no production timing or NIC qualification in this milestone |
 
-P1 and P2 can proceed in parallel once P0 is stable. P5 is not permission to ignore a required annotation: any deployment that requires one of those surfaces moves it into that deployment's release gate. In particular, the stack and scheduling annotations need an explicit decision before any broad MEL-conformance claim.
+**Current P2/P3 disposition.** Aravis has physical Cognex observations and Pleora
+exists as the second internal SDK adapter, with native fixtures and limited
+watermarked Cognex evaluation. Neither record qualifies production integration-
+start timestamps, and licensed production Pleora use is still gated. See
+[current status](status.md) and the [Pleora qualification record](pleora-integration.md).
 
-## P0: provider creation and common objects
-
-### Factories, manager, and Control
-
-The initial entry points use the upstream C++ ABI. The factory symbols have C linkage, but return `std::shared_ptr` and take C++ strings/objects. See [Control][control], [Buffer][buffer], and [IRFactory][factory].
-
-| Surface | Bootstrap | Follow-up/acceptance |
-| --- | --- | --- |
-| Global `getAPI_Manager(const std::string&)` | Provider context factory | Reject unknown selections; make selected backend/device and context ownership explicit |
-| `getControl(std::string_view, std::shared_ptr<::API_Manager>)` | Concrete MEL Control factory | Reject mismatched instance/manager types; do not let unrelated contexts share state accidentally |
-| `getBuffer(std::string_view, std::shared_ptr<::API_Manager>)` | Registered-host-memory wrapper factory | Associate wrappers with the correct context and validate ownership on registration |
-| `API_Manager` lifetime | Own the provider context | Channels/buffers must not call through an already-destroyed context |
-| `Control::init(const std::string&)` | Initialize the selected synthetic profile | Define repeat-init and unknown aperture/config behavior |
-| `Control::getCapabilities() const` | Initial discovery snapshot | This returns a reference; the bootstrap keeps the snapshot stable. Use attached `Channel::getCapabilities()` for the current image layout after a command |
-| `Control::getVersionInfo() const` | Implementation/upstream version information | Keep implementation version separate from API version and SDK/camera versions |
-| `Control::attachChannel(const Config&)` | One C2 and one Image channel per manager | Check type, channel identity, listener, and ownership; unsupported families remain unavailable |
-| `Control::detachChannel(std::shared_ptr<Channel>)` | Stop/detach the owned channel | Reject foreign objects; preserve outstanding image bytes until consumer release |
-
-The alternative registry loader uses `createC2Channel`, `createImageChannel`, `createHealthStatusChannel`, `createTrackChannel`, `createSchedulingChannel`, `createInstrumentationChannel`, and `createStackedImageChannel`, with `std::shared_ptr<SpecificChannel>(Config&)` signatures. These are **not exported by implication** when the manager/control path exists. Add them if a target Skill uses upstream `IRFactory`/`IRRegistry`, and test that path separately.
-
-### Common Channel surface
-
-All concrete channel families inherit these required members from [Channel][channel].
-
-| Member | Bootstrap | Required behavior to retain as adapters grow |
-| --- | --- | --- |
-| `sendKeepAliveRep()` → `RequestFor<Return>` | Supported for attached channels | Return an initialized future, including failure paths; define the effect of detached/closed state |
-| `send(ChannelCommsTestReq)` → `RequestFor<ChannelCommsTestRep>` | Supported | Preserve request correlation and produce the corresponding response/callback semantics |
-| `registerMetadataCallback(ChannelCommsTestRep)` | Supported | First valid registration succeeds; duplicate registration fails; callback runs outside provider locks |
-| `registerBuffer(std::shared_ptr<Buffer>)` | Image host buffers | Require a disabled channel, correct provider affinity, valid nonoverlapping memory, and sufficient capacity |
-| `unregisterBuffer(std::shared_ptr<Buffer>)` | Image host buffers | Require a disabled channel and respect an outstanding delivery; do not free consumer memory |
-| `enable()` | C2 control state; Image acquisition | Validate initialization, listener, buffers, backend state, and current layout before accepting acquisition |
-| `disable()` | Stop new image publication and join from a control thread | Wake receives, contain late callbacks, preserve held bytes, and avoid callback-thread self-join |
-| `getCapabilities() const` | Current channel snapshot | Report actual current dimensions, pitch, byte counts, image format, and supported metadata |
-
-There is no general unregister-metadata-callback overload in this interface. Replacing or clearing a callback must not be invented as a compatible upstream API. Consumers should use channel lifetime and the supported registration contract.
-
-Image and synchronous metadata callbacks share the [profile's callback policy](implementation-profile.md#callbacks-threads-and-shutdown): lifecycle/configuration mutations, including Control lookup/creation, reject calls from any provider callback on the current thread, across provider instances. Explicit buffer release, capability/statistics queries, keep-alive, and correlated communications remain available. Queue mutations to a control thread and return without waiting on work that could depend on callback completion. External detach closes metadata admission and drains admitted callbacks.
-
-### Buffer and image delivery
-
-All [Buffer][buffer] members are required: `init`, `getBufferAddress`, `getImageAddress`, `getSize`, `getContext`, `release`, `getFlags`, `addFlag`, and `setFlags`.
-
-The bootstrap supports host storage. It must not advertise GPU or RDMA support merely because the upstream `BufferFlag` enum contains those values. A flag request cannot turn an arbitrary host pointer into an SDK-compatible GPU/RDMA allocation.
-
-The consumer supplies an `ImageListener` in `Config`. The provider invokes:
-
-```cpp
-void ImageListener::onImage(
-    const Channel& channel,
-    const FrameHeader& header,
-    std::shared_ptr<Buffer> buffer);
-```
-
-The initial delivered layout is one-band Mono8 with contiguous rows. A delivery keeps a destination slot occupied until `Buffer::release()`. Retaining only a shared-pointer copy is not the release protocol. The provider must use checked sizes, preserve the caller's context, refuse overlapping registered memory, and keep all pools bounded.
-
-`FrameHeader` mapping includes `systemTime`, `integrationTime`, width/height, `bitsPerPixel`, `numBands`, FOV, contributing sensor, format, 32-bit frame/subframe fields, image type/flip/flags, dither, ROI offsets, navigation/inertial vectors, and band index. Every populated value needs an actual meaning. Synthetic FOV/time assumptions must be explicitly synthetic. Hardware navigation or optical calibration cannot be inferred from a GigE payload. See [FrameHeader][frame-header].
-
-## P0/P1: C2Channel
-
-[C2Channel][c2] has nine command overloads and six additional metadata registrations. It inherits the common Channel methods and common communications callback.
-
-### C2 commands
-
-| Request → response | Upstream annotation | Bootstrap | Priority and implementation task |
-| --- | --- | --- | --- |
-| `BIT_Command` → `Return` | Required | Partial: bounded provider-software test ID 1 | [Software BIT profile](software-bit.md); hardware/asynchronous BIT remains future work |
-| `CalibrationConfigurationCmd` → `mel::CalibrationConfiguration` | Optional | Unsupported; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4: return genuine calibration configuration; this is a query, not a generic execute-NUC operation |
-| `CalibrationStatusCmd` → `mel::CalibrationStatus` | Optional | Unsupported; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4: report actual calibration state and progress semantics |
-| `CameraCommand` → `CameraCommandResp` | Required if camera control | Supported for staring Mono8 profile | P0: serialize with Image commands; full snapshot, validation, readback, command correlation, and disabled-stream policy |
-| `CameraProtectCmd` → `CameraProtectCmdResp` | Required if camera protection | Unsupported and unadvertised; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4 if sensor supports it: define safe actuation/state and actual response; never inherit default OK for unsupported hardware |
-| `EraseCommand` → `EraseCommandType` | Optional | Unsupported; correlated Rejected/CapabilityUnavailable status (GIGE-MEL-042) | P4 only with a defined target and lifecycle semantics |
-| `SystemTrackDataResponse` → `CommandStatus` | Optional | Unsupported (the future holds the error, not a status payload); correlated Rejected/CapabilityUnavailable callback status (GIGE-MEL-042) | P5 or earlier pointing integration; distinct from the same-named TrackChannel operation |
-| `ModeCmd` → `MFA_Mode` | Required | Partial: Standby/Unused/default-scan idle acknowledgement or active/faulted Image cleanup | [Bounded contract](mode-command.md); synchronous cancel/join/stop preserves registered and held buffers, configuration and diagnostic history; logical state only, no physical standby/power or scheduling. P1: operational state machine and real task admission/execution/status/cancellation remain required |
-| `ConfigSetCommand` → `Return` | Required | Supported for provider-defined camera schema v1 | [Exact configuration/status profile](configuration.md); other configuration domains remain future work |
-
-### C2 metadata
-
-| Callback payload | Upstream annotation | Bootstrap | Priority |
-| --- | --- | --- | --- |
-| `mel::BIT_Configuration` | Required | One observed-state test catalogue | [Software BIT profile](software-bit.md) |
-| `CommandStatus` | Required | Supported for C2 ConfigSet, CameraCommand and the documented BIT_Command/ModeCmd subsets; terminal Rejected/CapabilityUnavailable for the five unsupported C2 commands (GIGE-MEL-042) | [Configuration](configuration.md#supported-execution-versus-rejected-unsupported-requests), [software BIT](software-bit.md) and [ModeCmd](mode-command.md) terminal outcomes. Every admitted C2 command now produces exactly one terminal status. A rejection status is not a capability claim; the unsupported operations remain unimplemented |
-| `mel::CalibrationConfiguration` | Optional | NotSupported | P4 |
-| `CameraProtectCmdResp` | Required if camera protection | NotSupported | P4 when protection is implemented |
-| `mel::CalibrationStatus` | Optional | NotSupported | P4 |
-| `mel::BIT_Status` | Required | Latest software result and current software faults | [Software BIT profile](software-bit.md) |
-
-`CameraCommandResp` metadata registration is on **ImageChannel**, not C2Channel. Do not add a new C2 overload under the assumption that every response type has a C2 callback. `CameraProtectCmd` and its response are declared together in `CameraProtectCmd.h`.
-
-## P0/P1: ImageChannel
-
-[ImageChannel][image] adds two command overloads and eleven metadata registrations.
-
-| Command → response | Upstream annotation | Bootstrap | Priority |
-| --- | --- | --- | --- |
-| `CameraCommand` → `CameraCommandResp` | Required if camera control | Supported for the initial profile | P0, shared implementation with C2 |
-| `NavigationReport` → `NavigationReportResp` | Required | **PARTIAL**: [validated receipt](navigation-reception.md) with [optional backend forwarding](navigation-backend-forwarding.md), one latest report per Image attachment, ready exact time echo and zero/unassigned IDs | P1: independently qualified image association remains unimplemented |
-
-| Callback payload | Upstream annotation | Bootstrap | Priority and data source |
-| --- | --- | --- | --- |
-| `BadPixelList` | Required | **Limited synthetic support**: one synchronous known-empty snapshot on successful registration, even disabled | Explicit default-false backend evidence; synthetic generator has no defects. Zero bytes/count, empty upstream vector; no repeat on ROI/exposure/rate changes. Aravis, physical cameras and independent fixture have no qualified defect-map source and remain unadvertised/NotSupported. No calibration or full-conformance claim. |
-| `OpticalDistortionMap` | Optional | NotSupported | P4: calibrated optics/profile |
-| `LineOfSightReport` | Required | Source-backed conditional implementation | [Recording-qualified LOS path](image-los-metadata.md); zero optional validity claims only; no default/production source |
-| `LineOfSightQuaternion` | Required if quaternion LOS | NotSupported | P4 if that coordinate representation is supported |
-| `LineOfSightEuler` | Required | Source-backed conditional implementation | [Recording-qualified LOS path](image-los-metadata.md); explicit source frame/time; no navigation conversion or physical qualification |
-| `CameraCommandResp` | Required if camera control | Supported | P0: emit correlated responses through the shared camera-command path |
-| `NavigationReportResp` | Required | Supported for partial receipt and optional backend acceptance | Image-only synchronous acknowledgement, no historical replay; no LOS or frame navigation population |
-| `LOS3D_KinematicsType` | Optional | NotSupported | P4: navigation/pointing integration |
-| `CandidateObjectMessage` | Required if candidate detection | NotSupported | P5: actual detector output, not an image counter |
-| `CandidateObjectPreProcMessage` | Optional | NotSupported | P5: detector/preprocessing product |
-| `NUC_TempData` | Optional | NotSupported | P4: actual sensor NUC/calibration temperature data |
-
-The `LOS3D_KinematicsType` registration takes its `std::function` by `const&`; match the exact upstream signature. All other signatures must also be compiled against the pinned headers rather than recreated from a prose table.
-
-## P1: HealthStatusChannel
-
-[HealthStatusChannel][health] is annotated required and has no extra `send` overloads. It adds eight callbacks to the common Channel interface. The provider now advertises and attaches a **partial** Health channel: common communications plus MFA_Status, MFA_StatusDetailed, the bounded software [BIT_Status](software-bit.md), and the bounded software [SubsystemStatusResp](subsystem-status.md), with zero image geometry. All four are published by one 100 ms worker from one captured core state per batch. The other four Health registrations (LFStatus, DiscreteStatus, MFA_SecurityAuditRecord, NUC_TempData) remain unsupported and unadvertised. This does not close the required Health conformance gaps below. See [the exact implemented contract](health-status.md) for 100 ms current-state snapshots, state mapping, diagnostic vocabulary, lifecycle and limitations.
-
-| Callback payload | Upstream annotation | Priority and intended source |
-| --- | --- | --- |
-| `LFStatus` | Required if local functions | P4 if supported local functions exist |
-| `mel::MFA_Status` | Required | Partial: sampled observed provider readiness/acquisition state; no hardware health claim |
-| `mel::BIT_Status` | Required | Partial: latest software result/current faults on existing Health worker; hardware BIT remains future work |
-| `SubsystemStatusResp` | Required | Partial: one provider **software** subsystem/CSCI with version 0.1.0, current readiness, committed BIT-state revision and prepared-report sequence ([profile](subsystem-status.md)); physical device/transport inventory, dependent subsystems, assigned criticality and connection probing remain P1/P2 work |
-| `mel::DiscreteStatus` | Required | **Unresolved, blocked (GIGE-MEL-041):** NotSupported and unadvertised. No pinned capability enumerator, and no discrete provider source beyond existing reports. A candidate software-only profile is held for upstream resolution ([design](tasks/GIGE-MEL-041-design.md#3-discretestatus-semantics-analysis)) |
-| `mel::MFA_SecurityAuditRecord` | Required | **Unresolved, blocked (GIGE-MEL-041):** NotSupported and unadvertised. No pinned capability enumerator **and** no genuine provider security event source ([investigation](tasks/GIGE-MEL-041-design.md#4-security-audit-record-event-source-investigation)) |
-| `mel::MFA_StatusDetailed` | Required | Partial: schema-1 provider diagnostics; no transport/hardware metrics |
-| `NUC_TempData` | Optional | P4 if the selected sensor provides it |
-
-A temperature sample is not a complete Health implementation. The implemented increments define initial/late periodic publication, ordering, shutdown, current acquisition failure versus historical diagnostics, the bounded [software BIT profile](software-bit.md), and the bounded [software subsystem profile](subsystem-status.md). They do not provide an event log, physical connection probing, hardware health, hardware BIT, calibration or full Health conformance. Remaining table entries describe broader upstream work, not capability claims.
-
-## P1 profile decision / P5 implementation: SchedulingChannel
-
-[SchedulingChannel][scheduling] is class-annotated `RequiredIfIRSTTrackTasking`. Individual members have more specific conditions:
-
-| Operation or callback | Upstream annotation | Work required before support is advertised |
-| --- | --- | --- |
-| `send(PrioritizedTrackListCmd)` → `TrackListResponse` | Required within the declared channel | Track-list validation, revision, correlation, and admission semantics |
-| `exec(AbortTask)` → `Return` | Required if IRST scan/stare/track tasking | Cancel active/queued work and define completion ordering |
-| `exec(IRSTScanTask)` → `Return` | Required if IRST scanning | Pointing/scan execution, timing, and sensor constraints |
-| `exec(IRSTStareTask)` → `Return` | Required if IRST staring | Coordinate/duration interpretation; fixed-camera limits must be explicit |
-| `exec(IRSTTrackTask)` → `Return` | Required if IRST tracking | Tracking/pointing execution and state machine |
-| `TaskExecutingRep` callback | Required if IRST track tasking | Publish actual task state |
-| `ExecuteTaskAck` callback | Required if IRST track tasking | Distinguish acceptance from completion |
-| `SchedCreatedRep` callback | Required if IRST track tasking | Report an actual created schedule |
-| `UpdateTrackListResponse` callback | Required if tracking | Correlate actual track-list updates |
-| `TaskEvents` callback | Optional | Defined task-event lifecycle |
-| `ScanPerformanceReport` callback | Optional | Actual scan-performance measurements |
-
-The [ChannelCapability][capability] comment says every EOIR MFA has task scheduling, and **`TaskScheduleDepth == 0` means an immediate task replaces the executing task**. It does not mean “no scheduling.” The bootstrap's lack of tasking therefore remains an explicit limitation; do not treat a zero-initialized field as a conformance waiver. Resolve this contract/profile question before a release claims general EOIR MEL support.
-
-## P5: TrackChannel
-
-[TrackChannel][track] is conditional on tracking. It is not advertised or attachable in the bootstrap.
-
-| Operation or callback | Upstream annotation | Work required |
-| --- | --- | --- |
-| `send(SystemTrackDataResponse)` → `CommandStatus` | Optional | Feed external system tracks into the actual algorithm. (The C2 overload of the same name is rejected as Unsupported; see C2 commands.) |
-| `send(TrackDataUpdate)` → `CommandStatus` | Required if track updates | Define update acceptance, correlation, and stale input handling |
-| `CandidateObjectMessage` callback | Required if candidate detection | Real detector output |
-| `IRSTTrackReport` callback | Required if tracking | Actual track reports with IDs, timing, and coordinates |
-| `RequestSystemTrackData` callback | Optional | Requests for externally supplied tracks/pointing support |
-| `CandidateObjectPreProcMessage` callback | Optional | Defined detector/preprocessing product |
-
-`Config::supportsSystemTrackData` and `supportsTrackDataUpdates` describe the **Skill's ability to supply data**. They are not proof that the camera contains a detector or tracker.
-
-## P4: InstrumentationChannel
-
-[InstrumentationChannel][instrumentation] is conditional on instrumentation. Add `send(InstrumentationLevelCmd)` → `InstrumentationReport` and registration of `InstrumentationReport` together, plus inherited Channel methods.
-
-The pinned `InstrumentationReport` carries command ID, size, timestamp, and instrumentation priority (`Normal`/`Debug`). It is not an arbitrary counter map. Keep backend packet/drop/pool statistics in an appropriate project diagnostic surface until a supported mapping exists; do not squeeze unrelated numbers into unrelated MEL fields.
+P5 is not permission to ignore a required annotation. Resolve the deployment
+profile first: [operations and gaps](mel-traceability-evidence.md) identify what
+is absent or only partial across factories, Channel/Buffer, C2, Image, Health,
+Scheduling, Track, Instrumentation and Stack. The [implementation profile](implementation-profile.md)
+retains ownership, memory, command and callback details.
 
 ## P1 profile decision / P5 implementation: stacked imagery
 
@@ -441,22 +292,12 @@ The tests and hardware evidence for each claimed milestone should cover these be
 | Real SDK | Device unavailable/busy/disconnected, interrupted receive, late callbacks, packet loss, timestamp reset/wrap, and reconnection policy |
 | Second backend | Same shared MEL-provider portability scenarios and MEL client; no new vendor types in common headers. The scenarios already pass for the synthetic backend and a test-only fixture backend ([backend portability](backend-portability.md)); that does not complete P2 or P3 |
 
-These are release criteria, not assertions that hardware qualification has occurred. The README's validation section records what was actually run for this bootstrap.
+These are release criteria, not assertions that hardware qualification has occurred.
+The [bootstrap validation record](validation.md) and [Qualification Evidence](qualification-evidence.md)
+distinguish original executions from later milestones.
 
-[control]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/Control.h
-[buffer]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/Buffer.h
-[factory]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/factory/IRFactory.h
-[channel]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/Channel.h
-[frame-header]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/FrameHeader.h
-[c2]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/c2/C2Channel.h
-[image]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/image/ImageChannel.h
-[health]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/health-status/HealthStatusChannel.h
-[scheduling]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/scheduling/SchedulingChannel.h
-[track]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/track/TrackChannel.h
-[instrumentation]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/instrumentation/InstrumentationChannel.h
 [stacked]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/stacked-image/StackedImageChannel.h
 [stacked-listener]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/stacked-image/StackedImageListener.h
-[capability]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelCapability.h
 [metadata-enum]: https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h
 
 ### GIGE-MEL-013: reproducible evidence, no new MEL surface

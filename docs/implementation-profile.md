@@ -1,5 +1,11 @@
 # Experimental image-stream profile, version 0.1
 
+For method-by-method obligations, implementation and evidence, start at
+[Requirements Traceability](mel-traceability.md). This profile describes
+behavior and limits alongside the milestone notes below, not a conformance
+determination. Use [Current Status](status.md) for the audited merged snapshot
+and [Qualification Evidence](qualification-evidence.md) for executed results.
+
 ## Isolated GenTL wire qualification tooling (GIGE-MEL-GENTL-003A)
 
 The explicitly launched, uninstalled supervisor wire mode adds a pinned Aravis
@@ -30,7 +36,7 @@ The uninstalled offline supervisor adds no backend or MEL capability. It runs
 only producer load/interface diagnostics in bounded network-isolated children.
 Balluff Impact Acquire 3.7.2.4495 (GenTL 1.6) initialized/closed in three children,
 then crashed in `TLUpdateInterfaceList` in the isolated no-camera environment.
-Euresys Gigelink 26.10 was not obtained (authenticated download required).
+Euresys Gigelink 26.10 was not obtained in GENTL-003 (authenticated download required).
 No real-producer GenApi, read-only wire behavior or physical-camera operation is
 qualified. Existing backend/profile qualification remains fixture-only; all
 ownership, XML limits and admission policies are unchanged. See
@@ -209,7 +215,7 @@ and the [pre-implementation dependency audit](tasks/GIGE-MEL-034-design.md).
 This document is the contract implemented by the bootstrap. It describes a
 useful development subset against the pinned IR/Common MEL 4.0 declarations.
 It is **not full MEL conformance**. Required functionality outside this subset
-remains explicitly unsupported; see [the complete inventory](mel-surface-roadmap.md).
+remains explicitly unsupported; see [the operation inventory](mel-traceability.md).
 
 GIGE-MEL-024 extracts the existing camera-profile policy into an internal,
 SDK-free module. GIGE-MEL-025 adds a typed feature service and shared snapshot,
@@ -547,6 +553,10 @@ Absent sinks preserve receipt-only behavior; sink errors, including unsupported,
 return typed failures without callback or retained-report update. No production
 navigation transport is implemented. It is **PARTIAL required
 navigation support**, not full navigation integration or MEL conformance.
+An internal [optional profile navigation handler](navigation-backend-forwarding.md#optional-camera-profile-navigation-handler-gige-mel-047)
+(GIGE-MEL-047) lets a selected camera profile prepare an owned operation behind
+such a sink. It is exercised only with an SDK-free recording backend; no
+production adapter exposes it, and MEL behavior and advertisement are unchanged.
 
 [ModeCmd's bounded subset](mode-command.md) synchronously accepts only
 `Standby/Unused/default-ScanParam` with initialized Control and known-valid actual

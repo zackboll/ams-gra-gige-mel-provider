@@ -1,0 +1,440 @@
+{
+  "schema": 1,
+  "family": "Buffer",
+  "operations": [
+    {
+      "id": "Buffer.destroy",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "virtual ~Buffer() = default",
+        "line": 26,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer (implicit destructor)"
+        }
+      ],
+      "behavior": "Wrapper does not free consumer memory; channel and callback shared ownership protect the wrapper, not the caller allocation.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "detach_preserves_delivered_buffer",
+          "result": "indirect",
+          "level": "SDK-free",
+          "demonstrates": "Checks successful detach, preserved bytes and explicit release with detached channel."
+        }
+      ],
+      "gap": "Add direct wrapper destruction/consumer allocation lifetime assertion.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "missing-positive-test"
+      ]
+    },
+    {
+      "id": "Buffer.init",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "virtual Return init(void* addr, const size_t sz, const int64_t ctx) = 0",
+        "line": 37,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::init"
+        }
+      ],
+      "behavior": "Records external pointer, size and context only while available and unbound.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks host registration, affinity, overlap, flags, unregister, reinit and context."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.getBufferAddress",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "[[nodiscard]] virtual void* getBufferAddress() const = 0",
+        "line": 44,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::getBufferAddress"
+        }
+      ],
+      "behavior": "Returns original host pointer.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Image callback compares image and buffer pointers."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.getImageAddress",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "[[nodiscard]] virtual void* getImageAddress() const = 0",
+        "line": 51,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::getImageAddress"
+        }
+      ],
+      "behavior": "Returns original host pointer: provider copies a packed image starting at offset zero.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "alternate_backend_padded_rows_are_repacked",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks image address equals consumer storage and padded source is repacked."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.getSize",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "[[nodiscard]] virtual int64_t getSize() const = 0",
+        "line": 59,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::getSize"
+        }
+      ],
+      "behavior": "Returns registered byte capacity as signed size.",
+      "evidence": [
+        {
+          "path": "tests/loader_tests.cpp",
+          "scenario": "run",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Requires the delivered capacity cover 64×48; exact capacity edge cases are not asserted."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.getContext",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "[[nodiscard]] virtual int64_t getContext() const = 0",
+        "line": 66,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::getContext"
+        }
+      ],
+      "behavior": "Returns the caller-supplied context unchanged.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks host registration, affinity, overlap, flags, unregister, reinit and context."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.release",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "virtual Return release() = 0",
+        "line": 72,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::release"
+        }
+      ],
+      "behavior": "Transitions delivered storage to reusable; early or duplicate release fails.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "retained_buffers_starvation_and_release_recovery",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks retained bytes, starvation, explicit release and resumed publication."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.getFlags",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "virtual Return getFlags(std::vector<BufferFlag>& flags) const = 0",
+        "line": 81,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::getFlags"
+        }
+      ],
+      "behavior": "Copies current wrapper flags into caller vector.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks host registration, affinity, overlap, flags, unregister, reinit and context."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    },
+    {
+      "id": "Buffer.addFlag",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "virtual void addFlag(BufferFlag flag) = 0",
+        "line": 88,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "partial",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::addFlag"
+        }
+      ],
+      "behavior": "Adds a distinct flag while unbound/available; bound mutation is ignored.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "negative",
+          "level": "SDK-free",
+          "demonstrates": "Checks that attempting to append a flag to a bound wrapper does not change its Host flags."
+        }
+      ],
+      "gap": "Add positive unbound append and duplicate-suppression assertion; current test only proves bound mutation is ignored.",
+      "responsibility": "provider",
+      "gap_groups": [
+        "missing-positive-test"
+      ]
+    },
+    {
+      "id": "Buffer.setFlags",
+      "family": "Buffer",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/irmel-types/Buffer.h",
+        "declaring": "Buffer",
+        "signature": "virtual void setFlags(const std::vector<BufferFlag>& flags) = 0",
+        "line": 95,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "required",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "applies"
+      },
+      "status": "supported",
+      "availability": "Factory/object path; no channel metadata flag",
+      "metadata": null,
+      "implementation": [
+        {
+          "path": "src/provider.cpp",
+          "symbol": "HostBuffer::setFlags"
+        }
+      ],
+      "behavior": "Changes flags only when unbound/available; non-Host registration is still rejected.",
+      "evidence": [
+        {
+          "path": "tests/provider_tests.cpp",
+          "scenario": "buffer_validation_affinity_and_mutation",
+          "result": "positive",
+          "level": "SDK-free",
+          "demonstrates": "Checks host registration, affinity, overlap, flags, unregister, reinit and context."
+        }
+      ],
+      "gap": null,
+      "responsibility": "provider",
+      "gap_groups": []
+    }
+  ]
+}

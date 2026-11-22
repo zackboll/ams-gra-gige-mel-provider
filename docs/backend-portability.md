@@ -1,12 +1,16 @@
 # Backend portability qualification
 
+This is the historical GIGE-MEL-007 SDK-free experiment. Native Aravis and
+Pleora adapters were added in later milestones; see [Current Status](status.md)
+and [Qualification Evidence](qualification-evidence.md) for their separate scope.
+
 ## Purpose
 
 `provider_backend_contract_tests` (CTest `provider_backend_portability`) shows
 that the **existing** common MEL provider works, through its existing C++
 backend-injection seam, with two independently implemented camera backends.
-The same MEL-facing scenarios run against both. A real GigE Vision SDK has not
-been selected or qualified. The test backend is not a camera simulator, a
+The same MEL-facing scenarios run against both. No real GigE Vision SDK was
+selected or exercised for this experiment. The test backend is not a camera simulator, a
 production factory selection or a qualified SDK.
 
 The path under test is the existing embedding seam:
@@ -160,5 +164,6 @@ This suite does not establish any of the following:
 - device clock mapping, PTP/UTC or calibration;
 - multi-camera behavior or physical health.
 
-The roadmap's "first real camera" (P2) and "second implementation" (P3)
-milestones remain open: both cases here are software backends.
+At GIGE-MEL-007, the roadmap's first real camera and second SDK milestones were
+still open: both cases here are software backends. The later SDK observations
+do not change what this experiment exercised.

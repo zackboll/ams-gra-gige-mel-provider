@@ -1,0 +1,74 @@
+/** @page api_installed Installed C++ interfaces
+
+The four project headers under `include/gige_mel/` are installed by
+`GigeMelProvider`. Start with @ref md_docs_2consumer-integration "Integrating a MEL Consumer"
+for installation and capture, then see @ref md_docs_2architecture "architecture"
+and the @ref md_docs_2implementation-profile "MEL implementation profile".
+
+Ordinary native MEL consumers use the pinned upstream factory declarations and
+channels; this reference does not regenerate the upstream MEL API. The installed
+project C++ backend contract is a **source-level integration contract, not a
+stable cross-toolchain plugin ABI**. The upstream factory lookup symbols have C
+linkage but use C++ types and are not a C API.
+
+Header | Entry points
+------ | ------------
+@ref include/gige_mel/provider.hpp "provider.hpp" | @ref gige_mel::make_api_manager, @ref gige_mel::ProviderSettings, @ref gige_mel::ProviderStatistics and @ref gige_mel::provider_statistics
+@ref include/gige_mel/backend.hpp "backend.hpp" | @ref installed_backend_contracts
+@ref include/gige_mel/navigation.hpp "navigation.hpp" | @ref gige_mel::backend::NavigationReport
+@ref include/gige_mel/line_of_sight.hpp "line_of_sight.hpp" | @ref gige_mel::backend::LosSupport and @ref gige_mel::backend::LosObservation
+
+@section installed_backend_contracts Backend Contracts
+
+- Select a backend with @ref gige_mel::backend::ICameraBackend and open an
+  @ref gige_mel::backend::ICameraDevice. See @ref gige_mel::backend::ICameraBackend::open "open()"
+  for identity and @ref gige_mel::backend::ICameraDevice::apply "apply()" for effective readback.
+- Read @ref gige_mel::backend::ErrorCode and @ref gige_mel::backend::Result for error
+  handling, then @ref gige_mel::backend::CameraConfiguration,
+  @ref gige_mel::backend::CameraCapabilities and @ref gige_mel::backend::image_layout
+  for geometry, timing and storage.
+- For adapter examples and acceptance tests, see
+  @ref md_docs_2backend-authoring "Adding a camera backend".
+
+@subsection installed_frame_ownership Frame and Stream Ownership
+
+Follow @ref gige_mel::backend::IFrameStream from start through
+@ref gige_mel::backend::IFrameStream::receive "receive()" and
+@ref gige_mel::backend::IFrameStream::request_stop "request_stop()". See
+@ref gige_mel::backend::FrameDescriptor and @ref gige_mel::backend::FrameTimestamp
+for admission and timing, and @ref gige_mel::backend::FrameLease for native
+ownership versus explicit MEL buffer release.
+
+@subsection installed_optional_capabilities Optional Navigation, LOS and Stack Capabilities
+
+- Navigation input: @ref gige_mel::backend::INavigationSink and
+  @ref gige_mel::backend::INavigationSink::submit_navigation "submit_navigation()".
+- LOS output: @ref gige_mel::backend::ILineOfSightSource,
+  @ref gige_mel::backend::ILineOfSightSource::open_line_of_sight "open_line_of_sight()"
+  and @ref gige_mel::backend::ILineOfSightStream.
+- Stack output: @ref gige_mel::backend::IStackedImageSource,
+  @ref gige_mel::backend::IStackedImageSource::open_stacked_images "open_stacked_images()",
+  @ref gige_mel::backend::IStackedImageStream, @ref gige_mel::backend::StackSupport
+  and @ref gige_mel::backend::StackLease.
+
+The presence of a C++ interface is not a guarantee that a source supports the
+capability; see @ref md_docs_2status "current capability and evidence status".
+
+@section installed_contract_evidence Contract evidence and limits
+
+- `backend_contract` and `provider_backend_portability` cover exact open,
+  configuration readback, padded rows, source lease retention and stop/close.
+- `provider_contract` covers registered destination ownership, callback reentry,
+  transient versus terminal receive results, timestamp rejection/discontinuity,
+  partial configuration changes, and navigation receipt and submission errors.
+- `provider_los_metadata`, `provider_stacked_image` and `provider_stack_admission`
+  exercise capability gating, malformed input, cancellation and callback drain.
+  The @ref md_docs_2qualification-evidence "qualification evidence" separates
+  SDK-free fixtures from physical observations and open qualification gates.
+
+The architecture overview's bootstrap limit of 16 Image buffers describes the
+default, not a fixed maximum: @ref gige_mel::ProviderSettings controls the
+per-channel limit. The Image descriptor checks do not prove an opaque owner's
+pointer provenance or inspect Mono12 samples for high-nibble validity. Adapters
+are responsible for both. These limits are not changes to provider behavior.
+*/

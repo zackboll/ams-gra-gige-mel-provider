@@ -2,8 +2,14 @@
 
 This is a **provider-defined** JSON schema, not a standard MEL JSON schema.
 It implements the pinned C2 `ConfigSetCommand` without changing upstream
-declarations or adding a public ABI. The supported profile remains staring
-Mono8, one band. No SDK or physical camera has been qualified.
+declarations or adding a public ABI. The selected backend and profile determine
+admission: the one-band image path supports Mono8 and explicitly admitted
+[unpacked Mono12](mono12-image-profile.md); ConfigSet does not select the format.
+Native SDK fixtures and limited physical Cognex Mono8 observations exist, but
+do not qualify production camera operation, MEL timing or other firmware. See
+[Qualification Evidence](qualification-evidence.md).
+
+See also: <!-- subpage --> [ModeCmd and commanded Standby](mode-command.md).
 
 ## Schema version 1
 
@@ -44,7 +50,7 @@ navigation source. Future incompatible schemas require a new version and an
 explicit implementation/profile update. Camera-specific ROI, increments,
 rate and exposure constraints remain in the common layout/backend validation;
 the parser does not impose the synthetic camera's 640×480 or 1–120 Hz limits
-on future adapters.
+on native adapters or separately selected profiles.
 
 `commandID` is echoed exactly, including zero and `UINT32_MAX`. `systemTime` is
 caller context, as for CameraCommand: no scheduled execution or clock epoch is

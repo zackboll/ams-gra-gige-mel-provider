@@ -1,5 +1,6 @@
 #include "profile_loader.hpp"
 #include "profiles/profile_module.hpp"
+#include "profiles/navigation_handler.hpp"
 
 #include <cstring>
 #include <dlfcn.h>
@@ -22,7 +23,7 @@ template <std::size_t N> bool text(const char (&value)[N]) {
     return value[0] && std::memchr(value, 0, N);
 }
 
-class State final : public p::ICameraProfileState {
+class State : public p::ICameraProfileState {
 public:
     State(std::shared_ptr<Module> module, std::shared_ptr<const p::ICameraProfileState> state)
         : module_(std::move(module)), state_(std::move(state)) {}
@@ -46,6 +47,30 @@ private:
     const std::shared_ptr<const p::ICameraProfileState> state_;
 };
 
+// Created only when the module's own state implements the optional handler, so
+// the host wrapper neither hides nor fabricates the capability. The handler is
+// a base subobject of the retained module state: it lives exactly as long as
+// State::state_, which is destroyed before the module pin. No extra ownership,
+// worker or borrowed feature service is retained.
+class NavigationState final : public State, public p::IProfileNavigationHandler {
+public:
+    NavigationState(std::shared_ptr<Module> module, std::shared_ptr<const p::ICameraProfileState> state,
+                    const p::IProfileNavigationHandler& handler)
+        : State(std::move(module), std::move(state)), handler_(handler) {}
+    b::Result<p::NavigationOperation> prepare_navigation(const b::NavigationReport& report) const override {
+        return handler_.prepare_navigation(report);
+    }
+private:
+    const p::IProfileNavigationHandler& handler_;
+};
+
+std::shared_ptr<const p::ICameraProfileState> wrap_state(const std::shared_ptr<Module>& module,
+                                                       std::shared_ptr<const p::ICameraProfileState> state) {
+    if (const auto* handler = p::navigation_handler(*state))
+        return std::make_shared<NavigationState>(module, std::move(state), *handler);
+    return std::make_shared<State>(module, std::move(state));
+}
+
 class Profile final : public p::ICameraProfile {
 public:
     Profile(std::shared_ptr<Module> module, const p::ICameraProfile* profile, const m::Descriptor* descriptor)
@@ -57,7 +82,7 @@ public:
             auto state = profile_->open(features);
             if (!state) return state.error();
             if (!state.value()) return invalid("profile open returned null state");
-            return std::shared_ptr<const p::ICameraProfileState>(std::make_shared<State>(module_, std::move(state).value()));
+            return wrap_state(module_, std::move(state).value());
         } catch (const std::exception& e) {
             return invalid(std::string("profile open exception: ") + e.what());
         } catch (...) {

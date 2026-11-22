@@ -1,0 +1,50 @@
+# Site paths, exact project inputs and version macros are set by scripts/build_docs.py.
+PROJECT_NAME           = "AMS-GRA GigE MEL Provider"
+PROJECT_BRIEF          = "Native C++20 infrared MEL provider"
+OUTPUT_LANGUAGE        = English
+TIMESTAMP              = NO
+MARKDOWN_SUPPORT       = YES
+MARKDOWN_ID_STYLE      = GITHUB
+TOC_INCLUDE_HEADINGS   = 3
+
+# Extraction here describes visibility in the reference, not an API promise.
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_ANON_NSPACES   = YES
+SHOW_FILES             = YES
+SHOW_NAMESPACES        = YES
+SOURCE_BROWSER         = YES
+REFERENCES_LINK_SOURCE = YES
+REFERENCES_RELATION    = YES
+REFERENCED_BY_RELATION = YES
+STRIP_CODE_COMMENTS    = NO
+
+# Parse project files without opening SDK, compiler or vendored include trees.
+SEARCH_INCLUDES        = NO
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = IR_MEL_EXPORT= "__attribute__(x)="
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+GENERATE_LATEX         = NO
+HAVE_DOT               = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+DOT_IMAGE_FORMAT       = svg
+DOT_NUM_THREADS        = 2
+
+# Collect diagnostics separately from the publishable HTML. Undocumented
+# internals are intentionally not treated as build failures.
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = NO

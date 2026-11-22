@@ -17,8 +17,9 @@ Read [backend authoring](docs/backend-authoring.md). Begin with the normal copy
 path and reuse the common provider. Add an optional SDK-specific CMake target,
 an explicit device selector, and a reproducible SDK/camera test description.
 Do not put SDK headers in the common backend contract or require commercial
-software for the synthetic CI jobs. A second real adapter should exercise the
-same provider without editing MEL channel code.
+software for the synthetic CI jobs. Aravis and Pleora already exercise the same
+common provider boundary; new adapters should preserve it without editing MEL
+channel code to accommodate vendor policy.
 
 Proprietary SDKs must remain entirely outside the working tree. Never publish
 SDK headers, source, libraries, samples, installers, EULAs, keys or SDK-dependent
@@ -27,6 +28,55 @@ Before committing, inspect staged files and run `python3 scripts/check_proprieta
 before pushing also run it with `--history origin/main`. CI repeats the Git-blob
 checks. See [Pleora integration](docs/pleora-integration.md) for licensing and
 qualification restrictions. A successful download does not grant vendor rights.
+
+## Documentation
+
+Follow [the local Doxygen build instructions](README.md#build-the-documentation)
+and open the generated landing page in `build/documentation/docs/html/`. Review
+the installed (`include/gige_mel/`), camera extension (internal, uninstalled), and
+core implementation (internal) sections. The target checks local links and API
+entry points and writes warnings to `build/documentation/docs/doxygen-warnings.log`.
+See the [warning baseline](docs/documentation-warnings.md) for known limitations.
+Do not commit generated pages or treat extracted internals as stable API.
+
+For changes that affect behavior or qualification, reconcile the
+[current capability status](docs/status.md) and its audited as-of revision,
+[MEL requirements traceability](docs/mel-traceability.md), and
+[Qualification Evidence](docs/qualification-evidence.md). Update any affected
+SDK/camera and profile/firmware compatibility notes, plus the remaining hardware
+qualification and deployment gates. Check the evidence index with
+`python3 -B scripts/check_qualification_evidence.py --self-test` (also run by the
+documentation target). Keep stable evidence IDs and the original execution
+outcomes; implementation of a later capability does not rewrite a historical
+failure or prove an operation was run. Add a separate record when new evidence
+changes the conclusion, including the exact tested source and environment.
+
+For a new camera profile, follow [Create a Camera Profile](docs/camera-profile-tutorial.md)
+and use its qualification checklist. Keep the [authoring contract](docs/camera-profile-authoring.md)
+for shared semantics; add model-specific requirements and evidence limits to
+the model guide. Use the [Camera Profile Examples](docs/camera-profile-examples.md)
+source browser as an internal reference. For backend changes, keep the
+[backend authoring contract](docs/backend-authoring.md) current and document
+ownership, cancellation, error and thread semantics on the relevant C++
+declarations. Put API comment improvements next to project declarations and
+maintainer notes next to the relevant implementation; do not edit pinned upstream
+headers. Use the [documentation index](docs/index.md) for new guide navigation.
+For a published guide, mark one whole-page Markdown link from its section with
+`<!-- subpage -->` immediately before the link. Staging makes that link a
+Doxygen child; leave links from other topics unmarked. The five homepage hubs
+are Guides roots because Doxygen excludes main-page children from that index.
+Keep long historical reports source-backed rather than adding them to the site.
+
+For consumer-facing changes, check [Integrating a MEL Consumer](docs/consumer-integration.md)
+against the provider contracts and build the [standalone example](examples/installed_consumer/)
+against a freshly installed prefix. Keep it independent of `src/` and repository
+test helpers; advanced behavior belongs in the focused contract tests and guides.
+
+The [documentation workflow](.github/workflows/documentation.yml) builds the exact
+PR head and validates without deploying. A successful `main` push build uploads
+the same-run Pages artifact, then separate jobs deploy and verify the live source
+commit and critical entry points. A repository administrator must set **Settings →
+Pages → Build and deployment → Source → GitHub Actions** before the first deploy.
 
 ## Dependency maintenance
 

@@ -1,0 +1,852 @@
+{
+  "schema": 1,
+  "family": "Alternate factory",
+  "operations": [
+    {
+      "id": "IRFactory.loadChannelTrack",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<TrackChannel> loadChannelTrack(int id, const ams::iface::irmel::Config& config)",
+        "line": 39,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadChannelC2",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<C2Channel> loadChannelC2(int id, const ams::iface::irmel::Config& config)",
+        "line": 45,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadChannelHealthStatus",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<HealthStatusChannel> loadChannelHealthStatus(int id, const ams::iface::irmel::Config& config)",
+        "line": 51,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadChannelImage",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<ImageChannel> loadChannelImage(int id, const ams::iface::irmel::Config& config)",
+        "line": 57,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadChannelInstrumentation",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<InstrumentationChannel> loadChannelInstrumentation(int id, const ams::iface::irmel::Config& config)",
+        "line": 63,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadChannelScheduling",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<SchedulingChannel> loadChannelScheduling(int id, const ams::iface::irmel::Config& config)",
+        "line": 69,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadChannelStackedImage",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<StackedImageChannel> loadChannelStackedImage(int id, const ams::iface::irmel::Config& config)",
+        "line": 75,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.loadRegistry",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static bool loadRegistry(std::string_view filePath)",
+        "line": 80,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRFactory.baseCreateChannel",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRFactory.h",
+        "declaring": "IRFactory",
+        "signature": "static std::shared_ptr<Channel> baseCreateChannel(int id, std::string_view fnSymbol, ams::iface::irmel::Config config)",
+        "line": 91,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class Required as-is; no member annotation or upstream out-of-line definitions; applicability of alternate route unresolved",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRRegistry.destroy",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRRegistry.h",
+        "declaring": "IRRegistry",
+        "signature": "~IRRegistry()",
+        "line": 30,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class says RF MEL implementations in IR tree; no method annotation; clarify intended IR scope",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRRegistry.IsInitialized",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRRegistry.h",
+        "declaring": "IRRegistry",
+        "signature": "[[nodiscard]] bool IsInitialized() const",
+        "line": 38,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class says RF MEL implementations in IR tree; no method annotation; clarify intended IR scope",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRRegistry.ReadRegistry",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRRegistry.h",
+        "declaring": "IRRegistry",
+        "signature": "void ReadRegistry(std::string_view filename)",
+        "line": 42,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class says RF MEL implementations in IR tree; no method annotation; clarify intended IR scope",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRRegistry.LoadLibrary",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRRegistry.h",
+        "declaring": "IRRegistry",
+        "signature": "bool LoadLibrary(int id)",
+        "line": 47,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class says RF MEL implementations in IR tree; no method annotation; clarify intended IR scope",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRRegistry.GetSymbol",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRRegistry.h",
+        "declaring": "IRRegistry",
+        "signature": "void* GetSymbol(int id, const char* name)",
+        "line": 53,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Class says RF MEL implementations in IR tree; no method annotation; clarify intended IR scope",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Unavailable; installed manager/control route is different",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream registry loader declaration; this repository neither supplies nor uses that path.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRInterfaceBase.destroy",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+        "declaring": "IRInterfaceBase",
+        "signature": "virtual ~IRInterfaceBase() = default",
+        "line": 15,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No query-interface route",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Declared upstream but not a base of the audited factory/channel graph; no provider query interface.",
+      "evidence": [],
+      "gap": "Verify target consumer needs QueryInterface before designing an optional interface.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRInterfaceBase.QueryInterface",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+        "declaring": "IRInterfaceBase",
+        "signature": "virtual IRInterfaceBase* QueryInterface(int id) = 0",
+        "line": 19,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No query-interface route",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Declared upstream but not a base of the audited factory/channel graph; no provider query interface.",
+      "evidence": [],
+      "gap": "Verify target consumer needs QueryInterface before designing an optional interface.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRInterfaceBase.QueryInterface-typed",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRInterfaceBase.hpp",
+        "declaring": "IRInterfaceBase",
+        "signature": "T* QueryInterface()",
+        "line": 24,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "No capability predicate on declaration",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No query-interface route",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Declared upstream but not a base of the audited factory/channel graph; no provider query interface.",
+      "evidence": [],
+      "gap": "Verify target consumer needs QueryInterface before designing an optional interface.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnTrackChannel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnTrackChannel = std::add_pointer<std::shared_ptr<TrackChannel>(Config&)>::type",
+        "line": 29,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createTrackChannel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnC2Channel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnC2Channel = std::add_pointer<std::shared_ptr<C2Channel>(Config&)>::type",
+        "line": 34,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createC2Channel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnHealthStatusChannel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnHealthStatusChannel = std::add_pointer<std::shared_ptr<HealthStatusChannel>(Config&)>::type",
+        "line": 39,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createHealthStatusChannel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnImageChannel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnImageChannel = std::add_pointer<std::shared_ptr<ImageChannel>(Config&)>::type",
+        "line": 44,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createImageChannel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnInstrumentationChannel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnInstrumentationChannel = std::add_pointer<std::shared_ptr<InstrumentationChannel>(Config&)>::type",
+        "line": 49,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createInstrumentationChannel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnSchedulingChannel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnSchedulingChannel = std::add_pointer<std::shared_ptr<SchedulingChannel>(Config&)>::type",
+        "line": 54,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createSchedulingChannel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "IRCreateFunctions.fnStackedImageChannel",
+      "family": "Alternate factory",
+      "kind": "type seam",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/library/factory/IRCreateFunctions.h",
+        "declaring": "IRCreateFunctions",
+        "signature": "using fnStackedImageChannel = std::add_pointer<std::shared_ptr<StackedImageChannel>(Config&)>::type",
+        "line": 59,
+        "annotations": [
+          "@Required"
+        ]
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Required typedef as-is; concrete named export/loader obligation unverified at pin",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "No direct-channel factory exports",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream function-pointer type exists; alternate factory route absent.",
+      "evidence": [],
+      "gap": "Confirm the target Skill requires the alternate path and obtain authoritative loader implementation/symbol contract; add and independently test registry loading if selected. The typedef is not a declaration of createStackedImageChannel; no corresponding provider export exists.",
+      "responsibility": "external system",
+      "gap_groups": [
+        "interface-decision"
+      ]
+    },
+    {
+      "id": "LibraryLoader.destroy",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/utils/LibraryLoader.hpp",
+        "declaring": "LibraryLoader",
+        "signature": "~LibraryLoader()",
+        "line": 38,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Unannotated upstream service utility (no implementation at pin); not a provider interface contract",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Not installed by provider; separate service utility",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream service-side helper; provider exports native factory ABI but does not ship this utility.",
+      "evidence": [],
+      "gap": "Use native dlopen/dlsym or separately obtain and test the upstream service loader; do not count it as missing provider factory behavior.",
+      "responsibility": "external system",
+      "gap_groups": []
+    },
+    {
+      "id": "LibraryLoader.parseAndLoadLibrary-default",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/utils/LibraryLoader.hpp",
+        "declaring": "LibraryLoader",
+        "signature": "void parseAndLoadLibrary(int argc, const std::vector<char *> &argv)",
+        "line": 64,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Unannotated upstream service utility (no implementation at pin); not a provider interface contract",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Not installed by provider; separate service utility",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream service-side helper; provider exports native factory ABI but does not ship this utility.",
+      "evidence": [],
+      "gap": "Use native dlopen/dlsym or separately obtain and test the upstream service loader; do not count it as missing provider factory behavior.",
+      "responsibility": "external system",
+      "gap_groups": []
+    },
+    {
+      "id": "LibraryLoader.parseAndLoadLibrary-named-option",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/utils/LibraryLoader.hpp",
+        "declaring": "LibraryLoader",
+        "signature": "void parseAndLoadLibrary(int argc, const std::vector<char *> &argv, const std::string &optionName)",
+        "line": 70,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Unannotated upstream service utility (no implementation at pin); not a provider interface contract",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Not installed by provider; separate service utility",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream service-side helper; provider exports native factory ABI but does not ship this utility.",
+      "evidence": [],
+      "gap": "Use native dlopen/dlsym or separately obtain and test the upstream service loader; do not count it as missing provider factory behavior.",
+      "responsibility": "external system",
+      "gap_groups": []
+    },
+    {
+      "id": "LibraryLoader.loadLibrary",
+      "family": "Alternate factory",
+      "kind": "operation",
+      "upstream": {
+        "component": "ir-mel",
+        "path": "include/irmel/utils/LibraryLoader.hpp",
+        "declaring": "LibraryLoader",
+        "signature": "void loadLibrary(const std::string &so_filename)",
+        "line": 74,
+        "annotations": []
+      },
+      "related_upstream": [],
+      "obligation": "unresolved",
+      "applicability": {
+        "condition": "Unannotated upstream service utility (no implementation at pin); not a provider interface contract",
+        "current": "unresolved"
+      },
+      "status": "unavailable",
+      "availability": "Not installed by provider; separate service utility",
+      "metadata": null,
+      "implementation": [],
+      "behavior": "Upstream service-side helper; provider exports native factory ABI but does not ship this utility.",
+      "evidence": [],
+      "gap": "Use native dlopen/dlsym or separately obtain and test the upstream service loader; do not count it as missing provider factory behavior.",
+      "responsibility": "external system",
+      "gap_groups": []
+    }
+  ]
+}

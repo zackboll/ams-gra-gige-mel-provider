@@ -1,0 +1,124 @@
+/** @page api_extensions Camera extension interfaces (internal, uninstalled)
+
+These are **internal, uninstalled extension interfaces**. They are for authors
+working with the provider source tree, not for installed MEL consumers. Follow
+@ref md_docs_2camera-profile-tutorial "Create a Camera Profile" from admission
+to qualification, then compare the @ref md_docs_2camera-profile-examples
+"Camera Profile Examples" (reference implementations with source browsers).
+See the @ref md_docs_2camera-profile-authoring "camera-profile authoring contract" and
+@ref md_docs_2backend-authoring "backend authoring guide" for ownership and
+qualification requirements.
+
+@section extension_profile Profile lifecycle and feature services
+
+Register factories and select a binding without camera I/O. On explicit device
+open, the adapter invokes @ref gige_mel::backend::profiles::ICameraProfile::open
+on its chosen @ref gige_mel::backend::profiles::ICameraProfile. The returned
+@ref gige_mel::backend::profiles::ICameraProfileState owns admission facts and
+capabilities. It applies and reads back configuration, checks preflight before
+acquisition, and admits frames using the frozen run settings. State can retire
+independently of its parent profile; the backend still owns native acquisition
+and leases, and the provider owns MEL publication.
+
+Use @ref gige_mel::backend::profiles::ICameraProfileState::configuration for
+fresh readback, @ref gige_mel::backend::profiles::ICameraProfileState::apply for
+ordered writes, and @ref gige_mel::backend::profiles::ICameraProfileState::preflight
+to check whether the device is ready for a run. See the shared
+@ref gige_mel::backend::profiles::mono_free_running::apply_configuration for a
+concrete implementation of partial failure and no rollback.
+@ref gige_mel::backend::device_features::IDeviceFeatures is borrowed and
+serialized by the adapter; policy must not retain it or SDK handles. Compare
+@ref gige_mel::backend::device_features::IDeviceFeatures::read_integer_feature
+with @ref gige_mel::backend::device_features::IDeviceFeatures::write_integer
+because native constraints can change between planning and each setter.
+
+For acquisition, @ref gige_mel::backend::profiles::plan_pool checks capacity
+separately from @ref gige_mel::backend::profiles::ICameraProfileState::validate_frame,
+which admits @ref gige_mel::backend::profiles::NativeFrameFacts with a checked
+source span. Neither a pool size nor a retained owner proves arbitrary pointer
+provenance. See @ref src/profiles/frame_policy.hpp "frame facts and layout source".
+
+@section extension_modules Module loading and selection
+
+@ref gige_mel::selection::BackendCatalog owns the factories. Use
+@ref gige_mel::selection::BackendCatalog::register_backend(std::string,std::vector<std::string>,gige_mel::selection::BackendCatalog::ProfileBackendConstructor) "gige_mel::selection::BackendCatalog::register_backend"
+to declare compatibility and @ref gige_mel::selection::BackendCatalog::create
+to construct the exact pair. @ref gige_mel::selection::select_session binds a
+specific device ID without inspecting it. None of these operations certify a
+camera model or grant control authority.
+
+Use @ref gige_mel::selection::load_profile_module only for a trusted library at
+an explicit path; validation is not a sandbox. @ref gige_mel::backend::profiles::module::Descriptor
+and @ref gige_mel::selection::LoadedProfile describe validation, creation and
+lifetime pins. Discovery uses C linkage, but virtual objects, STL types and
+shared ownership cross a matched-C++ boundary. Versions and build identity do
+not prove toolchain/ABI parity or hardware compatibility. The existing identity
+hashes header bytes, so even comment-only edits in that closure require a host
+and module rebuild from matching inputs. See
+@ref md_docs_2runtime-selection "runtime selection and explicit module loading".
+
+@section extension_registers Register and transport boundaries
+
+An explicitly opened adapter may expose @ref gige_mel::backend::device_registers::IRegisterDevice.
+@ref gige_mel::backend::device_registers::IRegisterDevice::with_registers lends
+an @ref gige_mel::backend::device_registers::IDeviceRegisters under the device
+operation lock. @ref gige_mel::backend::device_registers::IDeviceRegisters::write_memory
+can change device state outside GenApi policy. This 4096-byte native SDK
+service is not part of profile module v1, does not bound in-flight SDK calls,
+and does not guarantee the number of SDK or wire transactions.
+
+The separate 508-byte @ref gige_mel::controlled_gvcp::IControlledRegisters
+experiment's @ref gige_mel::controlled_gvcp::Client uses
+@ref gige_mel::controlled_gvcp::Client::create for an explicit loopback endpoint.
+The fixture-only @ref gige_mel::controlled_gvcp::ControlOwner
+adds explicit @ref gige_mel::controlled_gvcp::ControlOwner::acquire and
+@ref gige_mel::controlled_gvcp::ControlOwner::shutdown. Neither is a production
+acquisition transport; SDK coexistence and cross-session stale ACK fencing are
+unqualified. See @ref md_docs_2device-register-transport "device register/memory access" and
+@ref md_docs_2backend-transport-experiments "transport experiments and original validation records".
+
+@subsection extension_navigation Optional profile navigation handler
+
+@verbatim
+MEL ImageChannel::send(NavigationReport)
+    ↓
+Common MEL validation (unchanged)
+    ↓
+Optional INavigationSink (only when the profile provides a handler)
+    ↓
+ProfileNavigationBridge
+    ↓
+IProfileNavigationHandler::prepare_navigation → owned NavigationOperation
+    ↓
+Backend-owned INavigationOperationPort (SDK-free recording fixture only)
+    ↓
+Future: qualified transport, detector-defined staging and acceptance
+@endverbatim
+
+A profile state may also implement the optional
+@ref gige_mel::backend::profiles::IProfileNavigationHandler. Discover it with
+@ref gige_mel::backend::profiles::navigation_handler; absence means no navigation
+processing. Base profile vtables and the module descriptor are unchanged.
+@ref gige_mel::backend::profiles::IProfileNavigationHandler::prepare_navigation
+applies sensor policy without device I/O and returns an owned
+@ref gige_mel::backend::profiles::NavigationOperation value with a
+profile-defined format, the unchanged complete report and profile-defined bytes.
+
+A backend builds @ref gige_mel::backend::profiles::ProfileNavigationBridge with
+@ref gige_mel::backend::profiles::ProfileNavigationBridge::create over its own
+@ref gige_mel::backend::profiles::INavigationOperationPort, and delegates
+@ref gige_mel::backend::INavigationSink to
+@ref gige_mel::backend::profiles::ProfileNavigationBridge::submit.
+@ref gige_mel::backend::profiles::ProfileNavigationBridge::shutdown drains before
+retirement. Preparation errors are definite; uncertain or control-lost outcomes
+map to `timeout` and are never retried. Module wrappers preserve the capability,
+and the header is part of the build identity.
+
+Only an SDK-free recording port exercises this path. No production adapter,
+authority grant, register write, GVCP transfer or detector protocol is connected.
+Transport ACKs, detector processing, navigation-to-image correlation and transfer
+alignment remain unqualified; do not put vendor addresses into `src/provider.cpp`.
+See @ref md_docs_2camera-profile-authoring "camera-profile authoring",
+@ref md_docs_2navigation-backend-forwarding "navigation forwarding" and
+@ref md_docs_2qualification-evidence "qualification evidence".
+*/
