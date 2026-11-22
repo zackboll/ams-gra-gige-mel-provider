@@ -5,6 +5,60 @@ matrix. Each section keeps its original execution scope and conclusions. Start
 at [Qualification Evidence](qualification-evidence.md) to locate the experiments
 or [Current Status](status.md) for the audited merged implementation.
 
+## Optional profile Image FOV (2026-11-22)
+
+The pre-edit baseline was freshly fetched `69fbf8a37bd0a2f93cdcf82c001574ff31f67ee8`
+(tree `5f000a259ffc41c11753fabab394527fa1ef69cb`), including merged PR #65.
+All 16 focused tests passed: provider and backend portability, profile and C2
+policy, all ten navigation cases, module descriptor/lifetime and identity closure.
+PR #64 merged separately during development. The delivery branch was advanced
+to `23c58b063f70d899977e0b82eb391528472379b5` (tree
+`e0398132e8a3aaeda158de5cf3e1df3162c9f5d3`) before the implementation commit;
+the FOV diff neither reorganizes nor adds forwarding to production adapters.
+
+Tested implementation and reference source:
+`985359d5e16db3bfb9d7588a8f0219034f49b85e` (tree
+`c2d215c2c2ebf12cdddb66e987d11e3a5ed5bb2d`). This follow-up records evidence
+only; its commit and tree are recorded separately in the PR. Results below were
+executed locally on Debian 13 x86-64 (Linux 6.12.117, GCC 14.2.0 and Clang
+19.1.7), without vendor SDKs or cameras. Hosted checks are separate.
+
+| Local lane | Result |
+| --- | --- |
+| GCC Debug `dev` | 58/58, including public Image, C2 policy, backend portability, both Stack tests, profile/navigation contracts, module descriptor and identity rejection. |
+| Clang Debug, affected targets and independent modules | 18/18: three FOV cases, ten navigation cases, C2 policy, module descriptor/lifetime, identity closure, Stack and backend portability. |
+| GCC ASan/UBSan, leak detection and halt-on-error | 15/15: three FOV cases, ten navigation cases, module lifetime/unload and Stack. |
+| GCC TSan, halt-on-error | 16/16: three FOV cases, ten navigation cases, provider lifecycle, backend portability and Stack. |
+| Standalone GCC and Clang Debug modules | FOV-only and FOV-plus-navigation variants built with `-z defs` and the export map. Their only defined dynamic export is `gige_mel_camera_profile_module_v1`; dependencies are libstdc++, libm, libgcc_s and libc. Standalone identity matches the corresponding host build. |
+| Installed and source boundaries | Both compilers built a standalone translation unit including the installed FOV header; its project include closure contains no MEL or SDK headers. The companion and bridge remain uninstalled. Pinned files, base interfaces, factory source and descriptor are unchanged; the provider still exports `getAPI_Manager`, `getControl` and `getBuffer`. |
+| Reference and repository checks | Doxygen 1.14.0 / Graphviz 2.42.4 passed installed API, internal provider signatures, guide and publication checks with only the known GenTL `with_registers` warning. Vendor and JSON integrity, proprietary content/history, whitespace, traceability and qualification index passed. |
+
+`profile_image_fov_image_delivery` observes normal `onImage` callbacks on
+the same session pitches for the default and independently loaded derived
+profile. At 80×60 and offset (4,6), the default is `(0.16, 0.18)` rad and the
+virtual model is approximately `(0.273633, 0.330963)` rad. At the same size
+and offset (152,98) the model gives approximately `(0.556599, 0.611758)` rad.
+C2 changes geometry successfully and separately exercises a rejected request
+whose valid native readback differs. The test verifies one calculation per
+run, repeated enable, saved headers and held bytes through disable, and release
+before restart. For a negative control, only the publication assignments were
+temporarily changed back to the old linear products. The unchanged test failed
+on the explicit ROI header (`0.160000, 0.180000` vs `0.273633, 0.330963`).
+The control was removed, not committed, and the six focused cases passed again.
+
+`profile_image_fov_enable_failures` checks explicit errors, standard and
+non-standard exceptions, invalid values for each angle, default overflow and
+recovery. It checks provider-facing stream creation and native start counters,
+listener counts, host bytes and buffer state after failure. The Stack contract
+delivers a recorded product on a device that refuses Image FOV. The retained
+state/alias test exercises all four combinations of optional capabilities;
+it observes ELF finalization and reads saved scalar angles after actual unload.
+
+The positive model is **virtual**. Production SDK adapters and synthetic do not
+forward it; Cognex gained no optics claim. Production timestamps, LOS, navigation
+association and calibration operations are unchanged. No physical optics,
+camera, SDK transport or MEL conformance qualification was performed here.
+
 ## Reusable monochrome defaults and MEL camera policy (2026-11-22)
 
 Base `199787d2f301986abb455dc79fe39ac70c46b297` (tree
