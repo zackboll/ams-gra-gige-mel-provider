@@ -102,7 +102,9 @@ public:
         return reject_unsupported<ir::CameraProtectCmdResp>(command,
             "CameraProtectCmd is unsupported: camera protection is not available in the experimental image-stream profile");
     }
-    /// Reject erase/zeroize without mutating provider or device state.
+    /// Reject erase/zeroize without performing either operation or changing
+    /// device/configuration state. Normal status dispatch and callback-failure
+    /// diagnostics still apply.
     mel::RequestFor<ir::EraseCommandType> send(ir::EraseCommand command) override {
         return reject_unsupported<ir::EraseCommandType>(command,
             "EraseCommand is unsupported: erase and zeroize are not available in the experimental image-stream profile");
