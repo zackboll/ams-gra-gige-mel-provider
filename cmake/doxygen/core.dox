@@ -6,6 +6,58 @@ them. Being indexed does not make a symbol public or installed. Each file page
 links to the line-numbered source, including implementations not compiled into
 the default SDK-free build.
 
+@section provider_contracts Common provider contracts
+
+These `gige_mel::provider_detail` classes and hooks describe the current private
+implementation, not a camera-provider subclass API. The @ref api_installed page
+remains the consumer/embedding/backend contract; @ref api_extensions describes
+the separate profile/backend composition interfaces.
+
+- **Session state and Control:** @ref gige_mel::provider_detail::Runtime "Runtime",
+  @ref gige_mel::provider_detail::ControlImpl "ControlImpl",
+  @ref gige_mel::provider_detail::ControlImpl::init(const std::string&) "ControlImpl::init",
+  @ref gige_mel::provider_detail::ControlImpl::getCapabilities() "ControlImpl::getCapabilities",
+  @ref gige_mel::provider_detail::ControlImpl::attachChannel(const ir::Config&) "ControlImpl::attachChannel",
+  @ref gige_mel::provider_detail::ControlImpl::detachChannel(std::shared_ptr<ir::Channel>) "ControlImpl::detachChannel".
+- **Shared channels and callbacks:** @ref gige_mel::provider_detail::ChannelCore "ChannelCore",
+  @ref gige_mel::provider_detail::ChannelCore::enable() "ChannelCore::enable",
+  @ref gige_mel::provider_detail::ChannelCore::disable() "ChannelCore::disable",
+  @ref gige_mel::provider_detail::ChannelCore::detach_locked() "ChannelCore::detach_locked",
+  @ref gige_mel::provider_detail::ChannelCore::configure_locked "ChannelCore::configure_locked",
+  @ref gige_mel::provider_detail::ChannelCore::registerMetadataCallback(std::function<void(ir::Channel&,const ir::ChannelCommsTestRep*const)>) "ChannelCore::registerMetadataCallback(ChannelCommsTestRep)",
+  @ref gige_mel::provider_detail::ChannelCore::register_callback "ChannelCore::register_callback",
+  @ref gige_mel::provider_detail::ChannelCore::admit_callback "ChannelCore::admit_callback",
+  @ref gige_mel::provider_detail::ChannelCore::invoke "ChannelCore::invoke",
+  @ref gige_mel::provider_detail::CallbackGuard "CallbackGuard",
+  @ref gige_mel::provider_detail::NavigationSubmissionGuard "NavigationSubmissionGuard".
+- **Buffers and frame delivery:** @ref gige_mel::provider_detail::HostBuffer "HostBuffer",
+  @ref gige_mel::provider_detail::ChannelCore::registerBuffer(std::shared_ptr<ir::Buffer>) "ChannelCore::registerBuffer",
+  @ref gige_mel::provider_detail::ChannelCore::unregisterBuffer(std::shared_ptr<ir::Buffer>) "ChannelCore::unregisterBuffer",
+  @ref gige_mel::provider_detail::HostBuffer::unbind() "HostBuffer::unbind",
+  @ref gige_mel::provider_detail::HostBuffer::cancel_fill() "HostBuffer::cancel_fill",
+  @ref gige_mel::provider_detail::HostBuffer::release() "HostBuffer::release",
+  @ref gige_mel::provider_detail::StreamState "StreamState",
+  @ref gige_mel::provider_detail::ChannelCore::run "ChannelCore::run",
+  @ref gige_mel::provider_detail::ChannelCore::run_stacks "ChannelCore::run_stacks".
+- **Concrete channel behavior:** @ref gige_mel::provider_detail::ImageChannelImpl "ImageChannelImpl"
+  (@ref gige_mel::provider_detail::ImageChannelImpl::send(mel::NavigationReport) "ImageChannelImpl::send(NavigationReport)"),
+  @ref gige_mel::provider_detail::StackedImageChannelImpl "StackedImageChannelImpl",
+  @ref gige_mel::provider_detail::C2ChannelImpl "C2ChannelImpl"
+  (@ref gige_mel::provider_detail::C2ChannelImpl::send(ir::ModeCmd) "C2ChannelImpl::send(ModeCmd)"),
+  @ref gige_mel::provider_detail::HealthChannelImpl "HealthChannelImpl"
+  (@ref gige_mel::provider_detail::HealthChannelImpl::registerMetadataCallback(std::function<void(ir::Channel&,const ir::SubsystemStatusResp*const)>) "HealthChannelImpl::registerMetadataCallback(SubsystemStatusResp)"),
+  @ref gige_mel::provider_detail::SchedulingChannelImpl "SchedulingChannelImpl"
+  (@ref gige_mel::provider_detail::SchedulingChannelImpl::exec(ir::IRSTStareTask) "SchedulingChannelImpl::exec(IRSTStareTask)",
+  @ref gige_mel::provider_detail::SchedulingChannelImpl::exec(ir::AbortTask) "SchedulingChannelImpl::exec(AbortTask)").
+- **Supporting helpers:** @ref gige_mel::provider_detail::ConfigurationOutcome "ConfigurationOutcome",
+  @ref gige_mel::provider_detail::HealthSnapshot "HealthSnapshot",
+  @ref gige_mel::provider_detail::health_snapshot "health_snapshot",
+  @ref gige_mel::provider_detail::task_deadline "task_deadline",
+  @ref gige_mel::provider_detail::backend_navigation "backend_navigation",
+  @ref gige_mel::provider_detail::ProviderSoftware "ProviderSoftware".
+
+@section core_source_map Source-file map
+
 Area | Start reading
 ---- | -------------
 Manager sessions and project diagnostics | @ref src/provider.cpp "provider.cpp" and @ref src/provider_internal.hpp "provider_internal.hpp"

@@ -9,17 +9,27 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
+/** @brief Limited source-backed virtual stare admission, not physical scheduling.
+ * Advertised only for a validated task source with bounded history, cancellation
+ * and atomic replacement. C2 Operate/TaskSched establishes the Runtime session;
+ * Scheduling enable does not. One current task, no queue or metadata worker.
+ * Track lists, scan/track execution and execution/schedule/event/performance
+ * metadata are unimplemented. No hardware motion, timing or completion is implied.
+ */
 class SchedulingChannelImpl final : public ChannelCore, public ir::SchedulingChannel {
 public:
     using ChannelCore::ChannelCore;
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
+    /// Return Unsupported without storing a track list or dispatching metadata.
     mel::RequestFor<ir::TrackListResponse> send(ir::PrioritizedTrackListCmd) override {
         return failed<ir::TrackListResponse>(mel::ErrorCode::Unsupported, "track lists are unsupported");
     }
+    /// Always reject scan execution with an Unsupported error future.
     mel::RequestFor<ir::Return> exec(ir::IRSTScanTask) override {
         return failed<ir::Return>(mel::ErrorCode::Unsupported, "scanning is unsupported");
     }
+    /// Always reject track execution with an Unsupported error future.
     mel::RequestFor<ir::Return> exec(ir::IRSTTrackTask) override {
         return failed<ir::Return>(mel::ErrorCode::Unsupported, "tracking is unsupported");
     }
@@ -28,9 +38,25 @@ public:
     GIGE_UNSUPPORTED_CALLBACK(ir::UpdateTrackListResponse)
     GIGE_UNSUPPORTED_CALLBACK(ir::TaskEvents)
     GIGE_UNSUPPORTED_CALLBACK(ir::ScanPerformanceReport)
+    /// Install one admission-acknowledgement slot; no replay or task completion reports.
     ir::Return registerMetadataCallback(Callback<ir::ExecuteTaskAck> callback) override {
         return register_callback(ack_callback_, std::move(callback));
     }
+    /** @brief Admit a virtual stare and atomically replace current work at the source.
+     * @param command Immediate only, system time 0 ns, zero priority/precedence,
+     * qualified center of zero azimuth/elevation radians (both references
+     * Aircraft), and a duration in nanoseconds within the declared inclusive limits.
+     * @return Ready Success on source admission, not completion; otherwise an
+     * error future with no acknowledgement. Duplicate request IDs (including
+     * terminal tasks) and source-declared capacity exhaustion reject without
+     * admission; only successful admissions consume history (at most 256 per
+     * session). Failed source admission must leave the current task unchanged.
+     * New sessions reset history.
+     * @note Requires a live TaskSched session and non-callback caller. Pins
+     * Control/channel and admits under operations using a cooperative deadline.
+     * Any registered ack is reserved before unlocking and delivered inline with
+     * command/request IDs. It may delay detach; disable does not drain all sync acks.
+     */
     mel::RequestFor<ir::Return> exec(ir::IRSTStareTask command) override {
         if (in_provider_callback())
             return failed<ir::Return>(mel::ErrorCode::InvalidState, "submit tasks outside provider callbacks");
@@ -77,6 +103,12 @@ public:
         invoke(callback, ack, nullptr, true);
         return result;
     }
+    /// Cancel current work under operations with a cooperative deadline; no
+    /// targeted ID (the pinned AbortTask exposes none), ack, session retirement
+    /// or history reset. Requires a live session outside callbacks; return ready
+    /// Success only once cancellation is established by the source. An idle or
+    /// terminal task is not cancellable; a failed cancellation leaves session
+    /// ownership for retry, Standby or mandatory retirement.
     mel::RequestFor<ir::Return> exec(ir::AbortTask) override {
         // Pinned AbortTask has no accessor: never inspect or claim targeted IDs.
         if (in_provider_callback())
@@ -96,6 +128,7 @@ public:
         return result;
     }
 protected:
+    /// Force retirement on disable or detach, without waiting for acknowledgements here.
     void stop_auxiliary_locked() override { retire_tasking(*runtime_); }
 private:
     Callback<ir::ExecuteTaskAck> ack_callback_;

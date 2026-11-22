@@ -2,6 +2,7 @@
 """Validate a Doxygen site or verify the critical entry points on GitHub Pages."""
 
 import argparse
+from html import unescape
 from html.parser import HTMLParser
 import json
 from pathlib import Path
@@ -97,6 +98,47 @@ INSTALLED_METHODS = (
     "make_api_manager", "provider_statistics", "open", "apply", "receive", "request_stop",
     "submit_navigation", "open_line_of_sight", "open_stacked_images",
 )
+CORE = "api_core.html"
+PROVIDER_SCOPE = "gige_mel::provider_detail"
+PROVIDER_TYPES = (
+    "Runtime", "ControlImpl", "ChannelCore", "CallbackGuard", "NavigationSubmissionGuard",
+    "HostBuffer", "StreamState", "ImageChannelImpl", "StackedImageChannelImpl",
+    "C2ChannelImpl", "HealthChannelImpl", "SchedulingChannelImpl", "ConfigurationOutcome",
+    "HealthSnapshot", "ProviderSoftware",
+)
+# Core link labels select entries, but the generated owner, name and full
+# parameter types (including nested template arguments) verify the destination.
+PROVIDER_MEMBERS = {
+    "ControlImpl::init": ("const std::string&",),
+    "ControlImpl::getCapabilities": (),
+    "ControlImpl::attachChannel": ("const ir::Config&",),
+    "ControlImpl::detachChannel": ("std::shared_ptr<ir::Channel>",),
+    "ChannelCore::enable": (),
+    "ChannelCore::disable": (),
+    "ChannelCore::detach_locked": (),
+    "ChannelCore::configure_locked": ("const backend::CameraConfiguration&", "bool"),
+    "ChannelCore::registerMetadataCallback(ChannelCommsTestRep)": (
+        "std::function<void(ir::Channel&,const ir::ChannelCommsTestRep*const)>",),
+    "ChannelCore::register_callback": ("Callback<T>&", "Callback<T>"),
+    "ChannelCore::admit_callback": ("const Callback<T>&",),
+    "ChannelCore::invoke": ("const Callback<T>&", "const T&", "const std::atomic<bool>*", "bool"),
+    "ChannelCore::registerBuffer": ("std::shared_ptr<ir::Buffer>",),
+    "ChannelCore::unregisterBuffer": ("std::shared_ptr<ir::Buffer>",),
+    "HostBuffer::unbind": (),
+    "HostBuffer::cancel_fill": (),
+    "HostBuffer::release": (),
+    "ChannelCore::run": ("const std::shared_ptr<StreamState>&", "const std::weak_ptr<ChannelCore>&"),
+    "ChannelCore::run_stacks": ("const std::shared_ptr<StreamState>&", "const std::weak_ptr<ChannelCore>&"),
+    "ImageChannelImpl::send(NavigationReport)": ("mel::NavigationReport",),
+    "C2ChannelImpl::send(ModeCmd)": ("ir::ModeCmd",),
+    "HealthChannelImpl::registerMetadataCallback(SubsystemStatusResp)": (
+        "std::function<void(ir::Channel&,const ir::SubsystemStatusResp*const)>",),
+    "SchedulingChannelImpl::exec(IRSTStareTask)": ("ir::IRSTStareTask",),
+    "SchedulingChannelImpl::exec(AbortTask)": ("ir::AbortTask",),
+    "health_snapshot": ("Runtime&", "bool", "bool", "bool"),
+    "task_deadline": (),
+    "backend_navigation": ("const mel::NavigationReport&",),
+}
 SEARCH = ("search/search.js", "search/searchdata.js")
 
 
@@ -537,6 +579,113 @@ def check_internal_extensions(root, pages, search_index):
           "section search and 2 negative controls (missing description, wrong member anchor)")
 
 
+def check_provider_prose(label, detail):
+    # Doxygen can emit source links, inheritance notices and a line definition
+    # for declarations without an authored paragraph. None is a contract.
+    prose = re.match(r'\s*<p>(.*?)</p>', detail, re.S)
+    text = unescape(re.sub(r"<[^>]+>", "", prose[1])).strip() if prose else ""
+    if not text or text.startswith(("Definition at line", "Implemented in ", "Reimplemented ")):
+        raise ValueError(f"{CORE}: no authored provider description for {label}")
+
+
+def check_provider_signature(label, detail):
+    signature, _, prose = detail.partition('<div class="memdoc">')
+    name = re.search(r'<td class="memname">(.*?)</td>', signature, re.S)
+    expected = f"{PROVIDER_SCOPE}::{label.split('(', 1)[0]}"
+    params = re.findall(r'<td class="paramtype">(.*?)</td>', signature, re.S)
+    types = tuple(re.sub(r"\s+", "", unescape(re.sub(r"<[^>]+>", "", param))) for param in params)
+    if (not name or re.sub(r"<[^>]+>", "", name[1]).split()[-1:] != [expected]
+            or types != tuple(re.sub(r"\s+", "", param) for param in PROVIDER_MEMBERS[label])):
+        raise ValueError(f"{CORE}: wrong provider declaration for {label}")
+    check_provider_prose(label, prose)
+
+
+def check_provider_contracts(root, pages, search_index):
+    core = pages[CORE]
+    wanted = set(PROVIDER_TYPES) | PROVIDER_MEMBERS.keys()
+    links = {}
+    for href, label in core.body_links:
+        if label in wanted:
+            if label in links:
+                raise ValueError(f"{CORE}: ambiguous provider link for {label}")
+            links[label] = local_target(CORE, href)
+
+    def indexed_targets(index_pages):
+        return {local_target(page, href) for page in index_pages for href, _ in pages[page].body_links}
+
+    type_index = indexed_targets(("annotated.html",))
+    namespace_index = indexed_targets(p for p in pages if re.fullmatch(r"namespacemembers_func(?:_\w+)?\.html", p))
+
+    def check_link(label, link, edited_text=None):
+        target, anchor = link or ("", "")
+        is_member = label in PROVIDER_MEMBERS
+        owner = label.rpartition("::")[0] if is_member else label
+        scope = f"{PROVIDER_SCOPE}::{owner}" if owner else PROVIDER_SCOPE
+        if (target not in pages or bool(anchor) != is_member
+                or "::".join(value for _, value in pages[target].breadcrumb) != scope):
+            raise ValueError(f"{CORE}: wrong provider owner or link for {label}")
+        text = edited_text if edited_text is not None else (root / target).read_text(encoding="utf-8")
+        if is_member:
+            check_provider_signature(label, member_detail(text, anchor))
+            index = indexed_targets((target.removesuffix(".html") + "-members.html",)) if owner else namespace_index
+        else:
+            detail = re.search(r'id="header-details"[^>]*>[^<]+</h2>\s*<div class="textblock">', text)
+            check_provider_prose(label, text[detail.end():] if detail else "")
+            index = type_index
+        if link not in index:
+            raise ValueError(f"{CORE}: provider declaration missing from index: {label}")
+        url = f"../{target}" + (f"#{anchor}" if anchor else "")
+        if f"'{url}'" not in search_index:
+            raise ValueError(f"{CORE}: provider declaration missing from search: {label}")
+
+    for label in (*PROVIDER_TYPES, *PROVIDER_MEMBERS):
+        check_link(label, links.get(label))
+
+    for audience in ("api_installed.html", EXTENSIONS):
+        for target, anchor in indexed_targets((audience,)) - {None}:
+            if target not in pages:
+                continue
+            path = tuple(value for _, value in pages[target].breadcrumb)
+            # The extension prose already links to provider.cpp as context;
+            # forbid private declarations, not that existing file cross-link.
+            if (path[:2] in {("gige_mel", "provider_detail"), ("gige_mel", "test_seams"), ("src", "provider")}
+                    or path in {("src", "provider_internal.hpp"), ("src", "provider_test_seams.hpp")}
+                    or (path == ("src", "provider.cpp") and anchor)
+                    or (path == ("gige_mel",) and anchor and re.search(
+                        r"gige_mel::(?:control_for|buffer_for)\s*</td>",
+                        member_detail((root / target).read_text(encoding="utf-8"), anchor)))):
+                raise ValueError(f"{audience}: lists a private provider declaration: {target}#{anchor}")
+
+    # Generate defects from real output. Preserve the declaration, anchor and
+    # Doxygen's automatic line definition when removing authored prose.
+    def without_prose(label, start_marker):
+        target, anchor = links[label]
+        text = (root / target).read_text(encoding="utf-8")
+        start = text.index(start_marker, text.index(f'id="{anchor or "header-details"}"')) + len(start_marker)
+        end = text.index('<p class="definition">', start)
+        return text[:start] + text[end:]
+
+    controls = (
+        ("missing member prose", "ChannelCore::disable", links["ChannelCore::disable"],
+         without_prose("ChannelCore::disable", '<div class="memdoc">'), "no authored provider description"),
+        ("wrong member", "ChannelCore::disable", links["ChannelCore::enable"], None, "wrong provider declaration"),
+        ("wrong overload", "SchedulingChannelImpl::exec(IRSTStareTask)", links["SchedulingChannelImpl::exec(AbortTask)"],
+         None, "wrong provider declaration"),
+        ("missing type prose", "Runtime", links["Runtime"], without_prose("Runtime", '<div class="textblock">'),
+         "no authored provider description"),
+    )
+    for defect, label, link, text, expected in controls:
+        try:
+            check_link(label, link, text)
+        except ValueError as error:
+            if expected not in str(error):
+                raise
+        else:
+            raise ValueError(f"{CORE}: provider negative control passed: {defect}")
+    print(f"Verified {len(PROVIDER_TYPES)} provider types, {len(PROVIDER_MEMBERS)} signatures/descriptions, "
+          "search/index and 4 negative controls (missing member/type prose, wrong member/overload)")
+
+
 def check_entry_links(page, body_links):
     linked = {local_target(page, href) for href, _ in body_links}
     for target in ENTRY_LINKS.get(page, ()):
@@ -688,6 +837,7 @@ def validate_site(root, sha, sources, evidence_ids=None):
     if errors:
         raise ValueError("Documentation validation failed:\n" + "\n".join(sorted(set(errors))))
     check_internal_extensions(root, pages, search_index)
+    check_provider_contracts(root, pages, search_index)
     check_navigation(root, pages, search_index)
     print(f"Verified {len(pages)} HTML pages, {len(sources)} source browsers, search, "
           f"navigation and publication boundary at {sha}")
