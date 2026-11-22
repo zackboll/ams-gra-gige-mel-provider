@@ -26,12 +26,12 @@ backend::Result<BackendCatalog> make_builtin_catalog(const std::vector<LoadedPro
                                           [] { return backend::make_synthetic_backend(); });
     if (!status) return status.error();
 #ifdef GIGE_MEL_SELECT_ARAVIS
-    status = catalog.register_backend("aravis", compatible(backend::profiles::module::aravis),
+    status = catalog.register_backend(std::string(backend::aravis::backend_id), compatible(backend::profiles::module::aravis),
                                       [](BackendCatalog::Profile p) { return backend::aravis::make_backend(std::move(p)); });
     if (!status) return status.error();
 #endif
 #ifdef GIGE_MEL_SELECT_PLEORA
-    status = catalog.register_backend("pleora", compatible(backend::profiles::module::pleora),
+    status = catalog.register_backend(std::string(backend::pleora::backend_id), compatible(backend::profiles::module::pleora),
                                       [](BackendCatalog::Profile p) { return backend::pleora::make_backend(std::move(p)); });
     if (!status) return status.error();
 #endif

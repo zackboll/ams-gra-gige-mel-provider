@@ -1,6 +1,6 @@
 // Independent test-only implementation of the project backend contract. See the
 // header for the documented fixture semantics. It shares no code with, and does
-// not delegate to, src/backends/synthetic.cpp.
+// not delegate to, src/backends/synthetic/synthetic_backend.cpp.
 #include "contract_fixture_camera.hpp"
 
 #include <algorithm>

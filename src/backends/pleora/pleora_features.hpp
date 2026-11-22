@@ -11,6 +11,9 @@ namespace gige_mel::backend::pleora {
 Error native_error(const PvResult& result, std::string_view operation);
 Status checked(const PvResult& result, std::string_view operation);
 
+// Borrowed native view used only while the caller owns the device lifetime
+// and operation lock (or exclusive, unpublished open). Feature aliases and
+// camera policy live in the profile.
 class Features final : public device_features::IDeviceFeatures {
 public:
     explicit Features(PvGenParameterArray& parameters) : parameters_(&parameters), nodes_(parameters.GetNodeMap()) {}

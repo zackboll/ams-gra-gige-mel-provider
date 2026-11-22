@@ -5,6 +5,7 @@
 #include "backends/pleora/pleora_license.hpp"
 #include "backends/pleora/pleora_stream.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <future>
@@ -76,7 +77,8 @@ void leases() {
     CHECK(stream->statistics().pool_starvation_events == 1);
     CHECK(source->releases == 5);
     std::memset(source->buffer.GetDataPointer(), 9, source->buffer.GetSize());
-    for (const auto& f : retained) CHECK(f.bytes()[0] == std::byte{3});
+    for (const auto& f : retained)
+        CHECK(std::ranges::all_of(f.bytes(), [](auto pixel) { return pixel == std::byte{3}; }));
     stream->stop();
     auto restart = stream->start(43);
     CHECK(!restart && restart.error().code == b::ErrorCode::resource_exhausted);
@@ -87,7 +89,7 @@ void leases() {
     CHECK(f);
     CHECK(f.value().descriptor().stream_generation == 2);
     stream.reset(); source.reset();
-    CHECK(f.value().bytes()[0] == std::byte{3});
+    CHECK(std::ranges::all_of(f.value().bytes(), [](auto pixel) { return pixel == std::byte{3}; }));
     // Destruction with an entirely full pool must not invalidate any copy.
     auto second = std::make_shared<Source>();
     auto full_stream = p::make_stream(second);
@@ -139,11 +141,14 @@ void cancellation() {
     waiting.wait();
     auto begin = std::chrono::steady_clock::now();
     stream->request_stop();
-    stream->stop();
+    // Cancellation alone wakes the receive; stop must not mask a broken signal.
     auto result = receiver.get();
     CHECK(!result && result.error().code == b::ErrorCode::stopped);
     CHECK(std::chrono::steady_clock::now() - begin < 500ms);
-    CHECK(!stream->receive(-1ms));
+    CHECK(source->stops == 0);
+    stream->stop();
+    CHECK(source->stops == 1);
+    CHECK(stream->receive(-1ms).error().code == b::ErrorCode::invalid_argument);
     CHECK(stream->start(2));
     source->notify = false;
     auto blocked = std::async(std::launch::async, [&] { return stream->receive(10s); });
@@ -210,9 +215,16 @@ void licensing() {
 }
 int main() {
     try {
-        auto backend = p::make_backend();
+        unsigned diagnostics = 0;
+        auto backend = p::make_backend(p::Options{false, [&](std::string_view) { ++diagnostics; }});
         CHECK(backend->id() == "pleora");
-        CHECK(!backend->open("192.168.24.101")); // no discovery for invalid identity
+        CHECK(diagnostics == 0);
+        // These are not native discovery keys; reject before discovery/connect.
+        for (const auto* alias : {"", "192.168.24.101", "mac:00:11:22:33:44:55", "00:11:22:AA:BB:CC"}) {
+            const auto refused = backend->open(alias);
+            CHECK(!refused && refused.error().code == b::ErrorCode::invalid_argument);
+        }
+        CHECK(diagnostics == 0);
         PvGenParameterArray parameters;
         p::Features features(parameters);
         CHECK(features.implemented("missing") && !features.implemented("missing").value());

@@ -26,9 +26,10 @@ public:
     virtual Status stop() = 0;
 };
 
-// Source ownership stays private; all callers use the same production stream.
-// The compatibility overload uses default monochrome frame admission for local
-// sources; production Device always passes the explicitly opened profile state.
+// Construct a stopped wrapper, retaining the native source and (in production)
+// the selected per-device profile state without native I/O. Frame leases pin
+// copied host bytes, not the pipeline or requeued native buffers. The one-argument
+// overload uses default monochrome frame admission for controlled test sources.
 std::unique_ptr<IFrameStream> make_stream(std::shared_ptr<NativeSource> source);
 std::unique_ptr<IFrameStream> make_stream(std::shared_ptr<NativeSource>,
     std::shared_ptr<const profiles::ICameraProfileState>);

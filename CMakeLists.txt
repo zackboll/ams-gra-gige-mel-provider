@@ -95,7 +95,7 @@ target_include_directories(gige_mel_headers SYSTEM INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/ams-math/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-add_library(gige_mel_backend STATIC src/backends/synthetic.cpp)
+add_library(gige_mel_backend STATIC src/backends/synthetic/synthetic_backend.cpp)
 add_library(gige_mel::backend ALIAS gige_mel_backend)
 set_target_properties(gige_mel_backend PROPERTIES POSITION_INDEPENDENT_CODE ON EXPORT_NAME backend)
 target_compile_features(gige_mel_backend PUBLIC cxx_std_20)
@@ -191,6 +191,9 @@ if(BUILD_TESTING)
   add_executable(backend_tests tests/backend_tests.cpp)
   target_link_libraries(backend_tests PRIVATE gige_mel_backend gige_mel_build_options)
   add_test(NAME backend_contract COMMAND backend_tests)
+  add_test(NAME backend_source_layout COMMAND ${CMAKE_COMMAND}
+    -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/backend_source_layout.cmake)
 
   add_executable(camera_profile_tests tests/camera_profile_tests.cpp)
   target_link_libraries(camera_profile_tests PRIVATE gige_mel_camera_profiles gige_mel_build_options)

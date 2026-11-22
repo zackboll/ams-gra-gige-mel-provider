@@ -24,9 +24,10 @@ namespace gige_mel::backend::aravis {
 
 inline constexpr std::string_view backend_id = "aravis";
 
-// Ordinary factory: Aravis's GigE Vision interface only. Construction performs
-// no discovery, open or configuration I/O and changes no process-wide Aravis
-// state (no interface enable flags, never arv_shutdown()).
+// Construction performs no discovery, open or configuration I/O. The backend
+// owns the selected profile; the no-argument overload selects the built-in
+// monochrome profile. Only the GigE Vision interface is used in production,
+// without changing process-wide Aravis state (no enable flags or arv_shutdown()).
 std::shared_ptr<ICameraBackend> make_backend();
 std::shared_ptr<ICameraBackend> make_backend(std::shared_ptr<const profiles::ICameraProfile>);
 

@@ -4,7 +4,6 @@
 #include "pleora_stream.hpp"
 #include "pleora_private.hpp"
 #include "pleora_registers.hpp"
-#include "profiles/camera_profile.hpp"
 
 #include <PvDeviceGEV.h>
 #include <PvDeviceEventSink.h>
@@ -41,6 +40,7 @@ struct State {
     std::unique_ptr<PvPipeline> pipeline;
     std::shared_ptr<void> reservation;
     std::weak_ptr<NativeSource> source;
+    // Retain the selected profile until after policy destruction.
     std::shared_ptr<const profiles::ICameraProfile> profile_owner;
     std::shared_ptr<const profiles::ICameraProfileState> policy;
     CameraCapabilities capabilities;
@@ -231,7 +231,7 @@ class Backend final : public ICameraBackend {
 public:
     Backend(Options options, std::shared_ptr<const profiles::ICameraProfile> profile)
         : options_(std::move(options)), profile_(std::move(profile)) {}
-    std::string_view id() const noexcept override { return "pleora"; }
+    std::string_view id() const noexcept override { return backend_id; }
     Result<std::vector<DeviceInfo>> enumerate() override {
         if (compiled_version() != runtime_version())
             return Error{ErrorCode::unsupported, "eBUS header/runtime version mismatch; no discovery attempted"};
@@ -243,7 +243,7 @@ public:
             auto* info = dynamic_cast<const PvDeviceInfoGEV*>(system.GetDeviceInfo(i));
             if (!info) continue;
             const std::string mac = info->GetMACAddress().GetAscii();
-            if (!mac.empty()) found.emplace(mac, DeviceInfo{"pleora", mac, info->GetDisplayID().GetAscii()});
+            if (!mac.empty()) found.emplace(mac, DeviceInfo{std::string(backend_id), mac, info->GetDisplayID().GetAscii()});
         }
         std::vector<DeviceInfo> devices;
         for (auto& [mac, info] : found) devices.push_back(std::move(info));
