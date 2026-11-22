@@ -96,6 +96,12 @@ support. Attach requires an advertised identity/type and the proper listener on
 frame channels. See the [pinned metadata enumeration](https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h)
 and [capability contract](https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelCapability.h).
 
+The [SDK-free profile-policy regression](qualification-evidence.md#sdk-free-provider-and-profiles)
+exercises the same C2 `CameraCommand` against the default and loaded Cognex
+states. The profile decides whether to apply the request; the common provider
+owns the ordinary camera response and correlated `CommandStatus`. This does not
+add C2 operations or qualify a camera or transport.
+
 | Channel | Metadata in both capability views (in addition to common `ChannelCommsTestRep`) | Boundary or discrepancy |
 | --- | --- | --- |
 | `IRSTImage` | `CameraCommandResp`, `NavigationReportResp`; `BadPixelList` if explicitly known empty; `LineOfSightEuler` and `LineOfSightReport` independently from valid source declarations | Camera response is on Image even for C2-origin commands. Navigation advertises acknowledgement, not sensor acceptance. Three required metadata registrations are not generally available: defect map is synthetic-only among shipped backends, LOS Euler/Report have a recording source only. No fallback from navigation or optics. |

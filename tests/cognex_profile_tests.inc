@@ -1,26 +1,3 @@
-// Typed fixtures reproduce documented values, not physical qualification.
-RecordingFeatures cognex_features() {
-    auto f = baseline();
-    f.nodes["DeviceVendorName"] = text_node("COGNEX", Kind::string);
-    f.nodes["DeviceModelName"] = text_node("CIC-5000R", Kind::string);
-    f.nodes["DeviceFirmwareVersion"] = text_node("106349-08;U;CIC-5000R;V3.7-1;0", Kind::string);
-    for (auto name : {"DeviceVendorName", "DeviceModelName", "DeviceFirmwareVersion"})
-        f.nodes[name].access = Access::read_only;
-    f.nodes["SensorWidth"] = integer_node(2592, 2592, 2592, 1, Access::read_only);
-    f.nodes["SensorHeight"] = integer_node(1944, 1944, 1944, 1, Access::read_only);
-    f.nodes["Width"] = integer_node(2592, 64, 2592);
-    f.nodes["Height"] = integer_node(1944, 64, 1944);
-    f.nodes["OffsetX"] = integer_node(0, 0, 0);
-    f.nodes["OffsetY"] = integer_node(0, 0, 0);
-    f.nodes.erase("AcquisitionFrameRate");
-    f.nodes["AcquisitionFrameRateAbs"] = float_node(10, 0.0149, 1'000'000, "Hz");
-    f.nodes["ExposureTimeAbs"] = float_node(35'000, 35, 999'985, "us");
-    f.nodes["AcquisitionFrameRateEnable"] = boolean_node(true); // explicit fixture arrangement, not power-on state
-    f.nodes["AcquisitionMode"] = text_node("Continuous");
-    f.nodes["ExposureAuto"] = text_node("Off");
-    return f;
-}
-
 void cognex_contract() {
     namespace s = gige_mel::selection;
     namespace p = backend::profiles;
@@ -89,17 +66,32 @@ void cognex_contract() {
         CHECK(state->capabilities().sensor_width == 2592 && state->capabilities().sensor_height == 1944);
         auto request = take(state->configuration(f, connected));
         CHECK(request.exposure == 35ms && request.frame_rate_hz == 10);
+        f.calls.clear();
+        request.frame_rate_hz = 6;
+        const auto lost = []() -> backend::Status {
+            return backend::Error{backend::ErrorCode::disconnected, "lost before rate admission"};
+        };
+        expect_error(state->apply(f, request, lost, allow_write), backend::ErrorCode::disconnected,
+                     "lost before rate admission");
+        CHECK(f.calls.empty());
         for (auto rate : {1u, 2u, 4u, 5u, 8u, 10u}) {
             request.frame_rate_hz = rate;
+            f.calls.clear();
             CHECK(take(state->apply(f, request, connected, allow_write)) == request);
+            CHECK(f.count("read_integer", "SensorWidth") == 3); // contract, fresh plan, actual readback
+            CHECK(f.count("read_string_or_enum", "AcquisitionMode") == 1);
             CHECK(take(state->configuration(f, connected)) == request);
+            f.calls.clear();
             CHECK(take(state->preflight(f)) == request);
+            CHECK(f.count("read_integer", "SensorWidth") == 1); // reuse the admitted snapshot
+            CHECK(f.count("read_string_or_enum", "AcquisitionMode") == 1);
         }
         for (auto rate : {0u, 3u, 6u, 7u, 9u, 12u, 14u, 16u, 100u}) {
             request.frame_rate_hz = rate;
             f.calls.clear();
             expect_error(state->apply(f, request, connected, allow_write), backend::ErrorCode::unsupported, "AcquisitionFrameRateAbs");
             CHECK(f.writes().empty());
+            CHECK(f.calls.empty()); // request policy precedes native reads
         }
         f.nodes["AcquisitionFrameRateAbs"].real.value = 16;
         CHECK(take(state->configuration(f, connected)).frame_rate_hz == 16);
@@ -122,6 +114,9 @@ void cognex_contract() {
             f.nodes[name].text = original;
         }
         f.nodes["AcquisitionFrameRateAbs"].real.value = 14.000112;
+        f.nodes["AcquisitionMode"].text = "SingleFrame";
+        expect_error(state->preflight(f), backend::ErrorCode::unsupported, "AcquisitionMode");
+        f.nodes["AcquisitionMode"].text = "Continuous";
         expect_error(state->configuration(f, connected), backend::ErrorCode::unsupported, "14.000112");
         CHECK(!state->preflight(f));
         CHECK(state->apply(f, request, connected, allow_write));

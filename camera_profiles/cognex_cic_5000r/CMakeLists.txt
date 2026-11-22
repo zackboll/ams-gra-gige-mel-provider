@@ -9,6 +9,7 @@ endif()
 include("${GIGE_MEL_SOURCE_ROOT}/cmake/ProfileBuildIdentity.cmake")
 gige_mel_profile_identity("${GIGE_MEL_SOURCE_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
 add_library(cognex_cic_5000r MODULE module.cpp profile.cpp
+  "${GIGE_MEL_SOURCE_ROOT}/src/profiles/camera_profile.cpp"
   "${GIGE_MEL_SOURCE_ROOT}/src/profiles/frame_policy.cpp"
   "${GIGE_MEL_SOURCE_ROOT}/src/profiles/mono_free_running.cpp"
   "${GIGE_MEL_SOURCE_ROOT}/src/profiles/mono_free_running_device.cpp")

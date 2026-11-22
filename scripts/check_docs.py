@@ -163,9 +163,11 @@ REFERENCE_INDEXES = ("namespaces.html", "namespacemembers.html", "annotated.html
                      "hierarchy.html", "functions.html", "files.html", "globals.html")
 API_PAGES = ("api_installed.html", "api_extensions.html", "api_core.html")
 EXTENSIONS = API_PAGES[1]
-EXTENSION_SECTIONS = ("extension_profile", "extension_modules", "extension_registers", "extension_navigation")
+EXTENSION_SECTIONS = ("extension_profile", "extension_monochrome", "extension_modules", "extension_registers",
+                      "extension_navigation")
 EXTENSION_TYPES = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
     "backend::profiles": ("ICameraProfile", "ICameraProfileState", "NativeFrameFacts",
+                          "MonoFreeRunningProfile", "MonoFreeRunningProfileState",
                           "IProfileNavigationHandler", "NavigationOperation", "INavigationOperationPort",
                           "ProfileNavigationBridge"),
     "backend::device_features": ("IDeviceFeatures",),
@@ -177,6 +179,9 @@ EXTENSION_TYPES = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
 EXTENSION_METHODS = tuple(f"gige_mel::{scope}::{name}" for scope, names in {
     "backend::profiles::ICameraProfile": ("open",),
     "backend::profiles::ICameraProfileState": ("configuration", "apply", "preflight", "validate_frame"),
+    "backend::profiles::MonoFreeRunningProfile": ("open",),
+    "backend::profiles::MonoFreeRunningProfileState": ("MonoFreeRunningProfileState", "configuration", "apply",
+                                                     "native_admission"),
     "backend::profiles::IProfileNavigationHandler": ("prepare_navigation",),
     "backend::profiles::ProfileNavigationBridge": ("create", "submit", "shutdown"),
     "backend::device_features::IDeviceFeatures": ("read_integer_feature", "write_integer"),

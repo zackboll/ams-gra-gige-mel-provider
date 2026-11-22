@@ -78,7 +78,10 @@ if (actual.value() != expected)
 
 After the checks, Cognex moves a validated native snapshot and capabilities into
 `std::make_shared<CognexCIC5000RState>(...)`, returned as a
-`std::shared_ptr<const ICameraProfileState>`. Build one state per open; do not
+`std::shared_ptr<const ICameraProfileState>`. The profile derives from
+`MonoFreeRunningProfile` but overrides `open()` explicitly: the inherited
+version would construct `MonoFreeRunningProfileState`, not the model's state.
+Build one state per open; do not
 share evolving device configuration across opens or retain the borrowed feature
 service, a native handle, or a pointer back to the parent profile. A stream or
 lease may keep the state alive after the profile or device closes.
@@ -138,7 +141,12 @@ reader to be exactly the two `Abs` names above.
 
 ## 4. Implement the per-device state
 
-Implement all required operations of [`ICameraProfileState`](../src/profiles/camera_profile.hpp).
+Implement the required operations of [`ICameraProfileState`](../src/profiles/camera_profile.hpp)
+or inherit them from [`MonoFreeRunningProfileState`](../src/profiles/mono_free_running_profile.hpp)
+when the camera shares the default monochrome assumptions. Cognex inherits
+capabilities and truthful readback, overriding diagnostics, request admission,
+run admission and the Mono8-only frame gate. The rate-limited teaching module
+instead composes a delegate; inheritance is not required.
 Separate immutable open-time facts (admitted identity, native mapping and
 representation, validated capability envelope) from fresh values (ROI, exposure,
 rate, availability, current limits and increments). The adapter serializes
@@ -275,7 +283,8 @@ with `MODULE_VARIANT=0`; the other variants exist only for negative tests.
    never deletes the raw module profile itself. No camera I/O in these callbacks.
 3. Compile only policy code and SDK-free helpers into the module. The
    [standalone Cognex CMake project](../camera_profiles/cognex_cic_5000r/CMakeLists.txt)
-   compiles helpers directly; the [teaching CMake project](../examples/profile_module/CMakeLists.txt)
+   compiles the default base definitions and helpers directly; the
+   [teaching CMake project](../examples/profile_module/CMakeLists.txt)
    puts them in a private PIC archive. Both use C++20, hidden visibility,
    an ELF version script to localize everything except discovery, and
    `-Wl,-z,defs` to catch unresolved dependencies. GCC builds also disable
@@ -430,13 +439,14 @@ browser links. Read the Cognex files in this order:
    open-time native range. An advertised 1–10 Hz envelope does not admit 3, 6,
    7 or 9 Hz, or guarantee all ROI/exposure combinations. The limit is policy,
    not a physical maximum.
-4. **`configuration` and `apply`.** Delegate conversion and the ordered
-   write transaction to the shared monochrome code. Apply the rate policy
-   before writes but do not clamp actual readback. Retain the *native* envelope
-   in these helpers so an existing representable 16 Hz state can be read and
-   explicitly corrected to an admitted rate without pretending it was 10 Hz.
-5. **`preflight`.** Re-read the native contract and effective configuration,
-   then apply the discrete rate policy. A native 16 Hz state cannot start a run.
+4. **`configuration` and `apply`.** Inherit configuration unchanged. Check
+   connection, request rate and required native facts before delegating `apply`
+   to the base transaction. The base owns the *native* envelope so actual
+   16 Hz can be read and corrected to an admitted rate without clamping to 10 Hz.
+5. **`preflight`.** Check the required native contract before admitting the
+   current snapshot with `native_admission()` and the shared snapshot helper,
+   then check the discrete rate. This preserves failure ordering without another
+   snapshot read. A native 16 Hz state cannot start a run.
 6. **`validate_frame`.** Check the selected Mono8 representation and delegate
    layout/span validation. Keep native IDs; do not copy the example's parity
    rule. Cognex rejects Mono12 even with a fixture claiming little-endian data.

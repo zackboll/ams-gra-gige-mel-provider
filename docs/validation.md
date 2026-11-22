@@ -5,6 +5,56 @@ matrix. Each section keeps its original execution scope and conclusions. Start
 at [Qualification Evidence](qualification-evidence.md) to locate the experiments
 or [Current Status](status.md) for the audited merged implementation.
 
+## Reusable monochrome defaults and MEL camera policy (2026-11-22)
+
+Base `199787d2f301986abb455dc79fe39ac70c46b297` (tree
+`19c2ccc59187868dcc8f48f22cca33245d618aac`) includes merged PR #63.
+Executable and reference source: `dc95358b1235d43072744e6824fe76b4d03689d5`
+(tree `85b5bb681895eff11d1f84361735215845228060`). The follow-up evidence
+record does not change executable source. Local environment: Debian 13.8
+Linux x86-64, GCC 14.2.0 and Clang 19.1.7, Debug.
+
+- Before edits, `camera_profile_contract`, `device_feature_contract`,
+  `cognex_profile_contract` and `dynamic_profile_module_contract` passed (4/4).
+  The added connection-precedence, native read count and preflight-order
+  assertions also passed when applied to the original Cognex implementation.
+- GCC SDK-free `ctest --preset dev`: 54/54. The focused selection was
+  `camera_profile_contract`, `device_feature_contract`, `cognex_profile_contract`,
+  `dynamic_profile_module_contract`, `profile_identity_closure`,
+  `profile_navigation_*` (10), and the new `profile_policy_mel_contract`.
+  Clang Debug and GCC ASan/UBSan with leak detection and halt-on-error each
+  passed that 16-test selection, including separately built modules and
+  actual unload after retained states retired. After adding the ordering
+  assertions, the two affected contracts were rechecked in all three builds.
+- `profile_policy_mel_contract`: equivalent recording features and backend
+  delegation expose the selected state through `make_api_manager`, `getControl`,
+  `init`, attach C2 and `send(CameraCommand)`. Both 6 Hz requests fit the
+  advertised ranges. Default: ordinary success, correlated Accepted and actual
+  6 Hz. Cognex: ordinary negative response, correlated CapabilityUnavailable
+  and zero writes. A simulated out-of-band 16 Hz remained readable, and 5 Hz
+  through C2 succeeded with the ordered native setters and matching readback.
+  The direct state test separately verifies that preflight refuses 16 Hz.
+- Native fixture checks (GCC Debug): `aravis_adapter` and
+  `aravis_stream_contract` with Aravis 0.8.36 Fake; `pleora_sdk_contract` with
+  eBUS Pv 6.5.3.7155, GenApi 3.4.1 and matching 3.4.1.1 headers;
+  `gentl_backend_contract` with GenTL 1.6 mock CTI and Aravis 0.8.36 GenApi.
+  All four passed. No physical camera or real GenTL producer was used.
+- GCC and Clang Cognex, rate-limited and navigation modules: only
+  `gige_mel_camera_profile_module_v1` exported; system/C++ runtime dependencies
+  only, no `NODELETE`, provider or SDK dependency. Installed header bytes and
+  CMake package exports matched the base, and dynamic provider symbol names and
+  types matched. The freshly installed standalone consumer captured and
+  released a synthetic Mono8 frame.
+- Doxygen 1.14.0 with Graphviz 2.42.4 generated the extension reference and
+  retained the single existing GenTL `with_registers` warning. The checker
+  resolved concrete default class/member links and their authored descriptions;
+  installed API, public navigation source URL and provider contract checks
+  remained intact.
+
+This validates reuse of camera policy through existing MEL configuration
+mechanics. It neither adds MEL operations nor qualifies production streaming,
+timing, optics, physical configuration, or new firmware.
+
 ## Dynamic camera-profile modules (GIGE-MEL-035)
 
 The [module qualification record](tasks/GIGE-MEL-035-validation.md) documents

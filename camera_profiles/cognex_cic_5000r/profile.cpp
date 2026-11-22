@@ -48,19 +48,13 @@ Status native_contract(IDeviceFeatures& features, const mono::NativeSnapshot& n)
     return {};
 }
 
-class CognexCIC5000RState final : public ICameraProfileState {
+class CognexCIC5000RState final : public MonoFreeRunningProfileState {
 public:
-    CognexCIC5000RState(mono::NativeSnapshot envelope, CameraCapabilities caps)
-        : envelope_(std::move(envelope)), caps_(std::move(caps)) {}
-    CameraCapabilities capabilities() const override { return caps_; }
+    using MonoFreeRunningProfileState::MonoFreeRunningProfileState;
     std::vector<std::pair<std::string, std::string>> native_diagnostics() const override {
         return {{"DeviceVendorName", "COGNEX"}, {"DeviceModelName", "CIC-5000R"},
             {"DeviceFirmwareVersion", "106349-08;U;CIC-5000R;V3.7-1;0"},
             {"ProfileRatePolicyHz", "1,2,4,5,8,10"}};
-    }
-    Result<CameraConfiguration> configuration(IDeviceFeatures& features, const ConnectionCheck& check) const override {
-        // Deliberately do not impose rate admission on actual readback.
-        return mono::read_configuration(features, envelope_, check);
     }
     Result<CameraConfiguration> apply(IDeviceFeatures& features, const CameraConfiguration& request,
         const ConnectionCheck& check, const BeforeWrite& before) const override {
@@ -69,15 +63,15 @@ public:
         auto current = mono::read_snapshot(features);
         if (!current) return current.error();
         if (auto ok = native_contract(features, current.value()); !ok) return ok.error();
-        // Keep the native envelope, not the advertised 10 Hz policy cap: this
-        // permits truthful recovery from a current, representable 16 Hz state.
-        return mono::apply_configuration(features, request, envelope_, check, before);
+        return MonoFreeRunningProfileState::apply(features, request, check, before);
     }
     Result<CameraConfiguration> preflight(IDeviceFeatures& features) const override {
         auto current = mono::read_snapshot(features);
         if (!current) return current.error();
         if (auto ok = native_contract(features, current.value()); !ok) return ok.error();
-        auto frozen = mono::acquisition_preflight(current.value(), envelope_);
+        // Reuse admission on this snapshot: the generic preflight would read
+        // again and check AcquisitionMode after representation admission.
+        auto frozen = mono::acquisition_preflight(current.value(), native_admission());
         if (!frozen) return frozen.error();
         if (auto ok = admit_rate(frozen.value().frame_rate_hz); !ok) return ok.error();
         return frozen;
@@ -86,11 +80,8 @@ public:
         PixelFormat format) const override {
         if (format != PixelFormat::mono8)
             return {FrameVerdict::reject, ErrorCode::unsupported, 0, 0, "cognex_cic_5000r_v1 admits Mono8 only"};
-        return mono::validate_frame(facts, frozen, format);
+        return MonoFreeRunningProfileState::validate_frame(facts, frozen, format);
     }
-private:
-    const mono::NativeSnapshot envelope_;
-    const CameraCapabilities caps_;
 };
 } // namespace
 
