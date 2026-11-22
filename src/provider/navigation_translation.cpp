@@ -5,8 +5,6 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
-// Structural checks only: consumer labels and values are not independently
-// qualified navigation. No clock conversion, clamping or normalization.
 std::optional<std::string> navigation_error(const mel::NavigationReport& report) {
     if (report.getSystemTime() <= 0ns) return "systemTime must be positive nanoseconds";
     switch (report.getState()) {
@@ -64,7 +62,6 @@ std::optional<std::string> navigation_error(const mel::NavigationReport& report)
     return std::nullopt;
 }
 
-// Called only after structural validation, including the solution state.
 backend::NavigationReport backend_navigation(const mel::NavigationReport& report) noexcept {
     backend::NavigationReport value;
     switch (report.getState()) {

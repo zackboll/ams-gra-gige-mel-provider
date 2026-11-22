@@ -10,7 +10,7 @@
 
 namespace gige_mel::test_seams {
 
-// Points inside one unsupported C2 submission (C2ChannelImpl::reject_unsupported).
+/// @brief Gates inside one unsupported C2 submission in the uninstalled test build.
 enum class UnsupportedStatusPoint {
     // Callback context rejected and Control/channel pinned; Runtime::operations
     // not yet taken; nothing reserved.
@@ -21,20 +21,23 @@ enum class UnsupportedStatusPoint {
     after_reservation,
 };
 
-// Must not throw: the after_reservation point holds a callback reservation.
+/// Must not throw: the after_reservation point holds a callback reservation.
 using UnsupportedStatusHook = void (*)(UnsupportedStatusPoint, void* context) noexcept;
 
-// Thread-local: only unsupported C2 submissions made by the calling thread run
-// the hook. Pass nullptr to clear.
+/// Only unsupported submissions on the calling thread use this hook. Context
+/// is borrowed, not owned. Pass nullptr to clear.
 void set_unsupported_status_hook(UnsupportedStatusHook hook, void* context) noexcept;
 
+/// Gates on either side of Stack callback admission, with no provider mutex held.
 enum class StackPoint { before_admission, after_reservation };
 using StackHook = void (*)(StackPoint, void*) noexcept;
-// Set before enable, clear after disable/detach. Invoked only on stack worker.
+/// Global pair, invoked only by the Stack worker. Set before enable and clear
+/// after disable/detach: hook and borrowed context are not published as a unit.
 void set_stack_hook(StackHook hook, void* context) noexcept;
 
-// Calling submission thread, after task ack reservation, before delivery.
+/// Runs on the submitting thread, after task ack reservation and before delivery.
 using TaskHook = void (*)(void*) noexcept;
+/// Set the per-thread task hook and borrowed context, or clear with a null hook.
 void set_task_hook(TaskHook hook, void* context) noexcept;
 
 } // namespace gige_mel::test_seams

@@ -9,12 +9,31 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
+/** @brief Control-plane commands for configuration, software BIT and bounded mode changes.
+ * These commands require attachment, not C2 enable. Replies and correlated
+ * terminal status can be synchronous; configuration/BIT status is admitted at
+ * dispatch, whereas ModeCmd and admitted unsupported requests reserve it under
+ * operations. Calibration, protection, erase/zeroize and system track input are
+ * unadvertised and unsupported, as are calibration/protection output callbacks.
+ */
 class C2ChannelImpl final : public ChannelCore, public ir::C2Channel {
 public:
     using ChannelCore::ChannelCore;
     using ChannelCore::send;
     using ChannelCore::registerMetadataCallback;
+    /// Apply a camera snapshot, routing any typed response to Image before C2 status.
+    /// @see ChannelCore::camera_command
     mel::RequestFor<ir::CameraCommandResp> send(ir::CameraCommand command) override { return camera_command(command); }
+    /** @brief Run the synchronous software-state BIT (numeric test ID 1).
+     * @param command Select initiate before cancel, then clearFaultCode; the
+     * selected initiate/cancel list must contain exactly one known ID.
+     * @return Success means observed-state evaluation completed, not that it
+     * passed. Cancel is InvalidState (no queued/active test); clearing faults is
+     * unsupported. Bad selection and preparation failure return error futures.
+     * Commits the latest completion under the operation and state locks; then
+     * attempts inline BIT status before correlated CommandStatus. No backend
+     * test or I/O, and no status on callback/closing/detached admission failure.
+     */
     mel::RequestFor<ir::Return> send(ir::BIT_Command command) override {
         if (in_provider_callback())
             return failed<ir::Return>(mel::ErrorCode::InvalidState, "schedule BIT outside provider callbacks");
@@ -67,30 +86,47 @@ public:
         on_command_status(outcome.status(command.getCommandID()));
         return result;
     }
-    // GIGE-MEL-042: unsupported, unadvertised families. Each returns its typed
-    // Unsupported error and, once admitted, one correlated terminal rejection.
+    /// Reject calibration catalogue requests with a typed Unsupported error and
+    /// a correlated terminal rejection if admitted and a status slot is installed.
     mel::RequestFor<mel::CalibrationConfiguration> send(ir::CalibrationConfigurationCmd command) override {
         return reject_unsupported<mel::CalibrationConfiguration>(command,
             "CalibrationConfigurationCmd is unsupported: calibration configuration is not available in the experimental image-stream profile");
     }
+    /// Reject calibration-status requests without reading calibration state.
     mel::RequestFor<mel::CalibrationStatus> send(ir::CalibrationStatusCmd command) override {
         return reject_unsupported<mel::CalibrationStatus>(command,
             "CalibrationStatusCmd is unsupported: calibration status is not available in the experimental image-stream profile");
     }
+    /// Reject camera protection without touching the device.
     mel::RequestFor<ir::CameraProtectCmdResp> send(ir::CameraProtectCmd command) override {
         return reject_unsupported<ir::CameraProtectCmdResp>(command,
             "CameraProtectCmd is unsupported: camera protection is not available in the experimental image-stream profile");
     }
+    /// Reject erase/zeroize without performing either operation or changing
+    /// device/configuration state. Normal status dispatch and callback-failure
+    /// diagnostics still apply.
     mel::RequestFor<ir::EraseCommandType> send(ir::EraseCommand command) override {
         return reject_unsupported<ir::EraseCommandType>(command,
             "EraseCommand is unsupported: erase and zeroize are not available in the experimental image-stream profile");
     }
-    // The upstream response type is CommandStatus; the future still carries the
-    // Unsupported error, never a successful (rejection-valued) payload.
+    /// Reject track input with an Unsupported error, not a successful
+    /// CommandStatus value. Any correlated rejection is delivered separately.
     mel::RequestFor<ir::CommandStatus> send(ir::SystemTrackDataResponse command) override {
         return reject_unsupported<ir::CommandStatus>(command,
             "SystemTrackDataResponse is unsupported: system track data input is not available in the experimental image-stream profile");
     }
+    /** @brief Accept Standby/Unused or source-qualified Operate/TaskSched only.
+     * Requires default scan parameters and known-valid initialized state for
+     * the supported transitions. Under operations, TaskSched requires idle
+     * acquisition, opens and verifies an idle source session, or keeps the
+     * existing one. Standby observes tasking and cancels active work before
+     * retirement; failed observe/cancel does not retire the session. Otherwise
+     * Standby stops owned Image/Stack and its auxiliary work without detaching,
+     * unbinding or releasing bytes; idle Standby is a no-op.
+     * Returns the accepted mode or an error future; a registered terminal
+     * status is reserved before unlocking and dispatched inline. Invalid
+     * admission (callback context, closing or detach) dispatches nothing.
+     */
     mel::RequestFor<ir::MFA_Mode> send(ir::ModeCmd command) override {
         // Same admission precedence as configuration/BIT: no recursive status
         // dispatch or operation-lock wait from any provider callback thread.
@@ -203,16 +239,22 @@ public:
         invoke(callback, *status, nullptr, true);
         return result;
     }
+    /// Apply complete schema-v1 JSON configuration, not a patch or timed command.
+    /// @see ChannelCore::config_set
     mel::RequestFor<ir::Return> send(ir::ConfigSetCommand command) override { return config_set(command); }
+    /// Register and attempt inline publication of the fixed software BIT catalogue.
     ir::Return registerMetadataCallback(Callback<mel::BIT_Configuration> callback) override {
         return register_initial(catalogue_callback_, std::move(callback), [&] { return bit_catalogue(); });
     }
+    /// Install the terminal status slot for C2 commands without initial publication.
     ir::Return registerMetadataCallback(std::function<void(ir::Channel&, const ir::CommandStatus* const)> callback) override {
         return register_callback(status_callback_, std::move(callback));
     }
     GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationConfiguration)
     GIGE_UNSUPPORTED_CALLBACK(ir::CameraProtectCmdResp)
     GIGE_UNSUPPORTED_CALLBACK(mel::CalibrationStatus)
+    /// Register and attempt inline publication of current software BIT state,
+    /// observing faults but not executing a test.
     ir::Return registerMetadataCallback(Callback<mel::BIT_Status> callback) override {
         return register_initial(bit_callback_, std::move(callback), [&] {
             auto snapshot = health_snapshot(*runtime_);
@@ -221,21 +263,10 @@ public:
         });
     }
 private:
-    // Established C2 admission precedence (as ConfigSet/BIT/ModeCmd): reject any
-    // provider-callback context before locking or status dispatch, pin Control
-    // and this channel, then linearize with detach under operations. Admission
-    // touches no backend, configuration, acquisition, BIT, navigation or Health
-    // state.
-    //
-    // GIGE-MEL-042-R1: the registered CommandStatus callback is snapshotted and
-    // reserved (admit_callback) while this request is still admitted under
-    // operations. Detach sets detached_ and drains reservations under the same
-    // lock, so either detach precedes admission (InvalidState, no callback) or
-    // detach waits until this admitted status has been dispatched. The ready
-    // future and status are formed before admission; nothing that can throw
-    // runs between the reservation and invoke, which contains callback
-    // exceptions and always releases the reservation. No provider lock is held
-    // while the consumer callback runs.
+    /// No-I/O unsupported path: reject reentry/closing first, prepare the error
+    /// future and rejection, then serialize admission with detach. If detach has
+    /// won, return InvalidState instead; otherwise dispatch any reserved status
+    /// inline after unlocking, without touching backend or other channel state.
     template <class Response, class Request>
     mel::RequestFor<Response> reject_unsupported(const Request& request, const char* description) {
         if (in_provider_callback())
@@ -258,6 +289,9 @@ private:
         invoke(callback, status, nullptr, true);
         return result;
     }
+    /// Prepare a snapshot under operations before installing the slot. Caught
+    /// preparation failure returns Fail without registration; dispatch after
+    /// unlocking is not reserved and may be suppressed by detach.
     template <class T, class Prepare>
     ir::Return register_initial(Callback<T>& slot, Callback<T> callback, Prepare prepare) {
         if (in_provider_callback() || is_detached()) return ir::Return::Fail;
@@ -280,6 +314,7 @@ private:
         invoke(callback, *payload);
         return ir::Return::Success;
     }
+    /// Snapshot the C2 status slot and attempt admission without the operation lock.
     void on_command_status(const ir::CommandStatus& status) override {
         Callback<ir::CommandStatus> callback;
         { std::lock_guard lock(callback_mutex_); callback = status_callback_; }

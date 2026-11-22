@@ -16,8 +16,8 @@
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
 
-// Private software identity shared by MFA_Status About, VersionInfo text and the
-// SubsystemStatusResp CSCI version.
+/// @brief One CMake-derived software identity for Health About, VersionInfo
+/// text and the subsystem CSCI version, distinct from API/dependency versions.
 struct ProviderSoftware {
     static constexpr const char* name = "ams-gra-gige-mel-provider";
     static constexpr const char* version_text = GIGE_MEL_VERSION_TEXT;
