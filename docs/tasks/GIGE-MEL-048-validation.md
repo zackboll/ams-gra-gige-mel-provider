@@ -29,3 +29,43 @@ fixtures do not contend for UDP port 3956.
 `provider_backend_portability` still exercises the unchanged synthetic and
 independent SDK-free provider fixture. Its MEL destination ownership evidence
 does not substitute for the separate adapter source-lease checks above.
+
+## Installation and source checks
+
+- Separate installed C++ consumers, MEL-only Stack and virtual-task consumers
+  built and ran from SDK-free GCC and Clang, Aravis-only, Pleora-only, combined,
+  and GenTL fixture installs. The standalone installed synthetic capture also ran.
+- The package-isolation verifier checked Aravis-only and combined builds: the
+  native adapter loaded pinned Aravis 0.8.36; the installed provider did not
+  depend on it and the external consumer built without `PKG_CONFIG_PATH`.
+  The combined SDK build and install also passed with `BUILD_TESTING=OFF`.
+- Against the original `5d3f585` install, 119 header files match byte for byte,
+  as do the CMake package exports. The SDK-free backend archive retains all 706
+  external defined symbols. Provider SONAME, direct ELF dependency entries,
+  resolved dependency names and factory exports match, with no vendor dependency.
+  The raw provider dynamic-symbol list has three additional weak
+  `std::vector<ChannelCapability>` swap implementation symbols. A separate clean
+  install of `199787d` (the integrated `main`, after PRs #62 and #63 landed)
+  has exactly the same list, including those symbols. GCC installs from the
+  candidate's default and optional builds match that baseline's 8,627 provider
+  symbols and all 127 non-documentation install paths.
+- The source-layout check rejects both a duplicate at the retired location and
+  registration on the wrong CMake target. A token comparison matched the moved
+  typed-access and acquisition function bodies, including native error mapping,
+  start, receive, retirement and logical close. The synthetic file is unchanged.
+- Upstream and JSON integrity, the documentation and traceability validators,
+  evidence-index checks, proprietary-content guard and `git diff --check` passed.
+  Doxygen reports the existing GenTL `with_registers` warning and no new warning.
+
+## Integrated qualification
+
+The refactor started at `5d3f585`. Both subsequent `origin/main` updates were
+integrated by normal merges after PRs #62 and #63 landed. The integrated builds
+include the newly landed discovery-publication test. GCC 14.2 and Clang 19
+Debug, SDK-free ASan/UBSan, and SDK-free TSan each passed 56/56. Aravis-only
+passed 64/64, Pleora-only 62/62, and combined Debug 70/70. SDK runs used pinned
+Aravis 0.8.36 and externally provisioned eBUS 6.5.3.7155 with matching GenApi
+3.4.1 headers. The scoped Pleora GenApi TSan exception was not changed.
+
+See [PR #64](https://github.com/zackboll/ams-gra-gige-mel-provider/pull/64)
+for the delivery-head matrix, optional GenTL fixture results and hosted runs.
