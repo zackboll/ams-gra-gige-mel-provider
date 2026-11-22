@@ -125,7 +125,39 @@ add_library(gige_mel_profile_navigation STATIC src/profiles/navigation_bridge.cp
 target_link_libraries(gige_mel_profile_navigation PUBLIC gige_mel_camera_profiles Threads::Threads
   PRIVATE gige_mel_build_options)
 
-add_library(gige_mel_provider SHARED src/provider.cpp src/factories.cpp src/config_parser.cpp)
+# Private provider components shared by production and test-seam builds.
+set(gige_mel_provider_sources
+  src/provider.cpp
+  src/factories.cpp
+  src/config_parser.cpp
+  src/provider/c2_channel.cpp
+  src/provider/callback_context.cpp
+  src/provider/capabilities.cpp
+  src/provider/channel_core.cpp
+  src/provider/control.cpp
+  src/provider/frame_delivery.cpp
+  src/provider/health_channel.cpp
+  src/provider/health_snapshot.cpp
+  src/provider/host_buffer.cpp
+  src/provider/image_channel.cpp
+  src/provider/navigation_translation.cpp
+  src/provider/results.cpp
+  src/provider/runtime.cpp
+  src/provider/scheduling_channel.cpp
+  src/provider/stacked_image_channel.cpp
+  src/provider/tasking.cpp
+  src/provider/test_hooks.cpp)
+
+# Namespace visibility hides the component declarations. The narrow linker rule
+# also localizes STL instantiations whose signatures contain those private types.
+function(gige_mel_hide_provider_components target)
+  set(private_symbols "${CMAKE_CURRENT_SOURCE_DIR}/src/provider/private_symbols.map")
+  target_link_options(${target} PRIVATE "LINKER:--version-script=${private_symbols}")
+  set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${private_symbols}")
+endfunction()
+
+add_library(gige_mel_provider SHARED ${gige_mel_provider_sources})
+gige_mel_hide_provider_components(gige_mel_provider)
 target_include_directories(gige_mel_provider SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
 add_library(gige_mel::provider ALIAS gige_mel_provider)
 set_target_properties(gige_mel_provider PROPERTIES
@@ -198,7 +230,8 @@ if(BUILD_TESTING)
   # same provider sources are compiled again with test-only synchronization
   # points into an uninstalled library; the installed gige_mel_provider never
   # defines GIGE_MEL_PROVIDER_TEST_SEAMS.
-  add_library(gige_mel_provider_test_seams SHARED EXCLUDE_FROM_ALL src/provider.cpp src/factories.cpp src/config_parser.cpp)
+  add_library(gige_mel_provider_test_seams SHARED EXCLUDE_FROM_ALL ${gige_mel_provider_sources})
+  gige_mel_hide_provider_components(gige_mel_provider_test_seams)
   target_include_directories(gige_mel_provider_test_seams SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann-json/include)
   target_include_directories(gige_mel_provider_test_seams PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(gige_mel_provider_test_seams PUBLIC gige_mel_headers

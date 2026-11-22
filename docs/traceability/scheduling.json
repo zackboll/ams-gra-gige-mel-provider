@@ -27,8 +27,8 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
-          "symbol": "ChannelCore::destroy"
+          "path": "src/provider/channel_core.cpp",
+          "symbol": "ChannelCore::~ChannelCore"
         }
       ],
       "behavior": "Detachment retires the owned session and drains reserved or entered callbacks.",
@@ -77,7 +77,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "SchedulingChannelImpl::send(PrioritizedTrackListCmd)"
         }
       ],
@@ -130,7 +130,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::TaskExecutingRep)"
         }
       ],
@@ -183,7 +183,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "SchedulingChannelImpl::registerMetadataCallback(ExecuteTaskAck)"
         }
       ],
@@ -234,7 +234,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::SchedCreatedRep)"
         }
       ],
@@ -279,7 +279,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::UpdateTrackListResponse)"
         }
       ],
@@ -324,7 +324,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::TaskEvents)"
         }
       ],
@@ -377,7 +377,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "GIGE_UNSUPPORTED_CALLBACK(ir::ScanPerformanceReport)"
         }
       ],
@@ -421,7 +421,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "SchedulingChannelImpl::exec(AbortTask)"
         }
       ],
@@ -471,7 +471,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "SchedulingChannelImpl::exec(IRSTScanTask)"
         }
       ],
@@ -521,7 +521,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "SchedulingChannelImpl::exec(IRSTStareTask)"
         }
       ],
@@ -571,7 +571,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/scheduling_channel.cpp",
           "symbol": "SchedulingChannelImpl::exec(IRSTTrackTask)"
         }
       ],

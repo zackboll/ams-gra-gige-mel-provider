@@ -83,9 +83,10 @@ different device/firmware.
 
 ## Capability advertisement audit
 
-[`ControlImpl::init` and `capability`](../src/provider.cpp) build the immutable
+[`ControlImpl::init`](../src/provider/control.cpp) and
+[`capability`](../src/provider/capabilities.cpp) build the immutable
 `Control::getCapabilities()` discovery snapshot at first successful init.
-`ChannelCore::getCapabilities()` recomputes current attached configuration from
+[`ChannelCore::getCapabilities()`](../src/provider/channel_core.cpp) recomputes current attached configuration from
 the same helper. Metadata flags describe registration/delivery, not command
 support. Attach requires an advertised identity/type and the proper listener on
 frame channels. See the [pinned metadata enumeration](https://github.com/open-arsenal/ams-gra-hello-world-sk-interfaces-ir-mel/blob/8d9224519f12b44e0b28815755c56a32a28d24a0/include/irmel/library/irmel-types/ChannelMetadataCapabilityType.h)
@@ -148,7 +149,8 @@ data before the provider can truthfully expose sensor-dependent capabilities.
 
 ## C++ Implementation and evidence
 
-Read [factory exports](../src/factories.cpp), [shared provider implementation](../src/provider.cpp)
+Read [factory exports](../src/factories.cpp), [manager/session construction](../src/provider.cpp),
+the [private provider component map](architecture.md#private-provider-source-organization)
 and [installed backend/provider interfaces](../include/gige_mel/provider.hpp).
 Then use the [operation-level tests and gap report](mel-traceability-evidence.md)
 to cross-check each claim against its exact assertion and environment. See

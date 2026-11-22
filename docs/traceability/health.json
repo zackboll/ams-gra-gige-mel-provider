@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::~HealthChannelImpl"
         }
       ],
@@ -78,7 +78,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::LFStatus)"
         }
       ],
@@ -136,11 +136,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::registerMetadataCallback(MFA_Status)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::publish"
         }
       ],
@@ -206,11 +206,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::registerMetadataCallback(BIT_Status)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::publish"
         }
       ],
@@ -272,11 +272,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::registerMetadataCallback(SubsystemStatusResp)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::publish"
         }
       ],
@@ -342,7 +342,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::GIGE_UNSUPPORTED_CALLBACK(mel::DiscreteStatus)"
         }
       ],
@@ -408,7 +408,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::GIGE_UNSUPPORTED_CALLBACK(mel::MFA_SecurityAuditRecord)"
         }
       ],
@@ -474,11 +474,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::registerMetadataCallback(MFA_StatusDetailed)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::publish"
         }
       ],
@@ -540,7 +540,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/health_channel.cpp",
           "symbol": "HealthChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)"
         }
       ],

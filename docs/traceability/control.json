@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::~ControlImpl"
         }
       ],
@@ -70,7 +70,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::init"
         }
       ],
@@ -129,15 +129,15 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::getCapabilities"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::init"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/capabilities.cpp",
           "symbol": "capability"
         }
       ],
@@ -199,7 +199,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::getVersionInfo"
         }
       ],
@@ -251,7 +251,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::attachChannel"
         }
       ],
@@ -301,7 +301,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::detachChannel"
         }
       ],

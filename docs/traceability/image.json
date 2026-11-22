@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::~ImageChannelImpl"
         }
       ],
@@ -75,11 +75,11 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::send(CameraCommand)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::camera_command"
         }
       ],
@@ -147,7 +147,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::send(NavigationReport)"
         }
       ],
@@ -216,7 +216,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::registerMetadataCallback(BadPixelList)"
         }
       ],
@@ -277,7 +277,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::OpticalDistortionMap)"
         }
       ],
@@ -331,11 +331,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::registerMetadataCallback(LineOfSightReport)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::publish_los"
         }
       ],
@@ -397,7 +397,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::LineOfSightQuaternion)"
         }
       ],
@@ -451,11 +451,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::registerMetadataCallback(LineOfSightEuler)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::publish_los"
         }
       ],
@@ -517,11 +517,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::registerMetadataCallback(CameraCommandResp)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::on_camera_reply"
         }
       ],
@@ -587,11 +587,11 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::registerMetadataCallback(NavigationReportResp)"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::send(NavigationReport)"
         }
       ],
@@ -642,7 +642,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::registerMetadataCallback(LOS3D_KinematicsType)"
         }
       ],
@@ -696,7 +696,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectMessage)"
         }
       ],
@@ -742,7 +742,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::CandidateObjectPreProcMessage)"
         }
       ],
@@ -788,7 +788,7 @@
       },
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/image_channel.cpp",
           "symbol": "ImageChannelImpl::GIGE_UNSUPPORTED_CALLBACK(ir::NUC_TempData)"
         }
       ],
@@ -827,7 +827,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/channel_core.cpp",
           "symbol": "ChannelCore::~ChannelCore"
         }
       ],
@@ -879,7 +879,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/frame_delivery.cpp",
           "symbol": "ChannelCore::run"
         },
         {

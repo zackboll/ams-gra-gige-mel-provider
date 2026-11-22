@@ -29,11 +29,11 @@
           "symbol": "Manager"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/runtime.cpp",
           "symbol": "Runtime::~Runtime"
         },
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/control.cpp",
           "symbol": "ControlImpl::~ControlImpl"
         }
       ],

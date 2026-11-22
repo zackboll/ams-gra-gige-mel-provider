@@ -27,7 +27,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.hpp",
           "symbol": "HostBuffer (implicit destructor)"
         }
       ],
@@ -72,7 +72,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::init"
         }
       ],
@@ -115,7 +115,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::getBufferAddress"
         }
       ],
@@ -158,7 +158,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::getImageAddress"
         }
       ],
@@ -201,7 +201,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::getSize"
         }
       ],
@@ -244,7 +244,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::getContext"
         }
       ],
@@ -287,7 +287,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::release"
         }
       ],
@@ -330,7 +330,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::getFlags"
         }
       ],
@@ -373,7 +373,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::addFlag"
         }
       ],
@@ -418,7 +418,7 @@
       "metadata": null,
       "implementation": [
         {
-          "path": "src/provider.cpp",
+          "path": "src/provider/host_buffer.cpp",
           "symbol": "HostBuffer::setFlags"
         }
       ],

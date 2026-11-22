@@ -1,0 +1,5 @@
+/* Keep private component types, including compiler-generated STL instances,
+   local to each provider library. No public symbol versions are introduced. */
+{
+  local: *provider_detail*;
+};
