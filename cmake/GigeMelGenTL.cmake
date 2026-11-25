@@ -23,7 +23,8 @@ message(STATUS "GenTL feasibility probe: verified EMVA GenTL 1.6 header in ${GIG
 add_library(gige_mel_gentl_header INTERFACE)
 target_include_directories(gige_mel_gentl_header SYSTEM INTERFACE "${GIGE_MEL_GENTL_INCLUDE_DIR}")
 
-add_library(gige_mel_gentl_consumer STATIC src/gentl/gentl_consumer.cpp)
+add_library(gige_mel_gentl_consumer STATIC
+  src/transport/gentl/gentl_consumer.cpp)
 target_include_directories(gige_mel_gentl_consumer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(gige_mel_gentl_consumer PUBLIC gige_mel_backend
   PRIVATE gige_mel_gentl_header gige_mel_build_options ${CMAKE_DL_LIBS})

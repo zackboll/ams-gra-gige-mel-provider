@@ -22,7 +22,7 @@
 // error (no native call) instead of deadlocking.
 
 #include "device_features.hpp"
-#include "gentl/gentl_consumer.hpp"
+#include "transport/gentl/gentl_consumer.hpp"
 
 #include <gige_mel/backend.hpp>
 

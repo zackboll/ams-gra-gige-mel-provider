@@ -6,7 +6,7 @@ The reference extracts undocumented project symbols; absence of prose on private
 internals is not treated as a warning or a build failure.
 
 Baseline with Doxygen **1.14.0**: one warning, in
-[`gige_mel::gentl::Device::with_registers`](../src/gentl/gentl_consumer.cpp).
+[`gige_mel::gentl::Device::with_registers`](../src/transport/gentl/gentl_consumer.cpp).
 Doxygen extracts the declaration in the class reference and displays the full
 implementation in the source browser, but cannot pair its definition with the
 declaration because it resolves the `reg::Status` alias incorrectly inside the

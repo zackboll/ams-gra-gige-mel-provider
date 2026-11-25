@@ -282,6 +282,21 @@ selectable policy implementations without a stable cross-toolchain ABI.
 
 Examples of profile concerns include exposure units, `OffsetX`/`OffsetY` handling, ROI increments, when offsets must be cleared before resizing, whether acquisition must stop, and whether frame-rate controls interact with trigger mode. A generic string-to-string feature bag loses type, availability, range, and unit information; avoid making it the core contract.
 
+### GenTL transport and camera backend
+
+- The transport foundation in [`src/transport/gentl/`](../src/transport/gentl/)
+  loads and manages CTI producers. Its low-level consumer API owns native
+  system, interface, device, stream and buffer lifetimes and provides port
+  operations. It does not implement `ICameraBackend`. The probe option
+  `GIGE_MEL_BUILD_GENTL_PROBE` and its fixtures exercise it independently.
+- The camera backend in [`src/backends/gentl/`](../src/backends/gentl/)
+  implements the common camera backend and device contracts. It uses the
+  transport consumer and integrates GenApi readback, camera profile validation
+  and exact device selection. The backend remains read-only: `apply()` and
+  `create_stream()` are unsupported.
+  `GIGE_MEL_BUILD_GENTL_BACKEND` is a separate opt-in; neither layer is installed
+  or linked into the default MEL provider or backend catalog.
+
 ## Frame and buffer ownership
 
 There are two independent leases:

@@ -3,7 +3,7 @@
 // device is a separate command-line request; configuration writes, register
 // writes and remote-device AcquisitionStart are not implemented at all.
 // No image is published through MEL. Exit: 0 ok, 1 failure, 2 usage.
-#include "gentl/gentl_consumer.hpp"
+#include "transport/gentl/gentl_consumer.hpp"
 #include "gentl_wire_preflight.hpp"
 
 #include <charconv>

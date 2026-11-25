@@ -7,7 +7,7 @@ See [executed validation](GIGE-MEL-GENTL-003A-validation.md).
 ## Boundaries and foundation audit
 
 Reviewed repository instructions, README, implementation profile, architecture's
-adapter/ownership/shutdown boundaries, `src/gentl/`, `src/backends/gentl/`, probe,
+adapter/ownership/shutdown boundaries, `src/transport/gentl/`, `src/backends/gentl/`, probe,
 existing qualification supervisor, Aravis loopback fixture, controlled-GVCP tests
 and codec, single-owner design, and GENTL-003 design/validation.
 

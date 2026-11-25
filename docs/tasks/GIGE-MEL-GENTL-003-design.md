@@ -7,7 +7,7 @@ Branch: `feature/gige-mel-gentl-003-producer-qualification`. Incorporated `main`
 ## Scope and audit
 
 Reviewed the repository instructions, README, implementation profile,
-architecture's adapter/profile and ownership boundaries, `src/gentl/`,
+architecture's adapter/profile and ownership boundaries, `src/transport/gentl/`,
 `src/backends/gentl/`, `src/device_features.hpp`, `src/profiles/camera_profile.hpp`,
 `camera_profiles/cognex_cic_5000r/`, probe, backend fixture example, both prior
 GenTL designs/validation records, and historical Cognex record.
