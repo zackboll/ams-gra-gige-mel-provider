@@ -4,10 +4,43 @@
 #include "stream_state.hpp"
 #include "../config_parser.hpp"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace gige_mel {
 namespace [[gnu::visibility("hidden")]] provider_detail {
+namespace {
+
+// Under the operations lock, after admission and before any source is opened.
+// Keep exception containment specific to the new, non-reentrant extension.
+backend::Result<backend::ImageFieldOfView> resolve_image_field_of_view(
+    const Runtime& runtime, const backend::CameraConfiguration& configuration) {
+    const auto* source = dynamic_cast<const backend::IImageFieldOfViewSource*>(runtime.device.get());
+    backend::ImageFieldOfView value;
+    if (source) {
+        try {
+            auto result = source->image_field_of_view(configuration);
+            if (!result) return backend::Error{result.error().code, "Image FOV source: " + result.error().message};
+            value = result.value();
+        } catch (const std::exception& error) {
+            return backend::Error{backend::ErrorCode::io_error, std::string("Image FOV source exception: ") + error.what()};
+        } catch (...) {
+            return backend::Error{backend::ErrorCode::io_error, "Image FOV source threw an unknown exception"};
+        }
+    } else {
+        value = {configuration.width * runtime.settings.horizontal_radians_per_pixel,
+                 configuration.height * runtime.settings.vertical_radians_per_pixel};
+    }
+    const auto valid = [](double angle) { return std::isfinite(angle) && angle > 0; };
+    if (!valid(value.horizontal_radians) || !valid(value.vertical_radians)) {
+        const auto* axis = !valid(value.horizontal_radians) ? "horizontal" : "vertical";
+        return backend::Error{backend::ErrorCode::invalid_argument,
+            std::string(source ? "Image FOV source: " : "Image FOV session pitch: ") + axis + " angle must be finite and positive"};
+    }
+    return value;
+}
+
+} // namespace
 
 ChannelCore::ChannelCore(std::shared_ptr<Runtime> runtime, ir::Config config)
     : runtime_(std::move(runtime)), config_(std::move(config)) {}
@@ -122,6 +155,11 @@ ir::Return ChannelCore::enable() {
         static_cast<std::size_t>(runtime_->stack_support.packed_bytes) : layout->image_bytes;
     for (const auto& buffer : buffers_) {
         if (buffer->outstanding() || static_cast<std::size_t>(buffer->getSize()) < bytes) return ir::Return::Fail;
+    }
+    if (type() == ir::ChannelType::IRSTImage) {
+        auto fov = resolve_image_field_of_view(*runtime_, state->configuration);
+        if (!fov) { runtime_->report(fov.error().message); return ir::Return::Fail; }
+        state->image_field_of_view = fov.value();
     }
     try {
         if (type() == ir::ChannelType::StackedImage) {

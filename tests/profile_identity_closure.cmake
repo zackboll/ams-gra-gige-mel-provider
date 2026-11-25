@@ -1,12 +1,14 @@
-# The matched-C++ module identity covers navigation and default state
+# The matched-C++ module identity covers optional interfaces and default state
 # inheritance/layout headers, including comment-only changes. Runs on a
 # private copy of the closure; never edits the checkout or a generated ID.
 # Usage: cmake -DSOURCE_ROOT=<checkout> -DWORK=<scratch dir> -P profile_identity_closure.cmake
 cmake_minimum_required(VERSION 3.24)
 include("${SOURCE_ROOT}/cmake/ProfileBuildIdentity.cmake")
 set(headers include/gige_mel/backend.hpp include/gige_mel/navigation.hpp src/device_features.hpp
+  include/gige_mel/image_field_of_view.hpp src/profiles/image_field_of_view.hpp
   src/profiles/frame_policy.hpp src/profiles/camera_profile.hpp src/profiles/profile_module.hpp
-  src/profiles/navigation_handler.hpp src/profiles/mono_free_running_profile.hpp src/profiles/mono_free_running.hpp)
+  src/profiles/navigation_handler.hpp src/profiles/mono_free_running_profile.hpp src/profiles/mono_free_running.hpp
+  src/profiles/mono_free_running_device.hpp)
 file(REMOVE_RECURSE "${WORK}")
 foreach(path ${headers} cmake/ProfileBuildIdentity.cmake cmake/profile_build_identity.hpp.in)
   get_filename_component(directory "${WORK}/tree/${path}" DIRECTORY)
@@ -27,13 +29,18 @@ identity(repeat)
 if(NOT original STREQUAL repeat)
   message(FATAL_ERROR "profile identity is not deterministic")
 endif()
-foreach(header navigation_handler.hpp mono_free_running_profile.hpp mono_free_running.hpp)
-  set(path "src/profiles/${header}")
+foreach(path src/profiles/navigation_handler.hpp src/profiles/mono_free_running_profile.hpp
+    src/profiles/mono_free_running.hpp src/profiles/mono_free_running_device.hpp
+    include/gige_mel/image_field_of_view.hpp src/profiles/image_field_of_view.hpp)
   file(APPEND "${WORK}/tree/${path}" "\n// comment-only change\n")
   identity(changed)
   if(original STREQUAL changed)
-    message(FATAL_ERROR "${header} is not part of the profile identity closure")
+    message(FATAL_ERROR "${path} is not part of the profile identity closure")
   endif()
   file(COPY_FILE "${SOURCE_ROOT}/${path}" "${WORK}/tree/${path}")
-  message(STATUS "Profile identity covers ${header} (comment-only change detected)")
+  identity(restored)
+  if(NOT original STREQUAL restored)
+    message(FATAL_ERROR "profile identity did not recover after restoring ${path}")
+  endif()
+  message(STATUS "Profile identity covers ${path} (comment-only change detected)")
 endforeach()

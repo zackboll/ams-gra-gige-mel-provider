@@ -1,6 +1,7 @@
 #include "profile_loader.hpp"
 #include "profiles/profile_module.hpp"
 #include "profiles/navigation_handler.hpp"
+#include "profiles/image_field_of_view.hpp"
 
 #include <cstring>
 #include <dlfcn.h>
@@ -47,16 +48,12 @@ private:
     const std::shared_ptr<const p::ICameraProfileState> state_;
 };
 
-// Created only when the module's own state implements the optional handler, so
-// the host wrapper neither hides nor fabricates the capability. The handler is
-// a base subobject of the retained module state: it lives exactly as long as
-// State::state_, which is destroyed before the module pin. No extra ownership,
-// worker or borrowed feature service is retained.
-class NavigationState final : public State, public p::IProfileNavigationHandler {
+// Each forwarding base borrows a subobject of State::state_, whose lifetime
+// ends before the module pin. Only compose bases for capabilities actually
+// exposed by the module state.
+class NavigationForwarder : public p::IProfileNavigationHandler {
 public:
-    NavigationState(std::shared_ptr<Module> module, std::shared_ptr<const p::ICameraProfileState> state,
-                    const p::IProfileNavigationHandler& handler)
-        : State(std::move(module), std::move(state)), handler_(handler) {}
+    explicit NavigationForwarder(const p::IProfileNavigationHandler& handler) : handler_(handler) {}
     b::Result<p::NavigationOperation> prepare_navigation(const b::NavigationReport& report) const override {
         return handler_.prepare_navigation(report);
     }
@@ -64,10 +61,34 @@ private:
     const p::IProfileNavigationHandler& handler_;
 };
 
+class FieldOfViewForwarder : public p::IProfileImageFieldOfView {
+public:
+    explicit FieldOfViewForwarder(const p::IProfileImageFieldOfView& handler) : handler_(handler) {}
+    b::Result<b::ImageFieldOfView> image_field_of_view(const b::CameraConfiguration& configuration) const override {
+        return handler_.image_field_of_view(configuration);
+    }
+private:
+    const p::IProfileImageFieldOfView& handler_;
+};
+
+template<class... Forwarders>
+class OptionalState final : public State, public Forwarders... {
+public:
+    template<class... Handlers>
+    OptionalState(const std::shared_ptr<Module>& module, std::shared_ptr<const p::ICameraProfileState> state,
+                  const Handlers&... handlers)
+        : State(module, std::move(state)), Forwarders(handlers)... {}
+};
+
 std::shared_ptr<const p::ICameraProfileState> wrap_state(const std::shared_ptr<Module>& module,
                                                        std::shared_ptr<const p::ICameraProfileState> state) {
-    if (const auto* handler = p::navigation_handler(*state))
-        return std::make_shared<NavigationState>(module, std::move(state), *handler);
+    const auto* navigation = p::navigation_handler(*state);
+    const auto* fov = p::image_field_of_view_handler(*state);
+    if (navigation && fov)
+        return std::make_shared<OptionalState<NavigationForwarder, FieldOfViewForwarder>>(
+            module, std::move(state), *navigation, *fov);
+    if (navigation) return std::make_shared<OptionalState<NavigationForwarder>>(module, std::move(state), *navigation);
+    if (fov) return std::make_shared<OptionalState<FieldOfViewForwarder>>(module, std::move(state), *fov);
     return std::make_shared<State>(module, std::move(state));
 }
 

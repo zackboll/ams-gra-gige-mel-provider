@@ -42,6 +42,15 @@ debug-STL setting, C++ level, configuration/flags hash, sanitizer setting and
 interface-header closure SHA-256. A mismatch fails explicitly before the factory.
 Do not copy/edit the generated identity to bypass a mismatch.
 
+The same standalone build produces `libvirtual_optics_profile.so`
+(`test_virtual_optics_v1`). Its `open()` explicitly constructs an inherited
+monochrome state with immutable **virtual** lens constants and an optional Image
+FOV operation. See the [pixel-edge model and fixture bounds](../../docs/camera-profile-examples.md#inherited-virtual-optics).
+With `GIGE_MEL_MODULE_NEGATIVE_TESTS=ON`, it also builds a test variant exposing
+both FOV and the fictional navigation handler. Both use the unchanged discovery
+entry point and have no SDK/provider dependency. These optics are exercised
+only in the SDK-free Image fixture, not by any production adapter.
+
 Required headers: `profiles/profile_module.hpp` and its generated
 `profile_build_identity.hpp`, plus the SDK-free transitive headers in this
 checkout. The source tree is the initial development header bundle; no installed

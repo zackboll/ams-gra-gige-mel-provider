@@ -1,4 +1,6 @@
 #pragma once
+
+#include <gige_mel/image_field_of_view.hpp>
 #include <gige_mel/backend.hpp>
 #include <condition_variable>
 #include <mutex>
@@ -89,8 +91,10 @@ struct Recording {
     std::shared_ptr<Subscription> latest;
     unsigned opens{0}, image_streams{0};
     bool fail_open{false};
+    bool unusable_image_fov{false};
+    unsigned image_fov_requests{0};
 };
-class Device final : public b::ICameraDevice, public b::IStackedImageSource {
+class Device : public b::ICameraDevice, public b::IStackedImageSource {
     std::shared_ptr<b::ICameraDevice> camera_;
     std::shared_ptr<Recording> recording_;
 public:
@@ -111,6 +115,16 @@ public:
         return std::unique_ptr<b::IStackedImageStream>{std::make_unique<Stream>(s)};
     }
 };
+class DeviceWithUnusableFov final : public Device, public b::IImageFieldOfViewSource {
+    std::shared_ptr<Recording> recording_;
+public:
+    DeviceWithUnusableFov(std::shared_ptr<b::ICameraDevice> camera, std::shared_ptr<Recording> recording)
+        : Device(std::move(camera), recording), recording_(std::move(recording)) {}
+    b::Result<b::ImageFieldOfView> image_field_of_view(const b::CameraConfiguration&) const override {
+        ++recording_->image_fov_requests;
+        return b::Error{b::ErrorCode::unsupported, "fixture Image FOV unavailable"};
+    }
+};
 class Backend final : public b::ICameraBackend {
     std::shared_ptr<b::ICameraBackend> camera_{b::make_synthetic_backend()};
     std::shared_ptr<Recording> recording_;
@@ -120,6 +134,8 @@ public:
     b::Result<std::vector<b::DeviceInfo>> enumerate() override { return camera_->enumerate(); }
     b::Result<std::shared_ptr<b::ICameraDevice>> open(std::string_view id) override {
         auto c = camera_->open(id); if (!c) return c.error();
+        if (recording_->unusable_image_fov)
+            return std::shared_ptr<b::ICameraDevice>{std::make_shared<DeviceWithUnusableFov>(std::move(c).value(), recording_)};
         return std::shared_ptr<b::ICameraDevice>{std::make_shared<Device>(std::move(c).value(), recording_)};
     }
 };

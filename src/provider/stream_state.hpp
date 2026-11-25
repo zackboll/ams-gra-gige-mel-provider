@@ -2,6 +2,7 @@
 
 #include "runtime.hpp"
 #include "host_buffer.hpp"
+#include <gige_mel/image_field_of_view.hpp>
 #include <irmel/library/irmel-types/ImageListener.h>
 
 namespace gige_mel {
@@ -9,7 +10,7 @@ namespace [[gnu::visibility("hidden")]] provider_detail {
 
 /** @brief One enabled acquisition's strongly owned worker context.
  * Retains Runtime, listener, destination wrappers and exactly one active
- * source (Image or Stack). Configuration, generation, location and buffer
+ * source (Image or Stack). Configuration, generation, Image FOV, location and buffer
  * membership are frozen at enable; no per-frame configuration lookup can
  * relabel queued data. The worker owns this state independently of the channel
  * and uses weak channel/Control links, pinning them only for delivery.
@@ -28,6 +29,7 @@ struct StreamState {
     std::vector<std::shared_ptr<HostBuffer>> buffers;
     backend::CameraConfiguration configuration;
     std::uint64_t generation{};
+    backend::ImageFieldOfView image_field_of_view; ///< Validated owned angles for Image only.
     mel::ComponentLocation location;
     std::atomic<bool> stopping{false};
     std::atomic<bool> failed{false};

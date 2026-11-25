@@ -65,6 +65,7 @@ EXAMPLE_SOURCES = {
     "Rate-limited module descriptor": "examples/profile_module/module.cpp",
     "Navigation record profile implementation": "examples/profile_module/navigation_record_policy.hpp",
     "Navigation record module descriptor": "examples/profile_module/navigation_module.cpp",
+    "Virtual optics profile and module": "examples/profile_module/virtual_optics_module.cpp",
 }
 EXAMPLE_BUILDS = {
     "Cognex CMakeLists.txt": "camera_profiles/cognex_cic_5000r/CMakeLists.txt",
@@ -76,12 +77,13 @@ SECTIONS = {
         "ICameraDevice", "IFrameStream", "FrameLease", "FrameDescriptor", "CameraConfiguration",
         "CameraCapabilities", "NavigationReport", "INavigationSink", "ILineOfSightSource",
         "ILineOfSightStream", "IStackedImageSource", "IStackedImageStream", "StackLease",
-        "ITaskExecutionSource", "ITaskExecutionSession",
+        "ITaskExecutionSource", "ITaskExecutionSession", "ImageFieldOfView", "IImageFieldOfViewSource",
     )),
     "api_extensions.html": ("Internal, uninstalled extension interfaces", (
         "ICameraProfile", "ICameraProfileState", "IDeviceFeatures", "BackendCatalog",
         "Descriptor", "load_profile_module", "select_session", "validate_frame", "apply_configuration",
         "IProfileNavigationHandler", "navigation_handler", "ProfileNavigationBridge",
+        "IProfileImageFieldOfView", "retain_image_field_of_view",
     )),
     "api_core.html": ("Core implementation reference", (
         "provider.cpp", "runtime.cpp", "control.cpp", "callback_context.cpp", "channel_core.cpp",
@@ -97,7 +99,7 @@ SECTIONS = {
 # the declaration or an automatically generated source/implementation link.
 INSTALLED_METHODS = (
     "make_api_manager", "provider_statistics", "open", "apply", "receive", "request_stop",
-    "submit_navigation", "open_line_of_sight", "open_stacked_images",
+    "submit_navigation", "open_line_of_sight", "open_stacked_images", "image_field_of_view",
 )
 CORE = "api_core.html"
 PROVIDER_SCOPE = "gige_mel::provider_detail"

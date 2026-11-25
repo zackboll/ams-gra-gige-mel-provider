@@ -77,6 +77,18 @@ so even comment-only edits in that closure require a host
 and module rebuild from matching inputs. See
 @ref md_docs_2runtime-selection "runtime selection and explicit module loading".
 
+@subsection extension_image_fov Optional profile Image field of view
+
+@ref gige_mel::backend::profiles::IProfileImageFieldOfView interprets the complete
+actual configuration against an immutable deployment model. Device composition
+can use @ref gige_mel::backend::profiles::retain_image_field_of_view to forward
+through the selected state, including an independently pinned module state.
+The operation is bounded, synchronous, and non-reentrant, with no feature I/O.
+The common provider validates and freezes the owned radians before acquisition.
+The module loader preserves FOV and navigation independently; neither companion
+changes base vtables or the descriptor. See
+@ref md_docs_2camera-profile-examples "the inherited virtual-optics example".
+
 @section extension_registers Register and transport boundaries
 
 An explicitly opened adapter may expose @ref gige_mel::backend::device_registers::IRegisterDevice.

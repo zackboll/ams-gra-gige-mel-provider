@@ -177,8 +177,8 @@ void ChannelCore::run(const std::shared_ptr<StreamState>& state, const std::weak
             header.setFlags({ir::ImageFlag::StareSnapshot});
             header.setColumnOffset(c.offset_x);
             header.setRowOffset(c.offset_y);
-            header.setHorizontalFieldOfView(d.width * state->runtime->settings.horizontal_radians_per_pixel);
-            header.setVerticalFieldOfView(d.height * state->runtime->settings.vertical_radians_per_pixel);
+            header.setHorizontalFieldOfView(state->image_field_of_view.horizontal_radians);
+            header.setVerticalFieldOfView(state->image_field_of_view.vertical_radians);
             header.setFace({state->location, 0});
             const auto control_pin = state->runtime->control.load().lock();
             const auto channel = weak.lock();

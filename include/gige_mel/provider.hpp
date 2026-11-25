@@ -23,11 +23,13 @@ struct ProviderSettings {
     /// Per-channel registration limit, inclusive range [1, 256]. Not the
     /// number of native acquisition buffers.
     std::size_t maximum_registered_buffers{16};
-    /// Finite positive horizontal radians per pixel; multiplied by image width
-    /// for MEL field of view. Default is virtual optics, not a measurement.
+    /// Finite positive horizontal radians per pixel. Without an explicit
+    /// Image FOV source, multiplied by frozen image width on enable. Default
+    /// is virtual optics, not a measurement.
     double horizontal_radians_per_pixel{0.001};
-    /// Finite positive vertical radians per pixel; multiplied by image height.
-    /// Use independently characterized values for physical optics.
+    /// Finite positive vertical radians per pixel; multiplied by frozen image
+    /// height if no explicit Image FOV source. Use independently characterized
+    /// values for physical optics.
     double vertical_radians_per_pixel{0.001};
     /// Required clock label on accepted Image frames. Must not be unspecified;
     /// matching it does not convert clocks or qualify integration-start timing.
