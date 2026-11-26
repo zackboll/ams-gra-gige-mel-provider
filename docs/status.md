@@ -31,6 +31,11 @@ unsupported stubs are not equivalent to functional, advertised capabilities.
 | Aravis or Pleora / `cognex_cic_5000r_v1` | Independently built matched-C++ module; exact COGNEX/CIC-5000R/V3.7-1 identity; Mono8 and conservative **1/2/4/5/8/10 Hz** admission | [Module guide](../camera_profiles/cognex_cic_5000r/README.md), [QE-COGNEX-MODULE](qualification-evidence.md#sdk-free-provider-and-profiles). Earlier physical observations informed policy; no physical qualification of the module, Mono12 or clocks. |
 | GenTL / injected existing profiles | Default-OFF, internal/uninstalled **read-only** backend foundation using EMVA GenTL 1.6 and Aravis 0.8.36 GenApi. Enumerate, exact open/close, profile admission and readback; no `apply`, streaming or catalog registration | [QE-GENTL-BACKEND](qualification-evidence.md#gentl-producers-and-consumer) is controlled simulated-register fixture evidence only. Reuse of the Cognex module does not change its Aravis/Pleora compatibility metadata. |
 
+The [explicit two-stream synthetic fixture](tasks/GIGE-MEL-MSTREAM-001-design.md)
+has one device acquisition owner and independently received Mono8 and Mono12
+products with fixed geometry and rates. It adds no MEL factory selection,
+Image capability, or native SDK reception.
+
 The [reusable monochrome defaults](camera-profile-authoring.md#reusing-the-monochrome-defaults)
 are internal and uninstalled. Cognex inherits capabilities and actual readback
 while retaining model-specific admission. [QE-SDKFREE-PROFILE-POLICY](qualification-evidence.md#sdk-free-provider-and-profiles)

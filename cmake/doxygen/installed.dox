@@ -34,7 +34,10 @@ Header | Entry points
 
 @subsection installed_frame_ownership Frame and Stream Ownership
 
-Follow @ref gige_mel::backend::IFrameStream from start through
+Discover sources with @ref gige_mel::backend::ICameraDevice::stream_topology
+and select transports in @ref gige_mel::backend::ICameraDevice::start_acquisition.
+The returned @ref gige_mel::backend::IFrameStream receivers are already started.
+Follow each receiver through
 @ref gige_mel::backend::IFrameStream::receive "receive()" and
 @ref gige_mel::backend::IFrameStream::request_stop "request_stop()". See
 @ref gige_mel::backend::FrameDescriptor and @ref gige_mel::backend::FrameTimestamp

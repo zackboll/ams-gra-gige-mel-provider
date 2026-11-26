@@ -3,6 +3,7 @@
 #include <gige_mel/navigation.hpp>
 #include <gige_mel/line_of_sight.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <array>
 #include <cstddef>
@@ -133,6 +134,83 @@ inline std::optional<ImageLayout> image_layout(PixelFormat format, std::uint32_t
                        format == PixelFormat::mono12 ? ByteOrder::little_endian : ByteOrder::not_applicable};
 }
 
+/// Device-local transport key, not a product, format, or MEL channel ID.
+struct StreamId {
+    std::uint32_t value{}; ///< Zero is the legacy singleton stream key.
+    bool operator==(const StreamId&) const = default;
+};
+
+/// Device-local logical product key. Several products may use the same stream.
+struct ImageProductId {
+    std::uint32_t value{}; ///< Zero is the legacy singleton product key.
+    bool operator==(const ImageProductId&) const = default;
+};
+
+/// One selectable transport receiver on the opened device.
+struct TransportStreamDescriptor {
+    StreamId id;
+};
+
+/// @brief Effective source image properties, not a mutable configuration API.
+/// Use image_layout() for the packed size. Fixed source stride and readable
+/// span, when known, describe the source rather than the packed destination.
+struct ImageProductDescriptor {
+    ImageProductId id;
+    StreamId source;
+    PixelFormat pixel_format{PixelFormat::mono8};
+    CameraConfiguration configuration;
+    std::optional<std::size_t> row_stride_bytes;
+    std::optional<std::size_t> span_bytes;
+};
+
+/// Device-local, owned discovery snapshot. Empty means no image acquisition.
+struct StreamTopology {
+    std::vector<TransportStreamDescriptor> streams;
+    std::vector<ImageProductDescriptor> products;
+};
+
+/// Reject empty selections and duplicate transport IDs before any setup.
+inline Status validate_stream_selection(std::span<const StreamId> selected) {
+    if (selected.empty()) return Error{ErrorCode::invalid_argument, "Select at least one transport stream"};
+    for (auto id = selected.begin(); id != selected.end(); ++id) {
+        if (std::find(selected.begin(), id, *id) != id)
+            return Error{ErrorCode::invalid_argument, "Duplicate selected transport stream ID"};
+    }
+    return {};
+}
+
+/// @brief Validate unique IDs, product/source references and checked image extents.
+/// This does not qualify native representation, frame contents, or timing.
+inline Status validate_stream_topology(const StreamTopology& topology) {
+    const auto& streams = topology.streams;
+    const auto& products = topology.products;
+    for (auto stream = streams.begin(); stream != streams.end(); ++stream) {
+        const auto same_id = [&](const auto& other) { return other.id == stream->id; };
+        if (std::any_of(streams.begin(), stream, same_id))
+            return Error{ErrorCode::invalid_argument, "Duplicate transport stream ID"};
+        if (std::none_of(products.begin(), products.end(), [&](const auto& p) { return p.source == stream->id; }))
+            return Error{ErrorCode::invalid_argument, "Transport stream has no image product"};
+    }
+    for (auto product = products.begin(); product != products.end(); ++product) {
+        if (std::any_of(products.begin(), product, [&](const auto& p) { return p.id == product->id; }))
+            return Error{ErrorCode::invalid_argument, "Duplicate image product ID"};
+        if (std::none_of(streams.begin(), streams.end(), [&](const auto& s) { return s.id == product->source; }))
+            return Error{ErrorCode::invalid_argument, "Image product refers to an unknown transport stream"};
+        const auto& c = product->configuration;
+        const auto layout = image_layout(product->pixel_format, c.width, c.height);
+        if (!layout)
+            return Error{ErrorCode::invalid_argument, "Unsupported image representation or geometry"};
+        const auto stride = product->row_stride_bytes.value_or(layout->row_bytes);
+        if (stride < layout->row_bytes || c.height - 1 >
+                (std::numeric_limits<std::size_t>::max() - layout->row_bytes) / stride)
+            return Error{ErrorCode::invalid_argument, "Invalid or overflowing image stride"};
+        const auto min_span = (c.height - 1) * stride + layout->row_bytes;
+        if (product->span_bytes && *product->span_bytes < min_span)
+            return Error{ErrorCode::invalid_argument, "Image span does not cover the final row"};
+    }
+    return {};
+}
+
 /// @brief Device/profile envelope and source facts, not a list of valid requests.
 /// Sensor extent and geometry increments are in pixels; rate bounds are in
 /// integer Hz and minimum exposure is a duration. The adapter still validates
@@ -154,7 +232,7 @@ struct CameraCapabilities {
     /// Explicit source evidence of an empty defect map across supported
     /// configurations; false means no such evidence, not proof of defects.
     bool known_empty_defect_map{false};
-    /// Authoritative selected backend/device format, not a CameraCommand setting.
+    /// Selected format for the legacy singleton view, not a CameraCommand setting.
     PixelFormat pixel_format{PixelFormat::mono8};
 };
 
@@ -209,6 +287,8 @@ struct FrameDescriptor {
     std::uint64_t configuration_generation{0}; ///< Caller token from IFrameStream::start.
     FrameTimestamp timestamp{};
     CameraConfiguration configuration{}; ///< Effective ROI and timing frozen for this frame.
+    StreamId source{};       ///< Transport receiver that owns this frame's run.
+    ImageProductId product{}; ///< Logical product from that transport, not a MEL channel.
 };
 
 /// @brief Move-only ownership token for immutable host-readable source bytes.
@@ -278,7 +358,8 @@ struct StreamStatistics {
 class IFrameStream {
 public:
     virtual ~IFrameStream() = default;
-    /// @brief Synchronously start a fresh acquisition on an open, stopped stream.
+    /// @brief Synchronously start the legacy singleton receiver on an open device.
+    /// Receivers returned by ICameraDevice::start_acquisition are already started.
     /// @param configuration_generation Caller token to echo on each descriptor
     /// with the effective configuration frozen for this run. Do not replay
     /// frames from earlier runs; use a fresh backend stream generation.
@@ -300,8 +381,9 @@ public:
     /// Signal cancellation and wake a pending receive. Safe concurrently with
     /// receive; does not join its caller-owned thread or wait for lease retirement.
     virtual void request_stop() noexcept = 0;
-    /// Stop acquisition and wake receive, without invalidating outstanding
-    /// leases. Safe concurrently with receive; support repeated stop (the MEL
+    /// Retire this receiver and wake receive, without invalidating outstanding
+    /// leases or terminating another active receiver. The device owns final
+    /// acquisition stop. Safe concurrently with receive; support repeated stop (the MEL
     /// worker and teardown path may both stop). Caller must still join receive.
     /// The void return does not confirm native stop success; adapters may latch
     /// an uncertain native outcome and refuse restart until it is resolved.
@@ -493,9 +575,9 @@ public:
 class ICameraDevice {
 public:
     virtual ~ICameraDevice() = default;
-    /// Return a value snapshot of selected profile bounds and source support.
+    /// Return selected profile bounds and source support for the legacy view.
     virtual CameraCapabilities capabilities() const = 0;
-    /// Return actual effective ROI and timing by value, not the last request.
+    /// Return effective ROI and timing for the legacy singleton view, not the last request.
     /// Fail if readback is unavailable (e.g. disconnected); never invent a snapshot.
     virtual Result<CameraConfiguration> configuration() const = 0;
     /// @brief Apply a complete configuration, not a patch or best-effort success.
@@ -508,8 +590,8 @@ public:
     /// enable until valid configuration is established. Synthetic validation
     /// failures leave state unchanged.
     virtual Result<CameraConfiguration> apply(const CameraConfiguration&) = 0;
-    /// Create a uniquely owned, stopped stream on an open device. Call start
-    /// before receive. A backend may enforce one live stream (busy on a duplicate).
+    /// Legacy singleton path: create a unique stopped receiver. Call start
+    /// before receive. Multi-stream-only devices return unsupported.
     virtual Result<std::unique_ptr<IFrameStream>> create_stream() = 0;
     /// @brief Logically close the device, waking receive and blocking future I/O.
     /// This does not join the caller's receive owner or retire held frame leases.
@@ -517,6 +599,50 @@ public:
     /// close is not a reconnect; report connection loss as disconnected rather
     /// than repeated timeouts. Synthetic close can be repeated successfully.
     virtual Status close() = 0;
+
+    /// @brief Discover selectable streams and products without starting acquisition.
+    /// Implementations return validated topology, or an error, not a partial
+    /// snapshot. Identities are stable for this opened device. The compatibility
+    /// implementation projects the legacy configuration as stream/product zero.
+    virtual Result<StreamTopology> stream_topology() const {
+        auto config = configuration();
+        if (!config) return config.error();
+        StreamTopology topology{{{StreamId{}}},
+            {{ImageProductId{}, StreamId{}, capabilities().pixel_format, config.value(), {}, {}}}};
+        if (auto valid = validate_stream_topology(topology); !valid) return valid.error();
+        return topology;
+    }
+
+    /// @brief Prepare all selected receivers, then start them as one device transaction.
+    /// @param selected Nonempty, duplicate-free device-local keys, borrowed only for this call.
+    /// @param configuration_generation Token echoed on each frame in the selected runs.
+    /// @return Ready-to-receive handles in selection order. Each handle issues
+    /// leases with its source ID and a declared product ID. No partial result on
+    /// failure; retire staged resources and preserve any existing independent
+    /// runs. An uncertain native command outcome requires fail-closed recovery.
+    /// @note The singleton adapter delegates to create_stream() and start().
+    /// Implementations can reject joins during acquisition if not supported.
+    virtual Result<std::vector<std::unique_ptr<IFrameStream>>> start_acquisition(
+        std::span<const StreamId> selected, std::uint64_t configuration_generation) {
+        if (auto valid = validate_stream_selection(selected); !valid) return valid.error();
+        if (selected.size() != 1 || selected.front() != StreamId{})
+            return Error{ErrorCode::unsupported, "Legacy acquisition only supports stream zero"};
+        std::vector<std::unique_ptr<IFrameStream>> receivers;
+        receivers.reserve(1);
+        auto created = create_stream();
+        if (!created) return created.error();
+        auto receiver = std::move(created).value();
+        if (!receiver) return Error{ErrorCode::io_error, "Backend returned no receiver"};
+        try {
+            auto started = receiver->start(configuration_generation);
+            if (!started) return started.error();
+        } catch (...) {
+            receiver->stop();
+            throw;
+        }
+        receivers.push_back(std::move(receiver));
+        return receivers;
+    }
 };
 
 /// @brief Enumerates and explicitly opens cameras through an installed C++ source contract.
@@ -551,5 +677,10 @@ struct SyntheticOptions {
 /// Construct a synthetic backend without device I/O. Allocation may throw;
 /// open validates the supplied options. Not a physical capability claim.
 std::shared_ptr<ICameraBackend> make_synthetic_backend(SyntheticOptions options = {});
+
+/// @brief Explicit fixed two-stream SDK-free fixture (open key synthetic-multi-0).
+/// Source pool size is per stream, [1, 64], validated at open. This is not a
+/// standard factory instance or a MEL profile. Use selected device acquisition.
+std::shared_ptr<ICameraBackend> make_synthetic_multi_stream_backend(std::size_t frame_pool_size = 4);
 
 } // namespace gige_mel::backend

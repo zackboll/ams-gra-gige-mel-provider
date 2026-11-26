@@ -521,6 +521,9 @@ void unsupported_operations_and_readonly() {
     request.frame_rate_hz = 5;
     expect(device->apply(request), ErrorCode::unsupported, "read-only");
     expect(device->create_stream(), ErrorCode::unsupported, "streaming is out of scope");
+    const auto topology = take(device->stream_topology());
+    CHECK(topology.streams.empty() && topology.products.empty());
+    expect(device->start_acquisition(std::array{b::StreamId{}}, 1), ErrorCode::unsupported, "streaming is out of scope");
     CHECK(fixture.count("GCWritePort") == 0 && fixture.count("DSOpen") == 0 && fixture.count("DevOpenDataStream") == 0);
     CHECK(take(device->configuration()) == before);
     // A read-only session never escalates: even a direct feature write is refused

@@ -170,11 +170,16 @@ ir::Return ChannelCore::enable() {
             state->stack_stream = std::move(opened).value();
             if (!state->stack_stream) return ir::Return::Fail;
         } else {
-            auto created = runtime_->device->create_stream();
-            if (!created) { runtime_->report(created.error().message); return ir::Return::Fail; }
-            state->stream = std::move(created).value();
-            auto started = state->stream->start(state->generation);
+            constexpr std::array legacy_image{backend::StreamId{}};
+            auto started = runtime_->device->start_acquisition(legacy_image, state->generation);
             if (!started) { runtime_->report(started.error().message); return ir::Return::Fail; }
+            auto receivers = std::move(started).value();
+            if (receivers.size() != 1 || !receivers.front()) {
+                for (const auto& receiver : receivers) if (receiver) receiver->stop();
+                runtime_->report("backend returned an invalid singleton receiver set");
+                return ir::Return::Fail;
+            }
+            state->stream = std::move(receivers.front());
         }
         {
             std::lock_guard lock(runtime_->state_mutex);

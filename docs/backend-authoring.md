@@ -119,6 +119,24 @@ Opening an unknown device should return `not_found`; a device already exclusivel
 
 The synthetic factory is `make_synthetic_backend(SyntheticOptions)`. Its backend/device identifiers are `synthetic` and `synthetic-0`. Invalid options are reported by `open`; constructing the factory does not perform camera I/O.
 
+### Selected acquisition
+
+`stream_topology()` describes the selectable transports and their logical image
+products without preparing receivers. Validate it before publication with
+`validate_stream_topology()`. Each frame identifies both its source transport and
+its product. A transport can carry several products; do not use a format, MEL
+UUID, or discovery-vector index as its identity.
+
+`start_acquisition()` prepares and commits a nonempty set of selected receivers
+as one device operation. The backend retains camera-wide ownership; a receiver
+can be retired without stopping another. On partial startup failure retire staged
+resources; if a native command's outcome is uncertain, fail closed. The default
+adapter exposes the legacy view with the zero stream and product IDs and invokes
+`create_stream()` and `IFrameStream::start()` for a singleton selection. Read-only
+devices with no acquisition should declare an empty topology instead. Only the
+explicit SDK-free `make_synthetic_multi_stream_backend()` fixture implements
+multiple receivers in this revision. See the [design and sequencing audit](tasks/GIGE-MEL-MSTREAM-001-design.md).
+
 ## Configuration contract
 
 The common provider uses the same transaction for typed CameraCommand and C2
