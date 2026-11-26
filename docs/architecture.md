@@ -98,7 +98,7 @@ listener under a documented test-only exception, not network isolation.
 Physical capture does not qualify production integration-start time, optics,
 UTC/PTP, reliability or full MEL conformance.
 
-The image profile is deliberately narrow: one staring camera, one image stream,
+The MEL image profile is deliberately narrow: one staring camera, one Image channel,
 one band, Mono8 or explicitly admitted unpacked little-endian Mono12, and
 consumer-provided host memory. Padded source rows are validated and repacked into
 the destination layout. Source-backed stacks and LOS are conditional foundations
@@ -253,6 +253,31 @@ The production `gige_mel_provider` and uninstalled
 test synchronization points away. The component headers are uninstalled and
 remain implementation details, separate from the installed project headers and
 the camera-profile/module contracts.
+
+### Multi-stream source ownership
+
+An opened device owns camera acquisition; transport receivers own independent
+waits and issue product-tagged leases. A product identifies an image and its
+representation/layout, not a transport key or a MEL UUID. Discovery is passive,
+and one transport can declare several products. The explicitly constructed
+`make_synthetic_multi_stream_backend()` fixture uses one device and two receivers:
+
+```text
+synthetic-multi-0 (one device, one acquisition owner)
+  +-- transport 0 -> product 100: Mono8  64 x 48 @ 10 Hz
+  +-- transport 1 -> product 200: Mono12 80 x 60 @  5 Hz, padded source rows
+```
+
+Selected start stages the whole receiver set before committing it. Each source
+has its own pool, frame IDs, delivery timing and stream generation. Stop retires
+one receiver; last retirement ends camera acquisition. Close wakes all receives
+without invalidating held leases. No extra frame copies are needed for routing.
+This fixture has fixed per-product configurations and no mutable singleton
+configuration view. The existing MEL Image still selects only the legacy
+singleton, through a compatibility adapter on native backends. The fixture is
+not selected through an exported MEL factory. See the [task design](tasks/GIGE-MEL-MSTREAM-001-design.md)
+for SDK sequencing limits, matched-C++ rebuild requirements and the future
+product-to-channel mapping.
 
 ### SDK adapter and camera profile
 

@@ -83,9 +83,9 @@ The default device implementations project the legacy view as one transport and
 one product (both default keys) and adapt a singleton batch start to
 `create_stream()` / `IFrameStream::start()`. The no-selector entry point is a
 compatibility path, not a second multi-stream contract; multi-stream-only
-devices refuse it. Migrate MEL and other callers to selected batch start as
-product-aware routing lands, then retire the old path when all implementations
-and embedders are ready. Existing native ownership and close paths do not change
+devices refuse it. MEL Image enable uses selected batch start with the single
+legacy key. Migrate remaining callers as product-aware routing lands, then
+retire the old path when all implementations and embedders are ready. Existing native ownership and close paths do not change
 in this task. Config/discovery/start/close retain caller serialization rules;
 selected synthetic teardown also synchronizes concurrent stop, close and receive.
 

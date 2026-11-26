@@ -856,6 +856,7 @@ enum class Transform {
     wrong_format, wrong_storage, wrong_significance, wrong_order,
     wrong_width, wrong_height, short_stride, overflow_stride, short_span,
     invalid_timestamp, reception_timestamp,
+    wrong_source, wrong_product,
     wrong_stream_after_one,
     impossible_geometry,
     incomplete,
@@ -981,6 +982,8 @@ public:
         if (transform_ == Transform::short_stride) --descriptor.row_stride_bytes;
         if (transform_ == Transform::overflow_stride) descriptor.row_stride_bytes = std::numeric_limits<std::size_t>::max();
         if (transform_ == Transform::wrong_stream_after_one && frame_number > 0) ++descriptor.stream_generation;
+        if (transform_ == Transform::wrong_source) descriptor.source = backend::StreamId{1};
+        if (transform_ == Transform::wrong_product) descriptor.product = backend::ImageProductId{1};
         if (transform_ == Transform::invalid_timestamp) descriptor.timestamp.valid = false;
         if (transform_ == Transform::reception_timestamp) descriptor.timestamp.event = backend::TimestampEvent::reception;
         if (transform_ == Transform::short_span)
@@ -1177,7 +1180,8 @@ void mono12_negative_controls() {
              Transform::wrong_order, Transform::wrong_width, Transform::wrong_height, Transform::short_stride,
              Transform::overflow_stride, Transform::short_span, Transform::incomplete,
              Transform::wrong_generation, Transform::wrong_clock, Transform::invalid_timestamp,
-             Transform::reception_timestamp, Transform::impossible_geometry}) {
+             Transform::reception_timestamp, Transform::impossible_geometry,
+             Transform::wrong_source, Transform::wrong_product}) {
         Fixture f(true, mono12_backend(transform));
         f.add_buffer(6144);
         std::fill(f.storage.front().begin(), f.storage.front().end(), std::byte{0x5a});

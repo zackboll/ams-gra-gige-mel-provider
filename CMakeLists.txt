@@ -191,6 +191,10 @@ if(BUILD_TESTING)
   add_executable(backend_tests tests/backend_tests.cpp)
   target_link_libraries(backend_tests PRIVATE gige_mel_backend gige_mel_build_options)
   add_test(NAME backend_contract COMMAND backend_tests)
+  add_executable(synthetic_multistream_tests tests/synthetic_multistream_tests.cpp)
+  target_link_libraries(synthetic_multistream_tests PRIVATE gige_mel_backend gige_mel_build_options)
+  add_test(NAME synthetic_multistream COMMAND synthetic_multistream_tests)
+  set_tests_properties(synthetic_multistream PROPERTIES TIMEOUT 30)
   add_test(NAME backend_source_layout COMMAND ${CMAKE_COMMAND}
     -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/backend_source_layout.cmake)

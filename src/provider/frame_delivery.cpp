@@ -124,6 +124,7 @@ void ChannelCore::run(const std::shared_ptr<StreamState>& state, const std::weak
             const auto format = state->runtime->camera_capabilities.pixel_format;
             const auto layout = backend::image_layout(format, c.width, c.height);
             const bool layout_matches = d.width == c.width && d.height == c.height && d.configuration == c &&
+                d.source == backend::StreamId{} && d.product == backend::ImageProductId{} &&
                 d.configuration_generation == state->generation && (!stream_generation || d.stream_generation == *stream_generation) &&
                 layout && d.pixel_format == format && d.storage_bits_per_pixel == layout->storage_bits &&
                 d.significant_bits_per_pixel == layout->significant_bits && d.byte_order == layout->byte_order &&
@@ -135,7 +136,7 @@ void ChannelCore::run(const std::shared_ptr<StreamState>& state, const std::weak
             if (!layout_matches || !timestamp_matches || d.status != backend::FrameStatus::complete ||
                 frame.bytes().size() < (d.height - 1) * d.row_stride_bytes + layout->row_bytes) {
                 ++state->runtime->rejected;
-                state->runtime->report("rejected incomplete frame or mismatched layout, generation, or timestamp contract");
+                state->runtime->report("rejected incomplete frame or mismatched source, product, layout, generation, or timestamp contract");
                 continue;
             }
             stream_generation = d.stream_generation;

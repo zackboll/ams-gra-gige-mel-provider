@@ -367,6 +367,13 @@ public:
                                             "streaming is out of scope; no stream or AcquisitionStart was attempted");
     }
 
+    Result<StreamTopology> stream_topology() const override {
+        if (reentered()) return reentry();
+        Guard lock(*this);
+        if (closed_) return fail(ErrorCode::stopped, "GenTL device '" + id_ + "' is closed");
+        return StreamTopology{}; // Native DataStreams are not selectable image sources yet.
+    }
+
     // Idempotent: the first result is returned again. A conclusive close
     // releases the identity; a failed one leaves a permanent tombstone.
     Status close() override {
